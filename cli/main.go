@@ -33,6 +33,8 @@ func main() {
 	switch os.Args[1] {
 	case "import":
 		err = importStatement(os.Args[2:])
+	case "rules":
+		err = ruleSet(os.Args[2:])
 	case "books":
 		err = renderBooks(os.Args[2:])
 	default:
@@ -50,8 +52,10 @@ func usage() {
 	fmt.Fprint(os.Stderr, `bookkeeper - turn statements into books
 
 usage:
-  bookkeeper import -db <file> -mapping <file> -csv <file>
-  bookkeeper books  -db <file> -rules <file> [-format table|ledger]
+  bookkeeper import     -db <file> -mapping <file> -csv <file>
+  bookkeeper rules load -db <file> -file <file> [-why <reason>]
+  bookkeeper rules list -db <file>
+  bookkeeper books      -db <file> [-format table|ledger]
 `)
 }
 
@@ -109,22 +113,18 @@ func importStatement(args []string) error {
 	return nil
 }
 
-func renderBooks(args []string) error {
-	fs := flag.NewFlagSet("books", flag.ExitOnError)
-	dbPath := fs.String("db", "books.db", "the event log")
-	rulesPath := fs.String("rules", "", "JSON rule set")
-	format := fs.String("format", "table", "output format: table or ledger")
-	currency := fs.String("currency", "CAD", "currency written on ledger postings")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *rulesPath == "" {
-		fs.Usage()
-		return fmt.Errorf("rules is required")
+// ruleSet records a rules file into the log, or shows what the log currently says.
+func ruleSet(args []string) error {
+	if len(args) == 0 {
+		usage()
+		return fmt.Errorf("rules needs load or list")
 	}
 
-	engine, err := rules.Load(*rulesPath)
-	if err != nil {
+	fs := flag.NewFlagSet("rules "+args[0], flag.ExitOnError)
+	dbPath := fs.String("db", "books.db", "the event log")
+	filePath := fs.String("file", "", "JSON rule set to load")
+	why := fs.String("why", "", "why the rule set changed; recorded with the edit")
+	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 
@@ -133,6 +133,66 @@ func renderBooks(args []string) error {
 		return err
 	}
 	defer closeLog()
+
+	switch args[0] {
+	case "list":
+		set, err := books.Rules(log)
+		if err != nil {
+			return err
+		}
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "MATCH\tPAYEE\tCATEGORY")
+		for _, r := range set {
+			fmt.Fprintf(w, "%s\t%s\t%s\n", r.Match, r.Payee, r.Category)
+		}
+		return w.Flush()
+
+	case "load":
+		if *filePath == "" {
+			fs.Usage()
+			return fmt.Errorf("file is required")
+		}
+		want, err := rules.ReadFile(*filePath)
+		if err != nil {
+			return err
+		}
+		got, err := books.LoadRules(log, "human", *why, want)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%d rules: %d added, %d changed, %d removed, %d moved\n",
+			len(want), got.Added, got.Changed, got.Removed, got.Moved)
+		return nil
+
+	default:
+		usage()
+		return fmt.Errorf("unknown rules subcommand %q", args[0])
+	}
+}
+
+func renderBooks(args []string) error {
+	fs := flag.NewFlagSet("books", flag.ExitOnError)
+	dbPath := fs.String("db", "books.db", "the event log")
+	format := fs.String("format", "table", "output format: table or ledger")
+	currency := fs.String("currency", "CAD", "currency written on ledger postings")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	log, closeLog, err := openLog(*dbPath)
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	set, err := books.Rules(log)
+	if err != nil {
+		return err
+	}
+	engine, err := rules.New(set)
+	if err != nil {
+		return err
+	}
 
 	txs, err := books.Transactions(log)
 	if err != nil {

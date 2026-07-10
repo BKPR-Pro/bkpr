@@ -52,9 +52,10 @@ func New(rs []Rule) (*Engine, error) {
 	return &Engine{rules: compiled}, nil
 }
 
-// Load reads a JSON rule set from disk. Rules are data, not code, so a different set of books
+// ReadFile reads a JSON rule set. The file is an editing surface, which is the right one for an
+// ordered document; the log is the truth. Rules are data, not code, so a different set of books
 // means a different rule set, not a different build.
-func Load(path string) (*Engine, error) {
+func ReadFile(path string) ([]Rule, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -63,7 +64,7 @@ func Load(path string) (*Engine, error) {
 	if err := json.Unmarshal(body, &rs); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	return New(rs)
+	return rs, nil
 }
 
 // Apply walks the rules in order, taking each field from the first rule that matches and supplies

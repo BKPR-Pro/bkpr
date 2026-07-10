@@ -135,6 +135,15 @@ different now) instead of the intent, and because the signal that tells a good r
 needs a rule to have an identity that survives being edited. Order is semantic, so `rule.moved`
 anchors on the rule it now precedes; if that anchor was later removed, the fold appends.
 
+A rule's identity is its **match pattern**. Changing what a rule answers keeps that identity, so a
+merchant's history stays together. Changing the pattern is a different rule, and rightly loses that
+history, because it now fires on a different set of lines. Two rules therefore cannot share a
+pattern.
+
+You still edit a file, which is the right surface for an ordered document. `rules load` folds the
+current set out of the log, diffs the file against it, and emits the intents the diff implies, so
+loading an unchanged file records nothing. `rules list` prints what the log says.
+
 ### Sources are doors, not folds
 
 A source says how to read one account's statements, so it is authored knowledge and belongs in the
@@ -228,11 +237,21 @@ go run ./cli import -db books.db -mapping cli/testdata/mapping.json -csv cli/tes
 # 9 lines read: 0 imported, 9 already in the log
 ```
 
-`books` folds the log back out through a rule set. It writes nothing, so run it as often as you
-like:
+`rules load` records a rule file into the log as the per-rule intents its diff implies. Loading an
+unchanged file records nothing:
 
 ```sh
-go run ./cli books -db books.db -rules cli/testdata/rules.json
+go run ./cli rules load -db books.db -file cli/testdata/rules.json
+# 8 rules: 8 added, 0 changed, 0 removed, 0 moved
+
+go run ./cli rules load -db books.db -file cli/testdata/rules.json
+# 8 rules: 0 added, 0 changed, 0 removed, 0 moved
+```
+
+`books` folds the log back out. It writes nothing, so run it as often as you like:
+
+```sh
+go run ./cli books -db books.db
 ```
 
 ```text
@@ -245,12 +264,31 @@ DATE        PAYEE                AMOUNT   POSTS TO
 9 lines posted, 2 of them uncategorized
 ```
 
+### Fixing a rule fixes history
+
+Learn that every hardware receipt was Unit 1, and say so once:
+
+```sh
+go run ./cli rules load -db books.db -file rules.json --why "the receipts were all Unit 1"
+# 8 rules: 0 added, 1 changed, 0 removed, 0 moved
+```
+
+Regenerate, and the books change by exactly one line per affected transaction:
+
+```diff
+-  Expenses:Real Estate:Materials:Uncategorized  84.20 CAD
++  Expenses:Real Estate:Materials:45 Sample Avenue:Unit 1  84.20 CAD
+```
+
+Twelve months of hardware charges would have moved together, from one edit. That is what the log
+buys.
+
 ## Books
 
 `-format ledger` emits plain-text double-entry entries.
 
 ```sh
-go run ./cli books -db books.db -rules cli/testdata/rules.json -format ledger > books.ledger
+go run ./cli books -db books.db -format ledger > books.ledger
 ```
 
 Every entry is **cleared** (`*`), because every line came off a bank statement and so has cleared
@@ -282,7 +320,8 @@ column names, date formats, and whether amounts are one signed column or a debit
 ```
 
 A **rule** matches a description and supplies a payee, an account to post to, or both. Rules are
-ordered, and for each field the first rule that supplies it wins.
+ordered, and for each field the first rule that supplies it wins. `match` is the rule's identity,
+so no two may share one. Feed the file to `rules load`; the log is what `books` reads.
 
 ```json
 [
@@ -315,13 +354,13 @@ statement line already knows which account it came from, and a line no rule matc
 ## Status
 
 Built: the CSV source, the rules engine, the ledger writer, the append-only event log with its
-in-memory and SQLite adapters, and `import` plus the transaction projection. Re-importing an
-overlapping statement is a proven no-op, and two renders of the same log are byte-identical.
+in-memory and SQLite adapters, `import` plus the transaction projection, and `rules load` plus the
+rule projection. Re-importing an overlapping statement is a proven no-op, two renders of the same
+log are byte-identical, and changing a rule reclassifies history.
 
-Rules and sources are still files rather than events, so nothing yet records when a rule changed or
-which mapping read a line. Next, in order: the rule events, then the source events, then
-`Categorize`, which turns postings into event data. Then `Discard`, the model tier, the digest, and
-the destinations.
+Sources are still a file rather than events, so nothing yet records which mapping read a line.
+Next, in order: the source events, then `Categorize`, which turns postings into event data. Then
+`Discard`, the model tier, the digest, and the destinations.
 
 ## Development
 

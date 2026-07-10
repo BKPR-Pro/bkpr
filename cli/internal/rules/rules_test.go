@@ -144,19 +144,19 @@ func TestInvalidRegexIsRejected(t *testing.T) {
 	}
 }
 
-func TestLoadFromJSON(t *testing.T) {
+func TestReadFileParsesARuleSet(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rules.json")
 	body := `[{"match": "shell|petro", "payee": "Fuel Stop", "category": "Expenses:Auto:Fuel"}]`
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	e, err := rules.Load(path)
+	rs, err := rules.ReadFile(path)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("ReadFile: %v", err)
 	}
 
-	got := e.Apply(tx("SHELL GAS #123"))
+	got := engine(t, rs...).Apply(tx("SHELL GAS #123"))
 	if got.Payee != "Fuel Stop" || only(t, got).Account != "Expenses:Auto:Fuel" {
 		t.Errorf("got %+v", got)
 	}
