@@ -1,9 +1,9 @@
-// Command bookkeeper categorizes bank and card statements into a set of books.
+// Command bookkeeper turns bank and card statements into a set of books.
 //
-// This slice covers the deterministic tier: read a CSV statement, apply an ordered rule set, and
-// report where each line posts. Every line posts. Where the rules run out of knowledge the account
-// path stops at Uncategorized rather than guessing, and later slices hand those to a model and
-// then to a person.
+// `import` records what a statement said, once per line, into an append-only log. `books` folds
+// that log back out through a rule set and renders it. Where the rules run out of knowledge the
+// account path stops at Uncategorized rather than guessing, and later slices hand those to a model
+// and then to a person.
 package main
 
 import (
@@ -11,9 +11,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/dallasread/bookkeeper/cli/internal/books"
+	"github.com/dallasread/bookkeeper/cli/internal/eventlog"
 	"github.com/dallasread/bookkeeper/cli/internal/ledger"
 	"github.com/dallasread/bookkeeper/cli/internal/model"
 	"github.com/dallasread/bookkeeper/cli/internal/rules"
@@ -26,46 +29,55 @@ func main() {
 		os.Exit(2)
 	}
 
+	var err error
 	switch os.Args[1] {
-	case "categorize":
-		if err := categorize(os.Args[2:]); err != nil {
-			fmt.Fprintf(os.Stderr, "bookkeeper: %v\n", err)
-			os.Exit(1)
-		}
+	case "import":
+		err = importStatement(os.Args[2:])
+	case "books":
+		err = renderBooks(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
 	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bookkeeper: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `bookkeeper - categorize statements into books
+	fmt.Fprint(os.Stderr, `bookkeeper - turn statements into books
 
 usage:
-  bookkeeper categorize -mapping <file> -rules <file> -csv <file>
+  bookkeeper import -db <file> -mapping <file> -csv <file>
+  bookkeeper books  -db <file> -rules <file> [-format table|ledger]
 `)
 }
 
-func categorize(args []string) error {
-	fs := flag.NewFlagSet("categorize", flag.ExitOnError)
+// openLog is the only place that decides where the books live.
+func openLog(path string) (*eventlog.Log, func() error, error) {
+	store, err := eventlog.OpenSQLite(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	return eventlog.New(store), store.Close, nil
+}
+
+func importStatement(args []string) error {
+	fs := flag.NewFlagSet("import", flag.ExitOnError)
+	dbPath := fs.String("db", "books.db", "the event log")
 	mappingPath := fs.String("mapping", "", "JSON describing how this bank's CSV columns map onto a transaction")
-	rulesPath := fs.String("rules", "", "JSON rule set")
 	csvPath := fs.String("csv", "", "CSV statement to read")
-	format := fs.String("format", "table", "output format: table or ledger")
-	currency := fs.String("currency", "CAD", "currency written on ledger postings")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *mappingPath == "" || *rulesPath == "" || *csvPath == "" {
+	if *mappingPath == "" || *csvPath == "" {
 		fs.Usage()
-		return fmt.Errorf("mapping, rules, and csv are all required")
+		return fmt.Errorf("mapping and csv are both required")
 	}
 
 	mapping, err := loadMapping(*mappingPath)
-	if err != nil {
-		return err
-	}
-	engine, err := rules.Load(*rulesPath)
 	if err != nil {
 		return err
 	}
@@ -76,6 +88,53 @@ func categorize(args []string) error {
 	defer statement.Close()
 
 	txs, err := source.ReadCSV(statement, mapping)
+	if err != nil {
+		return err
+	}
+
+	log, closeLog, err := openLog(*dbPath)
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	// The actor records which statement reported a line, so a bad mapping is traceable to the file
+	// that carried it.
+	result, err := books.Import(log, "statement:"+filepath.Base(*csvPath), txs)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("%d lines read: %d imported, %d already in the log\n", len(txs), result.Imported, result.Skipped)
+	return nil
+}
+
+func renderBooks(args []string) error {
+	fs := flag.NewFlagSet("books", flag.ExitOnError)
+	dbPath := fs.String("db", "books.db", "the event log")
+	rulesPath := fs.String("rules", "", "JSON rule set")
+	format := fs.String("format", "table", "output format: table or ledger")
+	currency := fs.String("currency", "CAD", "currency written on ledger postings")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *rulesPath == "" {
+		fs.Usage()
+		return fmt.Errorf("rules is required")
+	}
+
+	engine, err := rules.Load(*rulesPath)
+	if err != nil {
+		return err
+	}
+
+	log, closeLog, err := openLog(*dbPath)
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	txs, err := books.Transactions(log)
 	if err != nil {
 		return err
 	}

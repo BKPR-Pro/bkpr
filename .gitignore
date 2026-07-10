@@ -5,7 +5,7 @@ bin/
 *.local.json
 .env
 
-# SQLite (later slices)
+# The event log. Yours, not the repo's.
 *.db
 *.db-wal
 *.db-shm

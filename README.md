@@ -102,10 +102,14 @@ Events are immutable, past-tense facts.
 | `transaction.imported` | a statement line was read in. Once per fingerprint, ever |
 | `transaction.categorized` | a person or a model asserted the postings for this line |
 | `transaction.matched` | this line is the same movement as another; do not book it twice |
+| `transaction.discarded` | that line was garbage; keep it out of the books |
 | `rule.added` | a pattern should be handled |
 | `rule.changed` | a rule's answer is wrong |
 | `rule.removed` | a rule should stop firing |
 | `rule.moved` | two rules fire in the wrong order |
+| `source.added` | an account, and how to read its statements |
+| `source.changed` | we were reading an account wrong |
+| `source.removed` | stop reading an account |
 
 An event's name says **what happened**. Its `actor` says **who**. Reading `actor` should never be
 necessary to know what kind of fact you are looking at, which is why there is no
@@ -131,6 +135,27 @@ different now) instead of the intent, and because the signal that tells a good r
 needs a rule to have an identity that survives being edited. Order is semantic, so `rule.moved`
 anchors on the rule it now precedes; if that anchor was later removed, the fold appends.
 
+### Sources are doors, not folds
+
+A source says how to read one account's statements, so it is authored knowledge and belongs in the
+log for the same reason a rule does. But it behaves differently, and conflating the two would
+mislead:
+
+- Fix a **rule**, regenerate, and history reclassifies. A rule is an input to every fold.
+- Fix a **source**, regenerate, and nothing happens. It was used once, at the door.
+
+`transaction.imported` stores the transaction already normalized. Re-reading the log never
+re-parses a CSV. It could have stored the raw row and normalized on read, which would make a source
+a fold input and let a fixed mapping repair history. It does not, because the fingerprint is built
+from the normalized fields: re-normalizing would move every fingerprint and silently orphan every
+correction keyed to one. Fingerprinting the raw row instead is worse, since banks re-export the
+same line with different columns, and that breaks the deduplication that runs every day.
+
+So a source is logged for provenance, not for folding. A mapping that drifts in a file changes how
+lines normalize, which changes their fingerprints, which silently books a second rent payment.
+Recording which source read a line makes that diagnosable and bounded, and `transaction.discarded`
+is how a badly-normalized import leaves the books.
+
 ### Nothing has to be acknowledged
 
 There is no `confirmed` event, and there is nothing to clear. Both would build an inbox: a list
@@ -143,8 +168,8 @@ out of six hundred means it is fine.
 
 ### Commands and folds
 
-A command captures one intent, guards a precondition, and emits one event. `ImportStatement`,
-`AddRule`, `ChangeRule`, `RemoveRule`, `MoveRule`, `Categorize`, `Match`. Nothing else writes.
+A command captures one intent, guards a precondition, and emits one event. `Import`, `AddRule`,
+`ChangeRule`, `RemoveRule`, `MoveRule`, `Categorize`, `Match`, `Discard`. Nothing else writes.
 
 `TrackOnce` appends a fact that can only be true once and reports `ErrAlreadyTracked` otherwise,
 which is how re-importing an overlapping statement becomes a no-op rather than a second rent
@@ -193,16 +218,22 @@ got lost.
 
 ## Usage
 
-Categorize a statement against a rule set:
+`import` records what a statement said. It writes facts, and it is safe to run twice:
 
 ```sh
-go run ./cli categorize \
-  -mapping cli/testdata/mapping.json \
-  -rules   cli/testdata/rules.json \
-  -csv     cli/testdata/statement.csv
+go run ./cli import -db books.db -mapping cli/testdata/mapping.json -csv cli/testdata/statement.csv
+# 9 lines read: 9 imported, 0 already in the log
+
+go run ./cli import -db books.db -mapping cli/testdata/mapping.json -csv cli/testdata/statement.csv
+# 9 lines read: 0 imported, 9 already in the log
 ```
 
-Output:
+`books` folds the log back out through a rule set. It writes nothing, so run it as often as you
+like:
+
+```sh
+go run ./cli books -db books.db -rules cli/testdata/rules.json
+```
 
 ```text
 DATE        PAYEE                AMOUNT   POSTS TO
@@ -219,11 +250,7 @@ DATE        PAYEE                AMOUNT   POSTS TO
 `-format ledger` emits plain-text double-entry entries.
 
 ```sh
-go run ./cli categorize \
-  -mapping cli/testdata/mapping.json \
-  -rules   cli/testdata/rules.json \
-  -csv     cli/testdata/statement.csv \
-  -format  ledger > books.ledger
+go run ./cli books -db books.db -rules cli/testdata/rules.json -format ledger > books.ledger
 ```
 
 Every entry is **cleared** (`*`), because every line came off a bank statement and so has cleared
@@ -287,12 +314,13 @@ statement line already knows which account it came from, and a line no rule matc
 
 ## Status
 
-Built: the CSV source, the rules engine, the ledger writer, and the append-only event log with its
-in-memory and SQLite adapters.
+Built: the CSV source, the rules engine, the ledger writer, the append-only event log with its
+in-memory and SQLite adapters, and `import` plus the transaction projection. Re-importing an
+overlapping statement is a proven no-op, and two renders of the same log are byte-identical.
 
-Next, in order: `ImportStatement` and the transaction projection, so `categorize` reads the log and
-a re-import is a proven no-op. Then the rule events, which move the rule set off disk and into the
-log. Then `Categorize`, which turns postings into event data. Then the model tier, the digest, and
+Rules and sources are still files rather than events, so nothing yet records when a rule changed or
+which mapping read a line. Next, in order: the rule events, then the source events, then
+`Categorize`, which turns postings into event data. Then `Discard`, the model tier, the digest, and
 the destinations.
 
 ## Development
