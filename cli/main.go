@@ -37,8 +37,6 @@ func main() {
 		err = initStore(os.Args[2:])
 	case "import":
 		err = importStatement(os.Args[2:])
-	case "sources":
-		err = sourceSet(os.Args[2:])
 	case "rules":
 		err = ruleSet(os.Args[2:])
 	case "categorize":
@@ -70,15 +68,13 @@ Run "bookkeeper docs" for the full reference.
 
 usage:
   bookkeeper init         [dir]
-  bookkeeper sources add  <account> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
-  bookkeeper sources rm   <account>
-  bookkeeper sources list
   bookkeeper rules   add  -match <re> -category <account> [-payee <name>] [-before <re>]
   bookkeeper rules   set  -match <re> [-category <account>] [-payee <name>] [-why <reason>]
   bookkeeper rules   rm   -match <re>
   bookkeeper rules   mv   -match <re> [-before <re>]
   bookkeeper rules   list
-  bookkeeper import       <file> [-source <account>]
+  bookkeeper import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
+  bookkeeper import       <file.ledger>
   bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>]
   bookkeeper discard      -tx <fingerprint> [-why <reason>]
   bookkeeper books        [-format table|ledger] [-stdout]
@@ -98,14 +94,6 @@ SETUP
   init [dir]
       Create a set of books in dir (default: here).
 
-  sources add <account> -currency <c> (-amount <col> | -debit <col> -credit <col>)
-              [-date <col>] [-description <col>] [-date-format <layout>]
-      Teach bookkeeper how to read one account's statements. An upsert keyed by the
-      account: run again to change how it is read. -date-format is a Go layout, e.g.
-      2006-01-02. Default columns: Date, Description.
-  sources rm <account>            Forget how to read an account.
-  sources list                    Show the known sources.
-
 RULES  (deterministic categorization; first matching rule wins per field)
   rules add -match <re> -category <account> [-payee <name>] [-before <re>]
       Add a rule. Order decides which of two matching rules wins; a new rule lands last
@@ -119,9 +107,13 @@ RULES  (deterministic categorization; first matching rule wins per field)
   rules list                      Show the rules in order.
 
 BOOKKEEPING
-  import <file> [-source <account>]
-      Import transactions. A CSV is one account's statement and needs -source; a ledger
-      file names its own accounts and does not.
+  import <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>)
+                    [-date <col>] [-description <col>] [-date-format <layout>]
+  import <file.ledger>
+      Import transactions from a file, a one-time input. A CSV does not name its own
+      account, currency, or columns, so you supply them inline. A ledger file names all of
+      that itself, so it takes no options. (A live source you pull from repeatedly, like the
+      rent app, is registered instead and imported by name; that is coming.)
   categorize -tx <fingerprint> (-category <account> | -post <account>=<amount> ...)
              [-payee <name>] [-why <reason>]
       Assert the postings for one line, overriding the rule for that line only. Use -post
@@ -168,43 +160,45 @@ func firstArg(args []string, desc string) (string, []string, error) {
 	return args[0], args[1:], nil
 }
 
-// importStatement reads transactions from a file into the log. The file is named positionally, and
-// its format is the file's business rather than a flag's: a CSV is one account's statement and
-// needs -source to say which account, while a ledger file names its own accounts and does not.
+// importStatement reads transactions from a file into the log. A file is a one-time input, so its
+// details are supplied inline rather than registered: the format is the file's business, and a CSV
+// (which does not name its own account, currency, or columns) takes them as flags, while a ledger
+// file names all of that itself.
 func importStatement(args []string) error {
 	path, rest, err := firstArg(args, "the file to import")
 	if err != nil {
 		return err
 	}
-	fs := flag.NewFlagSet("import", flag.ExitOnError)
-	account := fs.String("source", "", "for a CSV, the ledger account this statement belongs to")
-	if err := fs.Parse(rest); err != nil {
-		return err
-	}
 
 	switch ext := strings.ToLower(filepath.Ext(path)); ext {
 	case ".csv":
-		return importCSV(path, *account)
+		return importCSV(path, rest)
 	default:
-		return fmt.Errorf("import: don't know how to read %q; CSV (.csv) is supported, ledger files are coming", path)
+		return fmt.Errorf("import: don't know how to read %q; .csv is supported, ledger files are coming", path)
 	}
 }
 
-func importCSV(path, account string) error {
-	if account == "" {
-		return fmt.Errorf("-source is required for a CSV: which account's statement is this?")
-	}
-
-	s, err := store.Open(".")
-	if err != nil {
+func importCSV(path string, args []string) error {
+	fs := flag.NewFlagSet("import (csv)", flag.ExitOnError)
+	var m source.CSV
+	fs.StringVar(&m.Account, "account", "", "the ledger account this statement belongs to")
+	fs.StringVar(&m.Currency, "currency", "", "the account's currency, e.g. CAD")
+	fs.StringVar(&m.Date, "date", "Date", "header of the date column")
+	fs.StringVar(&m.Description, "description", "Description", "header of the memo column")
+	fs.StringVar(&m.DateFormat, "date-format", "2006-01-02", "Go date layout the column uses")
+	fs.StringVar(&m.Amount, "amount", "", "header of a single signed amount column")
+	fs.StringVar(&m.Debit, "debit", "", "header of the debit column, if amounts are a pair")
+	fs.StringVar(&m.Credit, "credit", "", "header of the credit column, if amounts are a pair")
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	defer s.Close()
-	log := s.Log
-
-	src, err := books.Source(log, account)
-	if err != nil {
-		return err
+	switch {
+	case m.Account == "":
+		return fmt.Errorf("-account is required: which account's statement is this?")
+	case m.Currency == "":
+		return fmt.Errorf("-currency is required")
+	case m.Amount == "" && m.Debit == "" && m.Credit == "":
+		return fmt.Errorf("-amount, or -debit and -credit, is required")
 	}
 
 	statement, err := os.Open(path)
@@ -213,112 +207,24 @@ func importCSV(path, account string) error {
 	}
 	defer statement.Close()
 
-	txs, err := source.ReadCSV(statement, src)
+	txs, err := source.ReadCSV(statement, m)
 	if err != nil {
 		return err
 	}
 
-	// The actor records which statement reported a line, so a bad source is traceable to the file
-	// that carried it.
-	result, err := books.Import(log, "statement:"+filepath.Base(path), txs)
+	s, err := store.Open(".")
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	result, err := books.Import(s.Log, "statement:"+filepath.Base(path), txs)
 	if err != nil {
 		return err
 	}
 
 	fmt.Printf("%d lines read: %d imported, %d already in the log\n", len(txs), result.Imported, result.Skipped)
 	return nil
-}
-
-// sourceSet dispatches `sources add|rm|list`.
-func sourceSet(args []string) error {
-	if len(args) == 0 {
-		usage()
-		return fmt.Errorf("sources needs add, rm, or list")
-	}
-	switch args[0] {
-	case "add":
-		return sourceAdd(args[1:])
-	case "rm":
-		return sourceRemove(args[1:])
-	case "list":
-		return sourceList(args[1:])
-	default:
-		usage()
-		return fmt.Errorf("unknown sources subcommand %q", args[0])
-	}
-}
-
-func sourceAdd(args []string) error {
-	fs := flag.NewFlagSet("sources add", flag.ExitOnError)
-	var s source.CSV
-	fs.StringVar(&s.Currency, "currency", "", "the account's currency, e.g. CAD")
-	fs.StringVar(&s.Date, "date", "Date", "header of the date column")
-	fs.StringVar(&s.Description, "description", "Description", "header of the memo column")
-	fs.StringVar(&s.DateFormat, "date-format", "2006-01-02", "Go date layout the column uses")
-	fs.StringVar(&s.Amount, "amount", "", "header of a single signed amount column")
-	fs.StringVar(&s.Debit, "debit", "", "header of the debit column, if amounts are a pair")
-	fs.StringVar(&s.Credit, "credit", "", "header of the credit column, if amounts are a pair")
-	account, rest, err := firstArg(args, "the ledger account, e.g. Assets:Bank:Chequing")
-	if err != nil {
-		return err
-	}
-	if err := fs.Parse(rest); err != nil {
-		return err
-	}
-	s.Account = account
-
-	log, closeLog, err := open()
-	if err != nil {
-		return err
-	}
-	defer closeLog()
-
-	if err := books.AddSource(log, "human", s); err != nil {
-		return err
-	}
-	fmt.Printf("source %s\n", s.Account)
-	return nil
-}
-
-func sourceRemove(args []string) error {
-	account, _, err := firstArg(args, "the account to forget")
-	if err != nil {
-		return err
-	}
-	log, closeLog, err := open()
-	if err != nil {
-		return err
-	}
-	defer closeLog()
-
-	if err := books.RemoveSource(log, "human", account); err != nil {
-		return err
-	}
-	fmt.Printf("removed source %s\n", account)
-	return nil
-}
-
-func sourceList(args []string) error {
-	log, closeLog, err := open()
-	if err != nil {
-		return err
-	}
-	defer closeLog()
-
-	set, err := books.Sources(log)
-	if err != nil {
-		return err
-	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ACCOUNT\tCURRENCY\tDATE\tDESCRIPTION\tAMOUNT")
-	for _, s := range set {
-		amount := s.Amount
-		if amount == "" {
-			amount = s.Debit + " / " + s.Credit
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", s.Account, s.Currency, s.Date, s.Description, amount)
-	}
-	return w.Flush()
 }
 
 // ruleSet dispatches `rules add|set|rm|mv|list`.

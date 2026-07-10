@@ -107,9 +107,6 @@ Events are immutable, past-tense facts.
 | `rule.changed` | a rule's answer is wrong |
 | `rule.removed` | a rule should stop firing |
 | `rule.moved` | two rules fire in the wrong order |
-| `source.added` | an account, and how to read its statements |
-| `source.changed` | we were reading an account wrong |
-| `source.removed` | stop reading an account |
 
 An event's name says **what happened**. Its `actor` says **who**. Reading `actor` should never be
 necessary to know what kind of fact you are looking at, which is why there is no
@@ -143,30 +140,22 @@ pattern.
 Each edit is its own command and its own event: `rules add`, `set`, `rm`, `mv`. That is the intent
 recorded directly, with no file to diff. `rules list` prints what the log currently folds to.
 
-### Sources are doors, not folds
+### Importing is a one-time door
 
-A source says how to read one account's statements, so it is authored knowledge and belongs in the
-log for the same reason a rule does. But it behaves differently, and conflating the two would
-mislead:
+A file import is not part of any fold. `transaction.imported` stores the transaction already
+**normalized**, so re-reading the log never re-parses a CSV, and how you read a file (which columns,
+which date format) is a one-time input rather than a fact the books depend on.
 
-- Fix a **rule**, regenerate, and history reclassifies. A rule is an input to every fold.
-- Fix a **source**, regenerate, and nothing happens. It was used once, at the door.
+This is why the details are supplied inline at import (`-account`, `-currency`, the columns) rather
+than registered: a file is imported once. It also could have stored the raw row and normalized on
+read, which would make the reader a fold input and let re-reading with different flags repair
+history. It does not, because the fingerprint is built from the normalized fields: re-normalizing
+would move every fingerprint and silently orphan every correction keyed to one.
 
-`transaction.imported` stores the transaction already normalized. Re-reading the log never
-re-parses a CSV. It could have stored the raw row and normalized on read, which would make a source
-a fold input and let a fixed mapping repair history. It does not, because the fingerprint is built
-from the normalized fields: re-normalizing would move every fingerprint and silently orphan every
-correction keyed to one. Fingerprinting the raw row instead is worse, since banks re-export the
-same line with different columns, and that breaks the deduplication that runs every day.
-
-So a source is logged for provenance, not for folding. A mapping that drifts in a file changes how
-lines normalize, which changes their fingerprints, which silently books a second rent payment.
-Recording which source read a line makes that diagnosable and bounded, and `transaction.discarded`
-is how a badly-normalized import leaves the books.
-
-A source's identity is its **account**, so `import` names an account rather than a file, and
-importing against an account nobody has taught bookkeeper to read is an error that lists the
-accounts it does know.
+So a bad import is not fixed by re-parsing. You re-import with the right flags (the corrected line
+lands under a new fingerprint) and `discard` the garbage one. A *live source* you pull from
+repeatedly (the rent app) is different: it is a standing connector, registered and imported by name,
+and that is coming.
 
 ### Nothing has to be acknowledged
 
@@ -232,9 +221,9 @@ A model may label. Code does the writing, the deduplication, and the arithmetic.
 nondeterminism is what keeps the books regenerable, and it is why a model's answer is written to
 the log: it cannot be recomputed, so it must be remembered.
 
-## Sources and the artifact
+## Inputs and the artifact
 
-The core understands only normalized transactions. A **source** brings lines in; only a connector
+The core understands only normalized transactions. An **adapter** brings lines in; only the adapter
 knows about the outside world, and CSV is the default transport because every bank exports it and
 it needs no credentials.
 
@@ -261,25 +250,19 @@ bk init
 # Initialized a book of record in /your/project/.bookkeeper
 ```
 
-`sources add` teaches bookkeeper how to read one account's statements. It is an upsert keyed by the
-account: run it again to change how the account is read.
+`import` records what a file said, and it is safe to run twice. A file is a one-time input, so its
+details are supplied inline. A CSV does not name its own account, currency, or columns, so you give
+them; a ledger file names all of that itself and takes no options.
 
 ```sh
-bk sources add "Assets:Bank:Chequing" -currency CAD -amount Amount
-# a debit/credit pair instead of one signed column:
-bk sources add "Liabilities:Card:Visa" -currency CAD -debit Charge -credit Payment -date Posted
-```
-
-`import` records what a file said. It writes facts, and it is safe to run twice. A CSV is one
-account's statement, so it needs `-source` to say which; a ledger file names its own accounts and
-does not.
-
-```sh
-bk import statements/march.csv -source "Assets:Bank:Chequing"
+bk import statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
 # 9 lines read: 9 imported, 0 already in the log
 
-bk import statements/march.csv -source "Assets:Bank:Chequing"
+bk import statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
 # 9 lines read: 0 imported, 9 already in the log
+
+# a debit/credit pair instead of one signed column:
+bk import visa.csv -account "Liabilities:Card:Visa" -currency CAD -debit Charge -credit Payment -date Posted
 ```
 
 `rules add` records a rule; each is one event. Order decides which of two matching rules wins, so a
@@ -359,9 +342,9 @@ wins, with both kept in the log.
 
 ### Undoing a bad import
 
-A source stores its line already normalized, so a wrong mapping (a flipped sign, the wrong date
-column) imports garbage that fixing the mapping cannot repair: the fingerprints are already in the
-log, and re-import is a no-op on them. `discard` is the way out.
+Import stores each line already normalized, so a wrong flag (a flipped sign, the wrong date column)
+imports garbage that re-importing cannot repair on its own: the fingerprints are already in the log,
+and a re-import is a no-op on them. `discard` is the way out.
 
 ```sh
 bk discard -tx 33247b87... -why "imported to the wrong account"
@@ -372,8 +355,8 @@ line, so the mistake and its correction both stay in the log and the git diff is
 append. Re-importing the same statement will not bring the line back, because the imported fact is
 still there and the import stays a no-op.
 
-The repair flow the append-only log makes possible: fix the source, re-import (the corrected line
-lands under a new fingerprint, since the amount or date changed), then discard the garbage one.
+The repair flow the append-only log makes possible: re-import with the right flags (the corrected
+line lands under a new fingerprint, since the amount or date changed), then discard the garbage one.
 
 ### Transfers between your own accounts
 
@@ -418,16 +401,8 @@ ledger -f books.ledger print --uncleared  # empty, and correctly so
 
 ## Configuration
 
-There are no config files. Sources and rules are recorded straight into the log by command, and the
-log is what `import` and `books` read.
-
-A **source** is one account and how to read its statements. Banks disagree about column names, date
-formats, and whether amounts are one signed column or a debit/credit pair. The currency belongs to
-the account, not to whoever runs a render.
-
-```sh
-bk sources add "Assets:Bank:Chequing" -currency CAD -amount Amount -date Date -description Description
-```
+There are no config files. Rules are recorded straight into the log by command, and the log is what
+`books` reads. Import details are given inline, since a file is imported once (see Usage).
 
 A **rule** matches a description and supplies a payee, an account to post to, or both. Rules are
 ordered, and for each field the first rule that supplies it wins; `match` is the rule's identity, so
