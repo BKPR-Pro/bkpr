@@ -13,10 +13,12 @@ func newLog() *eventlog.Log { return eventlog.New(eventlog.NewMemory()) }
 
 func on(day int) time.Time { return time.Date(2026, 3, day, 0, 0, 0, 0, time.UTC) }
 
+func cad(cents int64) model.Amount { return model.Amount{Units: cents, Scale: 2, Commodity: "CAD"} }
+
 func line(id string, day int, cents int64, description string) model.Transaction {
 	return model.Transaction{
-		ID: id, Account: "Assets:Bank:Chequing", Currency: "CAD", Date: on(day),
-		AmountCents: cents, Description: description,
+		ID: id, Account: "Assets:Bank:Chequing", Date: on(day),
+		Amount: cad(cents), Description: description,
 		Raw: map[string]string{"Description": description},
 	}
 }
@@ -108,12 +110,10 @@ func TestTransactionsFoldBackWithEveryFieldIntact(t *testing.T) {
 		t.Errorf("id = %q", got.ID)
 	case got.Account != want.Account:
 		t.Errorf("account = %q", got.Account)
-	case got.Currency != want.Currency:
-		t.Errorf("currency = %q; the ledger writer has nothing to post without it", got.Currency)
+	case got.Amount != want.Amount:
+		t.Errorf("amount = %v, want %v (commodity and all)", got.Amount, want.Amount)
 	case !got.Date.Equal(want.Date):
 		t.Errorf("date = %s", got.Date)
-	case got.AmountCents != want.AmountCents:
-		t.Errorf("amount = %d", got.AmountCents)
 	case got.Description != want.Description:
 		t.Errorf("description = %q", got.Description)
 	case got.Raw["Description"] != want.Description:
@@ -150,7 +150,7 @@ func TestABadLineRefusesTheWholeStatement(t *testing.T) {
 
 	_, err := books.Import(log, "statement:march.csv", []model.Transaction{
 		line("a", 1, -6240, "SHELL GAS #123"),
-		{Account: "Assets:Bank:Chequing", Date: on(2), AmountCents: -100, Description: "NO FINGERPRINT"},
+		{Account: "Assets:Bank:Chequing", Date: on(2), Amount: cad(-100), Description: "NO FINGERPRINT"},
 	})
 	if err == nil {
 		t.Fatal("imported a transaction with no fingerprint")

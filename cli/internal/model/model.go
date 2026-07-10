@@ -24,17 +24,16 @@ const Uncategorized = "Uncategorized"
 type Transaction struct {
 	ID          string            // stable fingerprint of this line
 	Account     string            // ledger account the statement belongs to, e.g. Assets:Bank:Chequing
-	Currency    string            // the account's currency, not a choice made at render time
 	Date        time.Time         // when the line posted
-	AmountCents int64             // signed; negative is money out
+	Amount      Amount            // signed; negative is money out. Carries its own commodity.
 	Description string            // the raw memo the bank gave us
 	Raw         map[string]string // the original columns, kept for auditing
 }
 
-// Posting is one side of an entry: an account, and a signed amount in cents.
+// Posting is one side of an entry: an account, and a signed amount.
 type Posting struct {
-	Account     string `json:"account"`
-	AmountCents int64  `json:"amount_cents"`
+	Account string `json:"account"`
+	Amount  Amount `json:"amount"`
 }
 
 // Entry is what one Transaction becomes in the books.
@@ -50,13 +49,19 @@ type Entry struct {
 }
 
 // Balances reports whether the postings account for the whole statement line. The statement's sign
-// is from the source account's point of view, so the categorized side takes the opposite one.
+// is from the source account's point of view, so the categorized side takes the opposite one. A
+// posting in another commodity cannot be summed without a price, so a mixed-commodity entry never
+// balances; that boundary holds until prices are built.
 func (e Entry) Balances(tx Transaction) bool {
-	var sum int64
+	sum := Amount{Commodity: tx.Amount.Commodity}
 	for _, p := range e.Postings {
-		sum += p.AmountCents
+		next, err := sum.Add(p.Amount)
+		if err != nil {
+			return false
+		}
+		sum = next
 	}
-	return sum == -tx.AmountCents
+	return sum.Equal(tx.Amount.Negate())
 }
 
 // Uncategorized reports whether any posting stops short of a full account path.

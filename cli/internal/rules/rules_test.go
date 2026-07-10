@@ -10,7 +10,10 @@ import (
 )
 
 func tx(description string) model.Transaction {
-	return model.Transaction{Description: description, Account: "Liabilities:Card:Visa", AmountCents: -8420}
+	return model.Transaction{
+		Description: description, Account: "Liabilities:Card:Visa",
+		Amount: model.Amount{Units: -8420, Scale: 2, Commodity: "CAD"},
+	}
 }
 
 func engine(t *testing.T, rs ...rules.Rule) *rules.Engine {
@@ -51,8 +54,8 @@ func TestARuleNamesThePayeeAndTheAccountToPostTo(t *testing.T) {
 func TestThePostingTakesTheOppositeSignOfTheStatementLine(t *testing.T) {
 	e := engine(t, rules.Rule{Match: `acme`, Category: "Expenses:Repairs"})
 
-	if got := only(t, e.Apply(tx("ACME HARDWARE"))); got.AmountCents != 8420 {
-		t.Errorf("amount = %d, want 8420", got.AmountCents)
+	if got := only(t, e.Apply(tx("ACME HARDWARE"))); got.Amount.String() != "84.20 CAD" {
+		t.Errorf("amount = %s, want 84.20 CAD", got.Amount)
 	}
 }
 

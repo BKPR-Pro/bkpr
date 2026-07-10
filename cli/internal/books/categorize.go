@@ -34,7 +34,7 @@ func Categorize(log *eventlog.Log, actor, why, txID, payee string, postings []mo
 
 	entry := model.Entry{Payee: payee, Postings: postings}
 	if !entry.Balances(tx) {
-		return fmt.Errorf("books: the postings do not account for %s", dollars(-tx.AmountCents))
+		return fmt.Errorf("books: the postings do not account for %s", tx.Amount.Negate())
 	}
 
 	data, err := json.Marshal(categorizedData{Payee: payee, Postings: postings, Why: why})

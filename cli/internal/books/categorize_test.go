@@ -11,7 +11,7 @@ import (
 )
 
 func whole(account string, cents int64) []model.Posting {
-	return []model.Posting{{Account: account, AmountCents: -cents}}
+	return []model.Posting{{Account: account, Amount: cad(-cents)}}
 }
 
 func ledger(t *testing.T, log *eventlog.Log) ([]model.Transaction, []model.Entry) {
@@ -115,8 +115,8 @@ func TestASplitAssertionCategorizesToSeveralAccounts(t *testing.T) {
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE"))
 
 	err := books.Categorize(log, "human", "", "a", "Acme", []model.Posting{
-		{Account: "Expenses:Materials:Unit 1", AmountCents: 4000},
-		{Account: "Expenses:Materials:Unit 2", AmountCents: 4420},
+		{Account: "Expenses:Materials:Unit 1", Amount: cad(4000)},
+		{Account: "Expenses:Materials:Unit 2", Amount: cad(4420)},
 	})
 	if err != nil {
 		t.Fatalf("Categorize: %v", err)
@@ -134,7 +134,7 @@ func TestAnUnbalancedAssertionIsRefused(t *testing.T) {
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE"))
 
 	err := books.Categorize(log, "human", "", "a", "Acme", []model.Posting{
-		{Account: "Expenses:Materials:Unit 1", AmountCents: 4000},
+		{Account: "Expenses:Materials:Unit 1", Amount: cad(4000)},
 	})
 	if err == nil {
 		t.Fatal("recorded an assertion that does not balance the line")
@@ -148,6 +148,20 @@ func TestAnUnbalancedAssertionIsRefused(t *testing.T) {
 		if e.Action == books.ActionCategorized {
 			t.Fatal("an unbalanced assertion reached the log")
 		}
+	}
+}
+
+// One entry, one commodity, until prices exist. A posting in another commodity cannot be summed
+// against the line without a price, so it is refused rather than written as a silently broken entry.
+func TestAMixedCommodityAssertionIsRefused(t *testing.T) {
+	log := newLog()
+	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE")) // CAD
+
+	err := books.Categorize(log, "human", "", "a", "Acme", []model.Posting{
+		{Account: "Assets:Brokerage", Amount: model.Amount{Units: 10, Scale: 0, Commodity: "AAPL"}},
+	})
+	if err == nil {
+		t.Fatal("recorded an entry that mixes CAD and AAPL without a price")
 	}
 }
 

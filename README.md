@@ -414,8 +414,9 @@ statement line already knows which account it came from, and a line no rule matc
   proposes; code writes.
 - **Idempotent end to end.** Every line carries a stable fingerprint, so a re-import is always
   safe. Two genuinely identical charges on one day stay two charges.
-- **Money is integer cents.** Floats never touch a ledger. Event data is raw JSON precisely so
-  nothing round-trips through a float on the way in.
+- **An amount is an exact quantity of a commodity.** Held as integer minor units, so no float ever
+  touches the books, and the commodity may be a currency or a share. Ledger-cli's model, which is
+  why the books can hold anything ledger can.
 - **Connectors know the outside world; the core does not.**
 - **Say only what is known.** Truncate an account path rather than guess a leaf, and never guess a
   kind.
@@ -431,11 +432,15 @@ byte-identical, changing a rule reclassifies history in one appended event, corr
 line overrides the rule for that line only and survives later rule changes, and a wrong working
 directory is refused rather than turned into a new empty book of record.
 
-Next, in order: `Discard`, `Match`, the CSV views (`bk transactions --csv` and friends, for the
-tabular parts of the data), the model tier, the digest, and the destinations.
+Amounts are an integer `Amount` (quantity, scale, commodity), serialized in the log as a
+ledger-style string like `84.20 CAD` or `10 AAPL`. No float touches money at any boundary; the CSV
+reader's old float is gone. An entry is single-commodity for now: mixing commodities balances only
+through a price, which is refused until that slice exists.
 
-Known debt: `source.parseCents` routes money through a `float64` on its way to integer cents. It is
-safe at these magnitudes and it is still the wrong shape for a ledger.
+Next, in order: `Discard`, `Match`, the CSV views (`bk transactions --csv` and friends, for the
+tabular parts of the data), the model tier, the digest, and the destinations. Prices and cost basis
+(so a brokerage account can hold shares against cash) are a later slice; the `Amount` type is ready
+for them.
 
 ## Development
 

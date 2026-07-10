@@ -97,6 +97,6 @@ func (e *Engine) Apply(tx model.Transaction) model.Entry {
 
 	return model.Entry{
 		Payee:    payee,
-		Postings: []model.Posting{{Account: category, AmountCents: -tx.AmountCents}},
+		Postings: []model.Posting{{Account: category, Amount: tx.Amount.Negate()}},
 	}
 }

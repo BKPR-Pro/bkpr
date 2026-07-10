@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -82,21 +81,20 @@ func ReadCSV(r io.Reader, m CSV) ([]model.Transaction, error) {
 			return nil, fmt.Errorf("line %d: date %q does not match format %q", line, raw[m.Date], m.DateFormat)
 		}
 
-		cents, err := amountCents(raw, m)
+		amount, err := amountFor(raw, m)
 		if err != nil {
 			return nil, fmt.Errorf("line %d: %w", line, err)
 		}
 
 		description := raw[m.Description]
-		fingerprint := fingerprint(m.Account, date, cents, description)
+		fingerprint := fingerprint(m.Account, date, amount, description)
 		seen[fingerprint]++
 
 		txs = append(txs, model.Transaction{
 			ID:          fmt.Sprintf("%s-%d", fingerprint, seen[fingerprint]),
 			Account:     m.Account,
-			Currency:    m.Currency,
 			Date:        date,
-			AmountCents: cents,
+			Amount:      amount,
 			Description: description,
 			Raw:         raw,
 		})
@@ -122,61 +120,64 @@ func indexHeader(header []string, m CSV) (map[string]int, error) {
 	return positions, nil
 }
 
-// amountCents reads either the signed amount column or the debit/credit pair. Money is integer
-// cents everywhere; floats never touch a ledger.
-func amountCents(raw map[string]string, m CSV) (int64, error) {
+// amountFor reads either the signed amount column or the debit/credit pair, in the account's
+// commodity. The result is an integer Amount; no float is involved on the way in.
+func amountFor(raw map[string]string, m CSV) (model.Amount, error) {
 	if m.Amount != "" {
-		return parseCents(raw[m.Amount])
+		return parseAmount(raw[m.Amount], m.Currency)
 	}
 
-	debit, err := parseCents(raw[m.Debit])
+	debit, err := parseAmount(raw[m.Debit], m.Currency)
 	if err != nil {
-		return 0, err
+		return model.Amount{}, err
 	}
-	credit, err := parseCents(raw[m.Credit])
+	credit, err := parseAmount(raw[m.Credit], m.Currency)
 	if err != nil {
-		return 0, err
+		return model.Amount{}, err
 	}
-	if debit != 0 && credit != 0 {
-		return 0, fmt.Errorf("row has both a debit (%d) and a credit (%d)", debit, credit)
+	if !debit.IsZero() && !credit.IsZero() {
+		return model.Amount{}, fmt.Errorf("row has both a debit (%s) and a credit (%s)", debit, credit)
 	}
-	if debit != 0 {
-		return -abs(debit), nil
+	if !debit.IsZero() {
+		// A debit column holds a magnitude; money out is that magnitude, negative.
+		if debit.Units > 0 {
+			return debit.Negate(), nil
+		}
+		return debit, nil
 	}
 	return credit, nil
 }
 
-// parseCents accepts the shapes banks actually emit: "$1,234.56", "(45.00)" for negatives,
-// "+12", "-84.20", and empty (zero).
-func parseCents(s string) (int64, error) {
+// parseAmount accepts the shapes banks actually emit: "$1,234.56", "(45.00)" for negatives,
+// "+12", "-84.20", and empty (zero). It strips the presentation and parses the digits as integer
+// minor units in the given commodity.
+func parseAmount(s, commodity string) (model.Amount, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return 0, nil
+		return model.Amount{Commodity: commodity}, nil
 	}
 
 	negative := strings.HasPrefix(s, "(") && strings.HasSuffix(s, ")")
 	cleaned := notAmount.ReplaceAllString(s, "")
 	if cleaned == "" || cleaned == "-" {
-		return 0, fmt.Errorf("amount %q is not a number", s)
+		return model.Amount{}, fmt.Errorf("amount %q is not a number", s)
 	}
 
-	value, err := strconv.ParseFloat(cleaned, 64)
+	amount, err := model.NewAmount(cleaned, commodity)
 	if err != nil {
-		return 0, fmt.Errorf("amount %q is not a number", s)
+		return model.Amount{}, fmt.Errorf("amount %q is not a number", s)
 	}
-
-	cents := int64(value*100 + copysign(0.5, value)) // round half away from zero
-	if negative {
-		cents = -abs(cents)
+	if negative && amount.Units > 0 {
+		amount = amount.Negate()
 	}
-	return cents, nil
+	return amount, nil
 }
 
-func fingerprint(account string, date time.Time, cents int64, description string) string {
+func fingerprint(account string, date time.Time, amount model.Amount, description string) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
 		account,
 		date.Format("2006-01-02"),
-		strconv.FormatInt(cents, 10),
+		amount.String(),
 		strings.Join(strings.Fields(strings.ToLower(description)), " "),
 	}, "\x00")))
 	return hex.EncodeToString(sum[:])[:16]
@@ -189,18 +190,4 @@ func blank(record []string) bool {
 		}
 	}
 	return true
-}
-
-func abs(v int64) int64 {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
-
-func copysign(magnitude, sign float64) float64 {
-	if sign < 0 {
-		return -magnitude
-	}
-	return magnitude
 }

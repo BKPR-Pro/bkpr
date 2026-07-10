@@ -14,9 +14,11 @@ func on(day int) time.Time {
 	return time.Date(2026, 3, day, 0, 0, 0, 0, time.UTC)
 }
 
+func cad(cents int64) model.Amount { return model.Amount{Units: cents, Scale: 2, Commodity: "CAD"} }
+
 func chequing(day int, cents int64, description string) model.Transaction {
 	return model.Transaction{
-		Date: on(day), AmountCents: cents, Currency: "CAD",
+		Date: on(day), Amount: cad(cents),
 		Description: description, Account: "Assets:Bank:Chequing",
 	}
 }
@@ -35,7 +37,7 @@ func TestExpenseEntry(t *testing.T) {
 	tx := chequing(2, -8420, "ACME HARDWARE #4471")
 	e := model.Entry{
 		Payee:    "Acme Hardware",
-		Postings: []model.Posting{{Account: "Expenses:Repairs:Materials", AmountCents: 8420}},
+		Postings: []model.Posting{{Account: "Expenses:Repairs:Materials", Amount: cad(8420)}},
 	}
 
 	want := "2026/03/02  * Acme Hardware\n" +
@@ -52,7 +54,7 @@ func TestIncomeEntry(t *testing.T) {
 	tx := chequing(5, 160000, "E-TRANSFER FROM J SMITH")
 	e := model.Entry{
 		Payee:    "J. Smith",
-		Postings: []model.Posting{{Account: "Income:Real Estate:Rent:123 Example Street", AmountCents: -160000}},
+		Postings: []model.Posting{{Account: "Income:Real Estate:Rent:123 Example Street", Amount: cad(-160000)}},
 	}
 
 	if got := write(t, tx, e); !strings.Contains(got, "Income:Real Estate:Rent:123 Example Street  -1600.00 CAD") {
@@ -66,7 +68,7 @@ func TestEveryEntryIsCleared(t *testing.T) {
 	tx := chequing(12, -3999, "UNKNOWN MERCHANT 88")
 	e := model.Entry{
 		Payee:    "UNKNOWN MERCHANT 88",
-		Postings: []model.Posting{{Account: model.Uncategorized, AmountCents: 3999}},
+		Postings: []model.Posting{{Account: model.Uncategorized, Amount: cad(3999)}},
 	}
 
 	got := write(t, tx, e)
@@ -84,7 +86,7 @@ func TestAnUncategorizedLineCarriesNoAnnotation(t *testing.T) {
 	tx := chequing(2, -8420, "ACME HARDWARE #4471")
 	e := model.Entry{
 		Payee:    "Acme Hardware",
-		Postings: []model.Posting{{Account: "Expenses:Real Estate:Materials:Uncategorized", AmountCents: 8420}},
+		Postings: []model.Posting{{Account: "Expenses:Real Estate:Materials:Uncategorized", Amount: cad(8420)}},
 	}
 
 	want := "2026/03/02  * Acme Hardware\n" +
@@ -103,8 +105,8 @@ func TestASplitWritesEveryPostingAndStillElidesTheSourceAccount(t *testing.T) {
 	e := model.Entry{
 		Payee: "Acme Hardware",
 		Postings: []model.Posting{
-			{Account: "Expenses:Materials:Unit 1", AmountCents: 4000},
-			{Account: "Expenses:Materials:Unit 2", AmountCents: 4420},
+			{Account: "Expenses:Materials:Unit 1", Amount: cad(4000)},
+			{Account: "Expenses:Materials:Unit 2", Amount: cad(4420)},
 		},
 	}
 
@@ -125,8 +127,8 @@ func TestPostingsThatDoNotAccountForTheLineAreRefused(t *testing.T) {
 	e := model.Entry{
 		Payee: "Acme Hardware",
 		Postings: []model.Posting{
-			{Account: "Expenses:Materials:Unit 1", AmountCents: 4000},
-			{Account: "Expenses:Materials:Unit 2", AmountCents: 400},
+			{Account: "Expenses:Materials:Unit 1", Amount: cad(4000)},
+			{Account: "Expenses:Materials:Unit 2", Amount: cad(400)},
 		},
 	}
 
@@ -143,8 +145,8 @@ func TestPostingsThatDoNotAccountForTheLineAreRefused(t *testing.T) {
 func TestEntriesAreSeparatedByBlankLines(t *testing.T) {
 	txs := []model.Transaction{chequing(1, -100, "A"), chequing(2, -200, "B")}
 	entries := []model.Entry{
-		{Payee: "A", Postings: []model.Posting{{Account: "Expenses:X", AmountCents: 100}}},
-		{Payee: "B", Postings: []model.Posting{{Account: "Expenses:Y", AmountCents: 200}}},
+		{Payee: "A", Postings: []model.Posting{{Account: "Expenses:X", Amount: cad(100)}}},
+		{Payee: "B", Postings: []model.Posting{{Account: "Expenses:Y", Amount: cad(200)}}},
 	}
 
 	var buf bytes.Buffer
@@ -160,14 +162,15 @@ func TestEntriesAreSeparatedByBlankLines(t *testing.T) {
 // Currency belongs to the account the statement came from, not to whoever ran the render. Two
 // accounts in different currencies write different postings in one pass.
 func TestEachEntryIsWrittenInItsOwnAccountsCurrency(t *testing.T) {
+	usdAmount := model.Amount{Units: -100, Scale: 2, Commodity: "USD"}
 	usd := model.Transaction{
-		Date: on(1), AmountCents: -100, Currency: "USD",
+		Date: on(1), Amount: usdAmount,
 		Description: "B", Account: "Assets:Bank:Operating USD",
 	}
 	txs := []model.Transaction{chequing(1, -100, "A"), usd}
 	entries := []model.Entry{
-		{Payee: "A", Postings: []model.Posting{{Account: "Expenses:X", AmountCents: 100}}},
-		{Payee: "B", Postings: []model.Posting{{Account: "Expenses:X", AmountCents: 100}}},
+		{Payee: "A", Postings: []model.Posting{{Account: "Expenses:X", Amount: cad(100)}}},
+		{Payee: "B", Postings: []model.Posting{{Account: "Expenses:X", Amount: usdAmount.Negate()}}},
 	}
 
 	var buf bytes.Buffer
@@ -181,14 +184,14 @@ func TestEachEntryIsWrittenInItsOwnAccountsCurrency(t *testing.T) {
 	}
 }
 
-// A currency-less transaction would write "84.20 " with a trailing space, which is not a ledger.
-func TestATransactionWithoutACurrencyIsRefused(t *testing.T) {
+// A commodity-less transaction would write "84.20 " with a trailing space, which is not a ledger.
+func TestATransactionWithoutACommodityIsRefused(t *testing.T) {
 	tx := chequing(1, -100, "A")
-	tx.Currency = ""
-	e := model.Entry{Payee: "A", Postings: []model.Posting{{Account: "Expenses:X", AmountCents: 100}}}
+	tx.Amount.Commodity = ""
+	e := model.Entry{Payee: "A", Postings: []model.Posting{{Account: "Expenses:X", Amount: cad(100)}}}
 
 	if err := ledger.WriteAll(&bytes.Buffer{}, []model.Transaction{tx}, []model.Entry{e}); err == nil {
-		t.Fatal("wrote an entry with no currency")
+		t.Fatal("wrote an entry with no commodity")
 	}
 }
 

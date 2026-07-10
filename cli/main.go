@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -254,27 +253,27 @@ func ruleSet(args []string) error {
 	}
 }
 
-// postings collects repeated -post account=amount flags, so a correction can be a split.
-type postings []model.Posting
+// rawPosting is an account and an unparsed quantity from a -post flag. The quantity becomes an
+// Amount only once the transaction's commodity is known, which is after the store is open.
+type rawPosting struct{ account, quantity string }
 
-func (p *postings) String() string { return "" }
+// splitFlag collects repeated -post account=amount flags, so a correction can be a split.
+type splitFlag []rawPosting
 
-func (p *postings) Set(s string) error {
+func (p *splitFlag) String() string { return "" }
+
+func (p *splitFlag) Set(s string) error {
 	i := strings.LastIndex(s, "=")
 	if i < 0 {
 		return fmt.Errorf("posting %q must be account=amount", s)
 	}
-	cents, err := parseAmount(strings.TrimSpace(s[i+1:]))
-	if err != nil {
-		return err
-	}
-	*p = append(*p, model.Posting{Account: strings.TrimSpace(s[:i]), AmountCents: cents})
+	*p = append(*p, rawPosting{account: strings.TrimSpace(s[:i]), quantity: strings.TrimSpace(s[i+1:])})
 	return nil
 }
 
 // categorize records a human's answer for one line: its category, or a split across several.
 func categorize(args []string) error {
-	var split postings
+	var split splitFlag
 	fs := flag.NewFlagSet("categorize", flag.ExitOnError)
 	txID := fs.String("tx", "", "the transaction fingerprint to categorize")
 	category := fs.String("category", "", "post the whole line to this one account")
@@ -298,47 +297,32 @@ func categorize(args []string) error {
 	}
 	defer s.Close()
 
-	// -category is the common case: post the whole line to one account. The amount is the line's
-	// own, taken with the opposite sign, so the caller never has to restate it.
-	if *category != "" {
-		tx, err := books.Transaction(s.Log, *txID)
-		if err != nil {
-			return err
-		}
-		split = postings{{Account: *category, AmountCents: -tx.AmountCents}}
+	// The line's own commodity is what a posting is denominated in, so it is fetched before the
+	// postings are built and the caller never restates it.
+	tx, err := books.Transaction(s.Log, *txID)
+	if err != nil {
+		return err
 	}
 
-	if err := books.Categorize(s.Log, "human", *why, *txID, *payee, split); err != nil {
+	var post []model.Posting
+	if *category != "" {
+		// The common case: the whole line to one account, in the line's amount with the opposite sign.
+		post = []model.Posting{{Account: *category, Amount: tx.Amount.Negate()}}
+	} else {
+		for _, rp := range split {
+			amount, err := model.NewAmount(rp.quantity, tx.Amount.Commodity)
+			if err != nil {
+				return err
+			}
+			post = append(post, model.Posting{Account: rp.account, Amount: amount})
+		}
+	}
+
+	if err := books.Categorize(s.Log, "human", *why, *txID, *payee, post); err != nil {
 		return err
 	}
 	fmt.Printf("categorized %s\n", *txID)
 	return nil
-}
-
-// parseAmount reads a dollar string like "84.20" or "-40" into integer cents.
-func parseAmount(s string) (int64, error) {
-	neg := strings.HasPrefix(s, "-")
-	s = strings.TrimPrefix(strings.TrimPrefix(s, "-"), "+")
-	dollars, cents, found := strings.Cut(s, ".")
-	whole, err := strconv.ParseInt(dollars, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("amount %q is not a number", s)
-	}
-	total := whole * 100
-	if found {
-		if len(cents) != 2 {
-			return 0, fmt.Errorf("amount %q needs exactly two decimal places", s)
-		}
-		frac, err := strconv.ParseInt(cents, 10, 64)
-		if err != nil {
-			return 0, fmt.Errorf("amount %q is not a number", s)
-		}
-		total += frac
-	}
-	if neg {
-		total = -total
-	}
-	return total, nil
 }
 
 func renderBooks(args []string) error {
@@ -403,7 +387,7 @@ func report(out *os.File, txs []model.Transaction, entries []model.Entry) error 
 			unknown++
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-			tx.Date.Format("2006-01-02"), e.Payee, dollars(tx.AmountCents), accounts(e))
+			tx.Date.Format("2006-01-02"), e.Payee, tx.Amount, accounts(e))
 	}
 	if err := w.Flush(); err != nil {
 		return err
@@ -422,13 +406,4 @@ func accounts(e model.Entry) string {
 		names[i] = p.Account
 	}
 	return strings.Join(names, " + ")
-}
-
-func dollars(cents int64) string {
-	sign := ""
-	if cents < 0 {
-		sign = "-"
-		cents = -cents
-	}
-	return fmt.Sprintf("%s%d.%02d", sign, cents/100, cents%100)
 }

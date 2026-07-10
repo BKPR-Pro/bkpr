@@ -37,23 +37,22 @@ func WriteAll(w io.Writer, txs []model.Transaction, entries []model.Entry) error
 }
 
 func writeEntry(w io.Writer, tx model.Transaction, e model.Entry) error {
-	if tx.Currency == "" {
-		return fmt.Errorf("%s %s: the transaction has no currency", tx.Date.Format("2006/01/02"), e.Payee)
+	if tx.Amount.Commodity == "" {
+		return fmt.Errorf("%s %s: the transaction has no commodity", tx.Date.Format("2006/01/02"), e.Payee)
 	}
-	currency := tx.Currency
 
 	// The books are the artifact. An entry whose postings do not account for the whole statement
 	// line would be silently wrong once written, so it never gets written.
 	if !e.Balances(tx) {
 		return fmt.Errorf("%s %s: postings do not account for %s",
-			tx.Date.Format("2006/01/02"), e.Payee, amount(-tx.AmountCents))
+			tx.Date.Format("2006/01/02"), e.Payee, tx.Amount.Negate())
 	}
 
 	if _, err := fmt.Fprintf(w, "%s  * %s\n", tx.Date.Format("2006/01/02"), e.Payee); err != nil {
 		return err
 	}
 	for _, p := range e.Postings {
-		if _, err := fmt.Fprintf(w, "  %s  %s %s\n", p.Account, amount(p.AmountCents), currency); err != nil {
+		if _, err := fmt.Fprintf(w, "  %s  %s\n", p.Account, p.Amount); err != nil {
 			return err
 		}
 	}
@@ -62,13 +61,4 @@ func writeEntry(w io.Writer, tx model.Transaction, e model.Entry) error {
 	// elided and its amount inferred. Nothing else can name it, and nothing else can unbalance it.
 	_, err := fmt.Fprintf(w, "  %s\n", tx.Account)
 	return err
-}
-
-func amount(cents int64) string {
-	sign := ""
-	if cents < 0 {
-		sign = "-"
-		cents = -cents
-	}
-	return fmt.Sprintf("%s%d.%02d", sign, cents/100, cents%100)
 }

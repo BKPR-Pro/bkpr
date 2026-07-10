@@ -31,9 +31,8 @@ const (
 // CSV, and re-normalizing would move every fingerprint and orphan every correction keyed to one.
 type importedData struct {
 	Account     string            `json:"account"`
-	Currency    string            `json:"currency"`
 	Date        time.Time         `json:"date"`
-	AmountCents int64             `json:"amount_cents"`
+	Amount      model.Amount      `json:"amount"`
 	Description string            `json:"description"`
 	Raw         map[string]string `json:"raw,omitempty"`
 }
@@ -62,9 +61,8 @@ func Import(log *eventlog.Log, actor string, txs []model.Transaction) (ImportRes
 	for _, tx := range txs {
 		data, err := json.Marshal(importedData{
 			Account:     tx.Account,
-			Currency:    tx.Currency,
 			Date:        tx.Date,
-			AmountCents: tx.AmountCents,
+			Amount:      tx.Amount,
 			Description: tx.Description,
 			Raw:         tx.Raw,
 		})
@@ -112,9 +110,8 @@ func Transactions(log *eventlog.Log) ([]model.Transaction, error) {
 		txs = append(txs, model.Transaction{
 			ID:          e.RecordID,
 			Account:     data.Account,
-			Currency:    data.Currency,
 			Date:        data.Date,
-			AmountCents: data.AmountCents,
+			Amount:      data.Amount,
 			Description: data.Description,
 			Raw:         data.Raw,
 		})
@@ -142,13 +139,4 @@ func Transaction(log *eventlog.Log, id string) (model.Transaction, error) {
 		}
 	}
 	return model.Transaction{}, fmt.Errorf("books: no transaction %q; import it before categorizing it", id)
-}
-
-// dollars renders integer cents the way an error message reads best.
-func dollars(cents int64) string {
-	sign := ""
-	if cents < 0 {
-		sign, cents = "-", -cents
-	}
-	return fmt.Sprintf("%s%d.%02d", sign, cents/100, cents%100)
 }

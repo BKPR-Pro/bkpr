@@ -10,6 +10,7 @@ import (
 func signedMapping() source.CSV {
 	return source.CSV{
 		Account:     "Assets:Bank:Chequing",
+		Currency:    "CAD",
 		Date:        "Date",
 		Description: "Description",
 		Amount:      "Amount",
@@ -38,14 +39,14 @@ func TestReadsSignedAmountCSV(t *testing.T) {
 	if got := first.Date.Format("2006-01-02"); got != "2026-03-01" {
 		t.Errorf("date = %q", got)
 	}
-	if first.AmountCents != -8420 {
-		t.Errorf("cents = %d, want -8420", first.AmountCents)
+	if got := first.Amount.String(); got != "-84.20 CAD" {
+		t.Errorf("amount = %q, want -84.20 CAD", got)
 	}
 	if first.Description != "ACME HARDWARE #4471" {
 		t.Errorf("description = %q", first.Description)
 	}
-	if txs[1].AmountCents != 160000 {
-		t.Errorf("cents = %d, want 160000", txs[1].AmountCents)
+	if got := txs[1].Amount.String(); got != "1600.00 CAD" {
+		t.Errorf("amount = %q, want 1600.00 CAD", got)
 	}
 	if first.Raw["Description"] == "" {
 		t.Error("expected raw columns to be kept for auditing")
@@ -66,10 +67,10 @@ func TestParsesMessyAmounts(t *testing.T) {
 		t.Fatalf("ReadCSV: %v", err)
 	}
 
-	want := []int64{123456, -4500, 1200}
+	want := []string{"1234.56 CAD", "-45.00 CAD", "12 CAD"}
 	for i, w := range want {
-		if txs[i].AmountCents != w {
-			t.Errorf("row %d cents = %d, want %d", i, txs[i].AmountCents, w)
+		if got := txs[i].Amount.String(); got != w {
+			t.Errorf("row %d amount = %q, want %q", i, got, w)
 		}
 	}
 }
@@ -82,7 +83,7 @@ func TestDebitCreditColumns(t *testing.T) {
 			"2026-03-02,DEPOSIT,,1600.00\n")
 
 	m := source.CSV{
-		Account: "Assets:Bank:Chequing", Date: "Date", Description: "Description",
+		Account: "Assets:Bank:Chequing", Currency: "CAD", Date: "Date", Description: "Description",
 		Debit: "Debit", Credit: "Credit", DateFormat: "2006-01-02",
 	}
 
@@ -90,11 +91,11 @@ func TestDebitCreditColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadCSV: %v", err)
 	}
-	if txs[0].AmountCents != -8420 {
-		t.Errorf("debit cents = %d, want -8420", txs[0].AmountCents)
+	if got := txs[0].Amount.String(); got != "-84.20 CAD" {
+		t.Errorf("debit amount = %q, want -84.20 CAD", got)
 	}
-	if txs[1].AmountCents != 160000 {
-		t.Errorf("credit cents = %d, want 160000", txs[1].AmountCents)
+	if got := txs[1].Amount.String(); got != "1600.00 CAD" {
+		t.Errorf("credit amount = %q, want 1600.00 CAD", got)
 	}
 }
 
