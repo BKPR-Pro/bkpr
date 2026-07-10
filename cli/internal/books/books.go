@@ -98,10 +98,15 @@ func Transactions(log *eventlog.Log) ([]model.Transaction, error) {
 		return nil, err
 	}
 
+	gone := discarded(events)
+
 	var txs []model.Transaction
 	for _, e := range events {
 		if e.Collection != CollectionTransaction || e.Action != ActionImported {
 			continue
+		}
+		if gone[e.RecordID] {
+			continue // discarded: the imported fact stays in the log, but the line leaves the books
 		}
 		var data importedData
 		if err := e.Decode(&data); err != nil {

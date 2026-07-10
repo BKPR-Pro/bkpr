@@ -42,6 +42,8 @@ func main() {
 		err = ruleSet(os.Args[2:])
 	case "categorize":
 		err = categorize(os.Args[2:])
+	case "discard":
+		err = discard(os.Args[2:])
 	case "books":
 		err = renderBooks(os.Args[2:])
 	default:
@@ -68,6 +70,7 @@ usage:
   bookkeeper rules   list
   bookkeeper import       -source <account> -csv <file>
   bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>]
+  bookkeeper discard      -tx <fingerprint> [-why <reason>]
   bookkeeper books        [-format table|ledger] [-stdout]
 `)
 }
@@ -322,6 +325,32 @@ func categorize(args []string) error {
 		return err
 	}
 	fmt.Printf("categorized %s\n", *txID)
+	return nil
+}
+
+// discard removes a garbage line from the books, the way to undo a bad import.
+func discard(args []string) error {
+	fs := flag.NewFlagSet("discard", flag.ExitOnError)
+	txID := fs.String("tx", "", "the transaction fingerprint to discard")
+	why := fs.String("why", "", "why the line is garbage; recorded with the discard")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *txID == "" {
+		fs.Usage()
+		return fmt.Errorf("tx is required")
+	}
+
+	s, err := store.Open(".")
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	if err := books.Discard(s.Log, "human", *why, *txID); err != nil {
+		return err
+	}
+	fmt.Printf("discarded %s\n", *txID)
 	return nil
 }
 

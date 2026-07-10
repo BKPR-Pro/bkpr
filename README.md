@@ -225,22 +225,28 @@ fold over an in-memory adapter.
 
 1. **Rules.** Deterministic, free, reproducible. Handles almost everything.
 2. **A model.** Only the lines that came out `Uncategorized`. It proposes postings; code writes.
-3. **You.** Never blocking. A digest, not a queue.
+3. **You.** Never blocking. `ledger bal Uncategorized` is the whole review surface: whatever is
+   left is a rule you have not written or a line to correct, and nothing stops the books being
+   complete in the meantime.
 
 A model may label. Code does the writing, the deduplication, and the arithmetic. Quarantining the
 nondeterminism is what keeps the books regenerable, and it is why a model's answer is written to
 the log: it cannot be recomputed, so it must be remembered.
 
-## Sources and destinations
+## Sources and the artifact
 
-The core understands only normalized transactions. A **source** brings lines in; a **destination**
-acts on them. Only a connector knows about the outside world, and CSV is the default transport
-because every bank exports it and it needs no credentials.
+The core understands only normalized transactions. A **source** brings lines in; only a connector
+knows about the outside world, and CSV is the default transport because every bank exports it and
+it needs no credentials.
 
-A destination that must not act twice sends `Event.Key()` as its `Idempotency-Key`. The event is
-durable before any side effect runs, so a retry rebuilds the identical key from the identical
-stored event. That is the only thing that makes a retry safe when the response was the part that
-got lost.
+The only output is the ledger file. Bookkeeper turns statements into a committed double-entry
+ledger and stops there; the artifact is the product. It does not drive other systems, which keeps
+it standalone and keeps nothing about any particular app wired into the core.
+
+(The event carries a stable `Event.Key()`, so if bookkeeper ever did drive an external system, a
+destination that must not act twice could send that key as an `Idempotency-Key` and a retry would
+rebuild the identical key from the identical stored event. That is what makes a retry safe when the
+response is the part that gets lost. It is designed for and not built.)
 
 ## Usage
 
@@ -346,6 +352,24 @@ hardware charge does not re-pin every future one, and it survives a later rule c
 rule moves every line except the ones you have already spoken for. Assert twice and the later fact
 wins, with both kept in the log.
 
+### Undoing a bad import
+
+A source stores its line already normalized, so a wrong mapping (a flipped sign, the wrong date
+column) imports garbage that fixing the mapping cannot repair: the fingerprints are already in the
+log, and re-import is a no-op on them. `discard` is the way out.
+
+```sh
+bk discard -tx 33247b87... -why "imported to the wrong account"
+```
+
+It does not delete the imported event. It appends a fact that supersedes it, and the fold drops the
+line, so the mistake and its correction both stay in the log and the git diff is still a pure
+append. Re-importing the same statement will not bring the line back, because the imported fact is
+still there and the import stays a no-op.
+
+The repair flow the append-only log makes possible: fix the source, re-import (the corrected line
+lands under a new fingerprint, since the amount or date changed), then discard the garbage one.
+
 ### Transfers between your own accounts
 
 Move $500 from chequing to savings and it appears in both statements: once leaving chequing, once
@@ -439,8 +463,8 @@ statement line already knows which account it came from, and a line no rule matc
 - **Connectors know the outside world; the core does not.**
 - **Say only what is known.** Truncate an account path rather than guess a leaf, and never guess a
   kind.
-- **Nothing blocks.** Every line posts, every question is a digest, and every correction is cheap
-  because regenerating is cheap.
+- **Nothing blocks.** Every line posts, an unknown one truncates to `Uncategorized` rather than
+  stopping the run, and every correction is cheap because regenerating is cheap.
 
 ## Status
 
@@ -457,13 +481,18 @@ reader's old float is gone. An entry is single-commodity for now: mixing commodi
 through a price, which is refused until that slice exists.
 
 Internal transfers seen in both accounts' statements are recognised and booked once, as a
-deterministic fold over the lines and their categorization, so the money is not double-counted.
+deterministic fold over the lines and their categorization, so the money is not double-counted. A
+bad import is undone with `discard`, which supersedes the imported line without deleting it.
 
-Next, in order: the manual transfer override (`transaction.matched`, to correct a pairing the fold
-missed or got wrong), `Discard`, the CSV views (`bk transactions --csv` and friends, for the
-tabular parts of the data), the model tier, the digest, and the destinations. Prices and cost basis
-(so a brokerage account can hold shares against cash) are a later slice; the `Amount` type is ready
-for them.
+The only destination is the ledger file. Bookkeeper is a standalone tool: statements in, a
+committed double-entry ledger out. Driving other systems from it (for example recording rent
+payments back to a property app) is deliberately out of scope; the artifact is the product.
+
+Next, in order: the model tier (a model proposes categorizations for the `Uncategorized` lines, so
+you are not writing a rule for every merchant), then the manual transfer override
+(`transaction.matched`, to correct a pairing the fold missed) and the CSV views
+(`bk transactions --csv`, for the tabular parts of the data). Prices and cost basis (so a brokerage
+account can hold shares against cash) are a later slice; the `Amount` type is ready for them.
 
 ## Development
 
