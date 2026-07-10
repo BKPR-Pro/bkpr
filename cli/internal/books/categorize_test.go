@@ -7,7 +7,6 @@ import (
 	"github.com/dallasread/bookkeeper/cli/internal/books"
 	"github.com/dallasread/bookkeeper/cli/internal/eventlog"
 	"github.com/dallasread/bookkeeper/cli/internal/model"
-	"github.com/dallasread/bookkeeper/cli/internal/rules"
 )
 
 func whole(account string, cents int64) []model.Posting {
@@ -185,8 +184,8 @@ func TestAnAssertionSurvivesARuleChange(t *testing.T) {
 	books.Categorize(log, "human", "", "a", "Acme", whole("Expenses:Materials:Unit 1", -8420))
 
 	// The rule now defaults hardware to Unit 2 for everyone.
-	if _, err := books.LoadRules(log, "human", "", []rules.Rule{rule("acme", "Expenses:Materials:Unit 2")}); err != nil {
-		t.Fatalf("LoadRules: %v", err)
+	if err := books.SetRule(log, "human", "", rule("acme", "Expenses:Materials:Unit 2")); err != nil {
+		t.Fatalf("SetRule: %v", err)
 	}
 
 	if got := entryFor(t, log, "a").Postings[0].Account; got != "Expenses:Materials:Unit 1" {

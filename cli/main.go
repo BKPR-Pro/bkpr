@@ -8,7 +8,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -17,6 +16,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/dallasread/bookkeeper/cli/internal/books"
+	"github.com/dallasread/bookkeeper/cli/internal/eventlog"
 	"github.com/dallasread/bookkeeper/cli/internal/ledger"
 	"github.com/dallasread/bookkeeper/cli/internal/model"
 	"github.com/dallasread/bookkeeper/cli/internal/rules"
@@ -64,9 +64,13 @@ Every command finds the nearest .bookkeeper directory by walking up, as git does
 
 usage:
   bookkeeper init         [dir]
-  bookkeeper sources load [-file <file>] [-why <reason>]
+  bookkeeper sources add  <account> -currency <c> [-date <col> -description <col> -amount <col> | -debit <col> -credit <col>] [-date-format <layout>]
+  bookkeeper sources rm   <account>
   bookkeeper sources list
-  bookkeeper rules   load [-file <file>] [-why <reason>]
+  bookkeeper rules   add  -match <re> -category <account> [-payee <name>] [-before <re>]
+  bookkeeper rules   set  -match <re> [-category <account>] [-payee <name>] [-why <reason>]
+  bookkeeper rules   rm   -match <re>
+  bookkeeper rules   mv   -match <re> [-before <re>]
   bookkeeper rules   list
   bookkeeper import       -source <account> -csv <file>
   bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>]
@@ -86,6 +90,23 @@ func initStore(args []string) error {
 	}
 	fmt.Printf("Initialized a book of record in %s\n", path)
 	return nil
+}
+
+// open finds the book of record and hands back its log with a closer.
+func open() (*eventlog.Log, func() error, error) {
+	s, err := store.Open(".")
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.Log, s.Close, nil
+}
+
+// firstArg peels a required positional argument off the front, before any flags.
+func firstArg(args []string, desc string) (string, []string, error) {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return "", nil, fmt.Errorf("expected %s as the first argument", desc)
+	}
+	return args[0], args[1:], nil
 }
 
 func importStatement(args []string) error {
@@ -134,126 +155,264 @@ func importStatement(args []string) error {
 	return nil
 }
 
-// sourceSet records a sources file into the log, or shows what the log currently says.
+// sourceSet dispatches `sources add|rm|list`.
 func sourceSet(args []string) error {
 	if len(args) == 0 {
 		usage()
-		return fmt.Errorf("sources needs load or list")
+		return fmt.Errorf("sources needs add, rm, or list")
 	}
-
-	fs := flag.NewFlagSet("sources "+args[0], flag.ExitOnError)
-	filePath := fs.String("file", "", "JSON source set to load")
-	why := fs.String("why", "", "why the sources changed; recorded with the edit")
-	if err := fs.Parse(args[1:]); err != nil {
-		return err
-	}
-
-	s, err := store.Open(".")
-	if err != nil {
-		return err
-	}
-	defer s.Close()
-	log := s.Log
-
 	switch args[0] {
+	case "add":
+		return sourceAdd(args[1:])
+	case "rm":
+		return sourceRemove(args[1:])
 	case "list":
-		set, err := books.Sources(log)
-		if err != nil {
-			return err
-		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ACCOUNT\tCURRENCY\tDATE\tDESCRIPTION\tAMOUNT")
-		for _, s := range set {
-			amount := s.Amount
-			if amount == "" {
-				amount = s.Debit + " / " + s.Credit
-			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", s.Account, s.Currency, s.Date, s.Description, amount)
-		}
-		return w.Flush()
-
-	case "load":
-		if *filePath == "" {
-			fs.Usage()
-			return fmt.Errorf("file is required")
-		}
-		var want []source.CSV
-		body, err := os.ReadFile(*filePath)
-		if err != nil {
-			return err
-		}
-		if err := json.Unmarshal(body, &want); err != nil {
-			return fmt.Errorf("%s: %w", *filePath, err)
-		}
-		got, err := books.LoadSources(log, "human", *why, want)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("%d sources: %d added, %d changed, %d removed\n",
-			len(want), got.Added, got.Changed, got.Removed)
-		return nil
-
+		return sourceList(args[1:])
 	default:
 		usage()
 		return fmt.Errorf("unknown sources subcommand %q", args[0])
 	}
 }
 
-// ruleSet records a rules file into the log, or shows what the log currently says.
-func ruleSet(args []string) error {
-	if len(args) == 0 {
-		usage()
-		return fmt.Errorf("rules needs load or list")
-	}
-
-	fs := flag.NewFlagSet("rules "+args[0], flag.ExitOnError)
-	filePath := fs.String("file", "", "JSON rule set to load")
-	why := fs.String("why", "", "why the rule set changed; recorded with the edit")
-	if err := fs.Parse(args[1:]); err != nil {
-		return err
-	}
-
-	s, err := store.Open(".")
+func sourceAdd(args []string) error {
+	fs := flag.NewFlagSet("sources add", flag.ExitOnError)
+	var s source.CSV
+	fs.StringVar(&s.Currency, "currency", "", "the account's currency, e.g. CAD")
+	fs.StringVar(&s.Date, "date", "Date", "header of the date column")
+	fs.StringVar(&s.Description, "description", "Description", "header of the memo column")
+	fs.StringVar(&s.DateFormat, "date-format", "2006-01-02", "Go date layout the column uses")
+	fs.StringVar(&s.Amount, "amount", "", "header of a single signed amount column")
+	fs.StringVar(&s.Debit, "debit", "", "header of the debit column, if amounts are a pair")
+	fs.StringVar(&s.Credit, "credit", "", "header of the credit column, if amounts are a pair")
+	account, rest, err := firstArg(args, "the ledger account, e.g. Assets:Bank:Chequing")
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	log := s.Log
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	s.Account = account
 
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	if err := books.AddSource(log, "human", s); err != nil {
+		return err
+	}
+	fmt.Printf("source %s\n", s.Account)
+	return nil
+}
+
+func sourceRemove(args []string) error {
+	account, _, err := firstArg(args, "the account to forget")
+	if err != nil {
+		return err
+	}
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	if err := books.RemoveSource(log, "human", account); err != nil {
+		return err
+	}
+	fmt.Printf("removed source %s\n", account)
+	return nil
+}
+
+func sourceList(args []string) error {
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	set, err := books.Sources(log)
+	if err != nil {
+		return err
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ACCOUNT\tCURRENCY\tDATE\tDESCRIPTION\tAMOUNT")
+	for _, s := range set {
+		amount := s.Amount
+		if amount == "" {
+			amount = s.Debit + " / " + s.Credit
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", s.Account, s.Currency, s.Date, s.Description, amount)
+	}
+	return w.Flush()
+}
+
+// ruleSet dispatches `rules add|set|rm|mv|list`.
+func ruleSet(args []string) error {
+	if len(args) == 0 {
+		usage()
+		return fmt.Errorf("rules needs add, set, rm, mv, or list")
+	}
 	switch args[0] {
+	case "add":
+		return ruleAdd(args[1:])
+	case "set":
+		return ruleSetOne(args[1:])
+	case "rm":
+		return ruleRemove(args[1:])
+	case "mv":
+		return ruleMove(args[1:])
 	case "list":
-		set, err := books.Rules(log)
-		if err != nil {
-			return err
-		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "MATCH\tPAYEE\tCATEGORY")
-		for _, r := range set {
-			fmt.Fprintf(w, "%s\t%s\t%s\n", r.Match, r.Payee, r.Category)
-		}
-		return w.Flush()
-
-	case "load":
-		if *filePath == "" {
-			fs.Usage()
-			return fmt.Errorf("file is required")
-		}
-		want, err := rules.ReadFile(*filePath)
-		if err != nil {
-			return err
-		}
-		got, err := books.LoadRules(log, "human", *why, want)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("%d rules: %d added, %d changed, %d removed, %d moved\n",
-			len(want), got.Added, got.Changed, got.Removed, got.Moved)
-		return nil
-
+		return ruleList(args[1:])
 	default:
 		usage()
 		return fmt.Errorf("unknown rules subcommand %q", args[0])
 	}
+}
+
+func ruleAdd(args []string) error {
+	fs := flag.NewFlagSet("rules add", flag.ExitOnError)
+	var r rules.Rule
+	fs.StringVar(&r.Match, "match", "", "case-insensitive pattern to match the description")
+	fs.StringVar(&r.Category, "category", "", "account to post the line to")
+	fs.StringVar(&r.Payee, "payee", "", "payee to record on the entry")
+	before := fs.String("before", "", "place this rule ahead of the one matching this pattern")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if r.Match == "" {
+		return fmt.Errorf("-match is required")
+	}
+
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	if err := books.AddRule(log, "human", r, *before); err != nil {
+		return err
+	}
+	fmt.Printf("rule %q\n", r.Match)
+	return nil
+}
+
+func ruleSetOne(args []string) error {
+	fs := flag.NewFlagSet("rules set", flag.ExitOnError)
+	match := fs.String("match", "", "the rule to change")
+	category := fs.String("category", "", "the new account to post to")
+	payee := fs.String("payee", "", "the new payee")
+	why := fs.String("why", "", "why the rule changed; it reclassifies every line it matched")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *match == "" {
+		return fmt.Errorf("-match is required")
+	}
+
+	// Only the fields you name change; the rest of the rule is left as it was, so setting a category
+	// does not silently blank the payee.
+	provided := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { provided[f.Name] = true })
+
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	current, err := books.Rules(log)
+	if err != nil {
+		return err
+	}
+	merged, found := rules.Rule{}, false
+	for _, r := range current {
+		if r.Match == *match {
+			merged, found = r, true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("no rule matches %q; add it first", *match)
+	}
+	if provided["category"] {
+		merged.Category = *category
+	}
+	if provided["payee"] {
+		merged.Payee = *payee
+	}
+
+	if err := books.SetRule(log, "human", *why, merged); err != nil {
+		return err
+	}
+	fmt.Printf("rule %q\n", *match)
+	return nil
+}
+
+func ruleRemove(args []string) error {
+	fs := flag.NewFlagSet("rules rm", flag.ExitOnError)
+	match := fs.String("match", "", "the rule to remove")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *match == "" {
+		return fmt.Errorf("-match is required")
+	}
+
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	if err := books.RemoveRule(log, "human", *match); err != nil {
+		return err
+	}
+	fmt.Printf("removed rule %q\n", *match)
+	return nil
+}
+
+func ruleMove(args []string) error {
+	fs := flag.NewFlagSet("rules mv", flag.ExitOnError)
+	match := fs.String("match", "", "the rule to move")
+	before := fs.String("before", "", "move it ahead of this rule; omit to move it to the end")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *match == "" {
+		return fmt.Errorf("-match is required")
+	}
+
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	if err := books.MoveRule(log, "human", *match, *before); err != nil {
+		return err
+	}
+	fmt.Printf("moved rule %q\n", *match)
+	return nil
+}
+
+func ruleList(args []string) error {
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	set, err := books.Rules(log)
+	if err != nil {
+		return err
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "MATCH\tPAYEE\tCATEGORY")
+	for _, r := range set {
+		fmt.Fprintf(w, "%s\t%s\t%s\n", r.Match, r.Payee, r.Category)
+	}
+	return w.Flush()
 }
 
 // rawPosting is an account and an unparsed quantity from a -post flag. The quantity becomes an

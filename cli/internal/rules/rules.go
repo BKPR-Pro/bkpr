@@ -5,9 +5,7 @@
 package rules
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
 
 	"github.com/dallasread/bookkeeper/cli/internal/model"
@@ -50,21 +48,6 @@ func New(rs []Rule) (*Engine, error) {
 		compiled[i] = r
 	}
 	return &Engine{rules: compiled}, nil
-}
-
-// ReadFile reads a JSON rule set. The file is an editing surface, which is the right one for an
-// ordered document; the log is the truth. Rules are data, not code, so a different set of books
-// means a different rule set, not a different build.
-func ReadFile(path string) ([]Rule, error) {
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var rs []Rule
-	if err := json.Unmarshal(body, &rs); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return rs, nil
 }
 
 // Apply walks the rules in order, taking each field from the first rule that matches and supplies

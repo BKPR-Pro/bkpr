@@ -1,8 +1,6 @@
 package rules_test
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/dallasread/bookkeeper/cli/internal/model"
@@ -144,23 +142,5 @@ func TestASingleCategoryPostingBalancesTheTransaction(t *testing.T) {
 func TestInvalidRegexIsRejected(t *testing.T) {
 	if _, err := rules.New([]rules.Rule{{Match: `([`}}); err == nil {
 		t.Fatal("expected an error for an invalid regex")
-	}
-}
-
-func TestReadFileParsesARuleSet(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "rules.json")
-	body := `[{"match": "shell|petro", "payee": "Fuel Stop", "category": "Expenses:Auto:Fuel"}]`
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	rs, err := rules.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-
-	got := engine(t, rs...).Apply(tx("SHELL GAS #123"))
-	if got.Payee != "Fuel Stop" || only(t, got).Account != "Expenses:Auto:Fuel" {
-		t.Errorf("got %+v", got)
 	}
 }

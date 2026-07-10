@@ -23,82 +23,66 @@ func visa() source.CSV {
 	}
 }
 
-func loadSources(t *testing.T, log *eventlog.Log, want ...source.CSV) books.LoadResult {
+func addSource(t *testing.T, log *eventlog.Log, s source.CSV) {
 	t.Helper()
-	got, err := books.LoadSources(log, "human", "", want)
-	if err != nil {
-		t.Fatalf("LoadSources: %v", err)
+	if err := books.AddSource(log, "human", s); err != nil {
+		t.Fatalf("AddSource(%s): %v", s.Account, err)
 	}
-	return got
 }
 
-func TestLoadingSourcesAddsThemInAccountOrder(t *testing.T) {
+func TestAddingSourcesListsThemInAccountOrder(t *testing.T) {
 	log := newLog()
+	addSource(t, log, visa())
+	addSource(t, log, chequing())
 
-	got := loadSources(t, log, visa(), chequing())
-
-	if got.Added != 2 {
-		t.Errorf("got %+v, want 2 added", got)
-	}
 	set, _ := books.Sources(log)
 	if len(set) != 2 || set[0].Account != "Assets:Bank:Chequing" {
 		t.Fatalf("got %v, want them ordered by account", set)
 	}
 }
 
-func TestLoadingTheSameSourcesTwiceRecordsNothingTheSecondTime(t *testing.T) {
+// Add is an upsert keyed by the account. The same source added again is a no-op; a changed one is
+// recorded, so a mapping that drifts is diagnosable.
+func TestAddingASourceAgainIsANoOpButAChangeIsRecorded(t *testing.T) {
 	log := newLog()
-	loadSources(t, log, chequing(), visa())
+	addSource(t, log, chequing())
 
-	if got := loadSources(t, log, chequing(), visa()); got != (books.LoadResult{}) {
-		t.Errorf("got %+v, want nothing recorded", got)
-	}
-}
-
-// A mapping that drifts changes how lines normalize, which changes their fingerprints. Recording
-// the change is what makes the resulting duplicate diagnosable.
-func TestReadingAnAccountWrongAndFixingItIsRecorded(t *testing.T) {
-	log := newLog()
-	loadSources(t, log, chequing())
+	addSource(t, log, chequing()) // identical: nothing recorded
+	before, _ := log.All()
 
 	fixed := chequing()
 	fixed.Amount = "Amount (CAD)"
-	got, err := books.LoadSources(log, "human", "the column was renamed", []source.CSV{fixed})
-	if err != nil {
-		t.Fatalf("LoadSources: %v", err)
-	}
-	if got.Changed != 1 || got.Added != 0 {
-		t.Fatalf("got %+v, want 1 changed", got)
-	}
+	addSource(t, log, fixed)
+	after, _ := log.All()
 
-	set, _ := books.Sources(log)
-	if set[0].Amount != "Amount (CAD)" {
+	if len(before) != 1 {
+		t.Fatalf("an identical re-add recorded something: %d events", len(before))
+	}
+	if len(after) != 2 {
+		t.Fatalf("a real change was not recorded: %d events", len(after))
+	}
+	if set, _ := books.Sources(log); set[0].Amount != "Amount (CAD)" {
 		t.Errorf("amount column = %q", set[0].Amount)
-	}
-
-	events, _ := log.All()
-	if last := events[len(events)-1]; !strings.Contains(string(last.Data), "the column was renamed") {
-		t.Errorf("the reason was not recorded: %s", last.Data)
 	}
 }
 
-func TestDroppingASourceFromTheFileRemovesIt(t *testing.T) {
+func TestRemovingASource(t *testing.T) {
 	log := newLog()
-	loadSources(t, log, chequing(), visa())
+	addSource(t, log, chequing())
+	addSource(t, log, visa())
 
-	got := loadSources(t, log, chequing())
-
-	if got.Removed != 1 {
-		t.Errorf("got %+v, want 1 removed", got)
+	if err := books.RemoveSource(log, "human", "Liabilities:Card:Visa"); err != nil {
+		t.Fatalf("RemoveSource: %v", err)
 	}
-	if set, _ := books.Sources(log); len(set) != 1 {
+	if set, _ := books.Sources(log); len(set) != 1 || set[0].Account != "Assets:Bank:Chequing" {
 		t.Fatalf("got %v, want only chequing", set)
 	}
 }
 
 func TestASourceCanBeLookedUpByAccount(t *testing.T) {
 	log := newLog()
-	loadSources(t, log, chequing(), visa())
+	addSource(t, log, chequing())
+	addSource(t, log, visa())
 
 	got, err := books.Source(log, "Liabilities:Card:Visa")
 	if err != nil {
@@ -109,39 +93,32 @@ func TestASourceCanBeLookedUpByAccount(t *testing.T) {
 	}
 }
 
-// Importing against an account nobody taught bookkeeper to read should say what it does know,
-// rather than silently normalizing with a zero mapping.
+// Importing against an account nobody taught bookkeeper to read should say what it does know.
 func TestAnUnknownAccountSaysWhichOnesAreKnown(t *testing.T) {
 	log := newLog()
-	loadSources(t, log, chequing())
+	addSource(t, log, chequing())
 
 	_, err := books.Source(log, "Assets:Bank:Savings")
 	if err == nil {
-		t.Fatal("found a source that was never loaded")
+		t.Fatal("found a source that was never added")
 	}
 	if !strings.Contains(err.Error(), "Assets:Bank:Chequing") {
 		t.Errorf("the error should name the accounts it knows: %v", err)
 	}
 }
 
-func TestTwoSourcesForOneAccountAreRefused(t *testing.T) {
-	log := newLog()
-
-	if _, err := books.LoadSources(log, "human", "", []source.CSV{chequing(), chequing()}); err == nil {
-		t.Fatal("loaded two sources for one account")
-	}
-	if set, _ := books.Sources(log); len(set) != 0 {
-		t.Fatalf("got %v, want nothing written", set)
+func TestASourceWithoutACurrencyIsRefused(t *testing.T) {
+	broke := chequing()
+	broke.Currency = ""
+	if err := books.AddSource(newLog(), "human", broke); err == nil {
+		t.Fatal("added a source with no currency")
 	}
 }
 
-// Currency belongs to the account. Without it the ledger writer has nothing to put on a posting.
-func TestASourceWithoutACurrencyIsRefused(t *testing.T) {
-	log := newLog()
+func TestASourceWithNoAmountColumnsIsRefused(t *testing.T) {
 	broke := chequing()
-	broke.Currency = ""
-
-	if _, err := books.LoadSources(log, "human", "", []source.CSV{broke}); err == nil {
-		t.Fatal("loaded a source with no currency")
+	broke.Amount = ""
+	if err := books.AddSource(newLog(), "human", broke); err == nil {
+		t.Fatal("added a source with no amount or debit/credit columns")
 	}
 }

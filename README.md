@@ -140,9 +140,8 @@ merchant's history stays together. Changing the pattern is a different rule, and
 history, because it now fires on a different set of lines. Two rules therefore cannot share a
 pattern.
 
-You still edit a file, which is the right surface for an ordered document. `rules load` folds the
-current set out of the log, diffs the file against it, and emits the intents the diff implies, so
-loading an unchanged file records nothing. `rules list` prints what the log says.
+Each edit is its own command and its own event: `rules add`, `set`, `rm`, `mv`. That is the intent
+recorded directly, with no file to diff. `rules list` prints what the log currently folds to.
 
 ### Sources are doors, not folds
 
@@ -259,11 +258,13 @@ bk init
 # Initialized a book of record in /your/project/.bookkeeper
 ```
 
-`sources load` teaches bookkeeper which accounts exist and how to read their statements:
+`sources add` teaches bookkeeper how to read one account's statements. It is an upsert keyed by the
+account: run it again to change how the account is read.
 
 ```sh
-bk sources load -file sources.json
-# 1 sources: 1 added, 0 changed, 0 removed
+bk sources add "Assets:Bank:Chequing" -currency CAD -amount Amount
+# a debit/credit pair instead of one signed column:
+bk sources add "Liabilities:Card:Visa" -currency CAD -debit Charge -credit Payment -date Posted
 ```
 
 `import` records what a statement said. It writes facts, and it is safe to run twice:
@@ -276,15 +277,14 @@ bk import -source "Assets:Bank:Chequing" -csv statements/march.csv
 # 9 lines read: 0 imported, 9 already in the log
 ```
 
-`rules load` records a rule file into the log as the per-rule intents its diff implies. Loading an
-unchanged file records nothing:
+`rules add` records a rule; each is one event. Order decides which of two matching rules wins, so a
+new rule lands at the end unless `-before` places it ahead of another. `rules set`, `rm`, and `mv`
+change, drop, and reorder.
 
 ```sh
-bk rules load -file rules.json
-# 8 rules: 8 added, 0 changed, 0 removed, 0 moved
-
-bk rules load -file rules.json
-# 8 rules: 0 added, 0 changed, 0 removed, 0 moved
+bk rules add -match "shell|petro" -category "Expenses:Travel:Fuel" -payee "Fuel Stop"
+bk rules add -match "city water"  -category "Expenses:Utilities:Water" -before "water"
+bk rules list
 ```
 
 `books` folds the log into a table, or regenerates the ledger artifact in the store:
@@ -306,11 +306,11 @@ DATE        PAYEE                AMOUNT   POSTS TO
 
 ### Fixing a rule fixes history
 
-Learn that every hardware receipt was Unit 1, and say so once:
+Learn that every hardware receipt was Unit 1, and say so once. `set` changes only the fields you
+name, so the payee is left as it was:
 
 ```sh
-bk rules load -file rules.json --why "the receipts were all Unit 1"
-# 8 rules: 0 added, 1 changed, 0 removed, 0 moved
+bk rules set -match "acme hardware" -category "Expenses:...:Unit 1" -why "the receipts were all Unit 1"
 bk books -format ledger
 ```
 
@@ -413,37 +413,23 @@ ledger -f books.ledger print --uncleared  # empty, and correctly so
 
 ## Configuration
 
-Both files below are editing surfaces. `sources load` and `rules load` record them into the log,
-which is what `import` and `books` read.
+There are no config files. Sources and rules are recorded straight into the log by command, and the
+log is what `import` and `books` read.
 
 A **source** is one account and how to read its statements. Banks disagree about column names, date
 formats, and whether amounts are one signed column or a debit/credit pair. The currency belongs to
 the account, not to whoever runs a render.
 
-```json
-[
-  {
-    "account": "Assets:Bank:Chequing",
-    "currency": "CAD",
-    "date": "Date",
-    "description": "Description",
-    "amount": "Amount",
-    "date_format": "2006-01-02"
-  }
-]
+```sh
+bk sources add "Assets:Bank:Chequing" -currency CAD -amount Amount -date Date -description Description
 ```
 
 A **rule** matches a description and supplies a payee, an account to post to, or both. Rules are
-ordered, and for each field the first rule that supplies it wins. `match` is the rule's identity,
-so no two may share one. Feed the file to `rules load`; the log is what `books` reads.
+ordered, and for each field the first rule that supplies it wins; `match` is the rule's identity, so
+no two may share one.
 
-```json
-[
-  { "match": "acme hardware", "payee": "Acme Hardware",
-    "category": "Expenses:Real Estate:Materials:Uncategorized" },
-  { "match": "city water", "payee": "City Water Utility",
-    "category": "Expenses:Real Estate:Utilities:Water:123 Example Street" }
-]
+```sh
+bk rules add -match "acme hardware" -payee "Acme Hardware" -category "Expenses:Real Estate:Materials:Uncategorized"
 ```
 
 Categories are free-form account paths, so you can go as deep as your books do, down to the

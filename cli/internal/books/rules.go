@@ -30,11 +30,6 @@ type ruleData struct {
 	Why      string `json:"why,omitempty"`
 }
 
-// LoadResult reports what a rule file did to the log.
-type LoadResult struct {
-	Added, Changed, Removed, Moved int
-}
-
 // Rules folds the log into the current rule set, in order.
 func Rules(log *eventlog.Log) ([]rules.Rule, error) {
 	events, err := log.All()
@@ -71,97 +66,79 @@ func Rules(log *eventlog.Log) ([]rules.Rule, error) {
 	return set, nil
 }
 
-// LoadRules records the difference between a rule file and the log as the per-rule intents that
-// difference implies. The file is an editing surface, which is the right one for an ordered
-// document; the log is the truth. Loading an unchanged file records nothing.
-func LoadRules(log *eventlog.Log, actor, why string, want []rules.Rule) (LoadResult, error) {
-	var result LoadResult
-
-	seen := make(map[string]bool, len(want))
-	for _, r := range want {
-		if r.Match == "" {
-			return result, fmt.Errorf("books: a rule has no match")
-		}
-		if seen[r.Match] {
-			return result, fmt.Errorf("books: two rules match %q; the pattern is a rule's identity", r.Match)
-		}
-		seen[r.Match] = true
+// AddRule records a new rule. The match pattern is the rule's identity, so a pattern already in
+// the set is an error rather than a silent overwrite; use SetRule to change what a rule answers.
+// A new rule lands at the end unless before names the rule it should precede, since order decides
+// which of two matching rules wins.
+func AddRule(log *eventlog.Log, actor string, r rules.Rule, before string) error {
+	if r.Match == "" {
+		return fmt.Errorf("books: a rule needs a match")
 	}
-
 	current, err := Rules(log)
 	if err != nil {
-		return result, err
-	}
-
-	track := func(match, action string, data ruleData) error {
-		data.Why = why
-		body, err := json.Marshal(data)
-		if err != nil {
-			return err
-		}
-		_, err = log.Track(eventlog.Event{
-			Collection: CollectionRule, RecordID: match, Action: action,
-			Version: version, Actor: actor, Data: body,
-		})
 		return err
 	}
-
-	for _, r := range current {
-		if !seen[r.Match] {
-			if err := track(r.Match, ActionRemoved, ruleData{}); err != nil {
-				return result, err
-			}
-			result.Removed++
-		}
+	if indexOf(current, r.Match) >= 0 {
+		return fmt.Errorf("books: a rule already matches %q; the pattern is its identity, so use `rules set`", r.Match)
 	}
-
-	for _, r := range want {
-		i := indexOf(current, r.Match)
-		if i >= 0 && (current[i].Payee != r.Payee || current[i].Category != r.Category) {
-			if err := track(r.Match, ActionChanged, ruleData{Payee: r.Payee, Category: r.Category}); err != nil {
-				return result, err
-			}
-			result.Changed++
-		}
+	if before != "" && indexOf(current, before) < 0 {
+		return fmt.Errorf("books: no rule matches %q to place this one before", before)
 	}
+	return trackRule(log, actor, r.Match, ActionAdded, ruleData{Payee: r.Payee, Category: r.Category, Before: before})
+}
 
-	// Right to left, so the rule a new one precedes is already in the set by the time it lands.
-	for i := len(want) - 1; i >= 0; i-- {
-		if indexOf(current, want[i].Match) >= 0 {
-			continue
-		}
-		before := ""
-		if i+1 < len(want) {
-			before = want[i+1].Match
-		}
-		if err := track(want[i].Match, ActionAdded, ruleData{Payee: want[i].Payee, Category: want[i].Category, Before: before}); err != nil {
-			return result, err
-		}
-		result.Added++
-	}
-
-	// Whatever order the adds and removes left behind, walk it into the file's order. Every rule in
-	// want is now present, so this terminates with the two in agreement.
-	now, err := Rules(log)
+// SetRule changes what an existing rule answers. This reclassifies every past line the rule
+// matched, so it carries a why.
+func SetRule(log *eventlog.Log, actor, why string, r rules.Rule) error {
+	current, err := Rules(log)
 	if err != nil {
-		return result, err
+		return err
 	}
-	for i := range want {
-		if now[i].Match == want[i].Match {
-			continue
-		}
-		before := now[i].Match
-		if err := track(want[i].Match, ActionMoved, ruleData{Before: before}); err != nil {
-			return result, err
-		}
-		result.Moved++
-
-		var moved rules.Rule
-		now, moved = takeOut(now, want[i].Match)
-		now = insertBefore(now, moved, before)
+	if indexOf(current, r.Match) < 0 {
+		return fmt.Errorf("books: no rule matches %q; add it first", r.Match)
 	}
+	return trackRule(log, actor, r.Match, ActionChanged, ruleData{Payee: r.Payee, Category: r.Category, Why: why})
+}
 
-	return result, nil
+// RemoveRule drops a rule. The lines it categorized fall back to whatever else matches, or to
+// Uncategorized.
+func RemoveRule(log *eventlog.Log, actor, match string) error {
+	current, err := Rules(log)
+	if err != nil {
+		return err
+	}
+	if indexOf(current, match) < 0 {
+		return fmt.Errorf("books: no rule matches %q", match)
+	}
+	return trackRule(log, actor, match, ActionRemoved, ruleData{})
+}
+
+// MoveRule reorders a rule. An empty before sends it to the end; otherwise it lands ahead of the
+// named rule.
+func MoveRule(log *eventlog.Log, actor, match, before string) error {
+	current, err := Rules(log)
+	if err != nil {
+		return err
+	}
+	if indexOf(current, match) < 0 {
+		return fmt.Errorf("books: no rule matches %q", match)
+	}
+	if before != "" && indexOf(current, before) < 0 {
+		return fmt.Errorf("books: no rule matches %q to move before", before)
+	}
+	return trackRule(log, actor, match, ActionMoved, ruleData{Before: before})
+}
+
+func trackRule(log *eventlog.Log, actor, match, action string, data ruleData) error {
+	body, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	_, err = log.Track(eventlog.Event{
+		Collection: CollectionRule, RecordID: match, Action: action,
+		Version: version, Actor: actor, Data: body,
+	})
+	return err
 }
 
 func indexOf(set []rules.Rule, match string) int {

@@ -99,69 +99,59 @@ func Source(log *eventlog.Log, account string) (source.CSV, error) {
 	return source.CSV{}, fmt.Errorf("books: no source for %q; the log knows %v", account, known)
 }
 
-// LoadSources records the difference between a sources file and the log. Sources are unordered, so
-// there is nothing to move.
-func LoadSources(log *eventlog.Log, actor, why string, want []source.CSV) (LoadResult, error) {
-	var result LoadResult
-
-	seen := map[string]bool{}
-	for _, s := range want {
-		switch {
-		case s.Account == "":
-			return result, fmt.Errorf("books: a source has no account")
-		case s.Currency == "":
-			return result, fmt.Errorf("books: source %s has no currency", s.Account)
-		case seen[s.Account]:
-			return result, fmt.Errorf("books: two sources read %q; the account is a source's identity", s.Account)
-		}
-		seen[s.Account] = true
+// AddSource records how to read one account's statements. It is an upsert keyed by the account,
+// which is the source's identity: a new account is added, and giving an account bookkeeper already
+// knows changes how it is read. An identical repeat records nothing.
+func AddSource(log *eventlog.Log, actor string, s source.CSV) error {
+	switch {
+	case s.Account == "":
+		return fmt.Errorf("books: a source needs an account")
+	case s.Currency == "":
+		return fmt.Errorf("books: source %s needs a currency", s.Account)
+	case s.Amount == "" && s.Debit == "" && s.Credit == "":
+		return fmt.Errorf("books: source %s needs an amount column or a debit/credit pair", s.Account)
 	}
 
 	current, err := Sources(log)
 	if err != nil {
-		return result, err
-	}
-	currentByAccount := map[string]source.CSV{}
-	for _, s := range current {
-		currentByAccount[s.Account] = s
-	}
-
-	track := func(account, action string, data sourceData) error {
-		data.Why = why
-		body, err := json.Marshal(data)
-		if err != nil {
-			return err
-		}
-		_, err = log.Track(eventlog.Event{
-			Collection: CollectionSource, RecordID: account, Action: action,
-			Version: version, Actor: actor, Data: body,
-		})
 		return err
 	}
+	action := ActionAdded
+	for _, existing := range current {
+		if existing.Account == s.Account {
+			if existing == s {
+				return nil // no change
+			}
+			action = ActionChanged
+			break
+		}
+	}
+	return trackSource(log, actor, s.Account, action, fromSource(s))
+}
 
+// RemoveSource forgets how to read an account. Lines already imported from it stay in the books;
+// only future imports lose their source.
+func RemoveSource(log *eventlog.Log, actor, account string) error {
+	current, err := Sources(log)
+	if err != nil {
+		return err
+	}
 	for _, s := range current {
-		if !seen[s.Account] {
-			if err := track(s.Account, ActionRemoved, sourceData{}); err != nil {
-				return result, err
-			}
-			result.Removed++
+		if s.Account == account {
+			return trackSource(log, actor, account, ActionRemoved, sourceData{})
 		}
 	}
+	return fmt.Errorf("books: no source for %q", account)
+}
 
-	for _, s := range want {
-		existing, known := currentByAccount[s.Account]
-		switch {
-		case !known:
-			if err := track(s.Account, ActionAdded, fromSource(s)); err != nil {
-				return result, err
-			}
-			result.Added++
-		case existing != s:
-			if err := track(s.Account, ActionChanged, fromSource(s)); err != nil {
-				return result, err
-			}
-			result.Changed++
-		}
+func trackSource(log *eventlog.Log, actor, account, action string, data sourceData) error {
+	body, err := json.Marshal(data)
+	if err != nil {
+		return err
 	}
-	return result, nil
+	_, err = log.Track(eventlog.Event{
+		Collection: CollectionSource, RecordID: account, Action: action,
+		Version: version, Actor: actor, Data: body,
+	})
+	return err
 }
