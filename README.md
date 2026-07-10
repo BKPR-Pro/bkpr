@@ -249,6 +249,9 @@ response is the part that gets lost. It is designed for and not built.)
 
 ## Usage
 
+`bk` is the command-line wrapper; `go install github.com/dallasread/bookkeeper/cmd/bk@latest` builds
+it, or run it from a checkout with `go run ./cmd/bk`.
+
 `init` creates a set of books in the current directory, marked by a `.bookkeeper` directory the way
 a git repository is marked by `.git`. Every other command finds it by walking up, so you can run
 them from anywhere inside your project.
@@ -480,11 +483,34 @@ you are not writing a rule for every merchant), then the manual transfer overrid
 (`bk transactions --csv`, for the tabular parts of the data). Prices and cost basis (so a brokerage
 account can hold shares against cash) are a later slice; the `Amount` type is ready for them.
 
+## Layout
+
+The core is a library; the CLI is a thin wrapper over it.
+
+```text
+model/     the normalized shapes: Amount, Transaction, Posting, Entry
+eventlog/  the append-only log and its storage adapters
+books/     the commands and folds: Import, AddRule, Categorize, Discard, Ledger, ...
+rules/     the deterministic categorization engine
+source/    connectors that turn the outside world into transactions (CSV today)
+store/     locating and opening a .bookkeeper book of record
+cmd/bk/    the command-line wrapper
+```
+
+Every package is importable, so another program can drive the books directly:
+
+```go
+s, _ := store.Open(".")
+defer s.Close()
+books.Import(s.Log, "statement:march", txs)
+txs, entries, _ := books.Ledger(s.Log)
+```
+
 ## Development
 
 ```sh
-cd cli
 go test ./...
 go vet ./...
 gofmt -l .
+go build ./cmd/bk
 ```
