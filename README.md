@@ -30,14 +30,23 @@ Some attributions are simply not in the data. A hardware store charge could serv
 that fact lives on the receipt, not in the description. No amount of matching recovers it, so the
 rule defaults and flags rather than pretending.
 
-### Rules are defaults; decisions are overrides
+### Rules are defaults; corrections are about one line
 
 - **Rules** produce defaults, keyed by pattern. Always followed. Never learned automatically.
-- **Decisions** override one transaction, keyed by its fingerprint. They never generalize, so
-  correcting a single hardware charge does not silently re-pin every future one.
+- **Corrections** are facts about one transaction, keyed by its fingerprint. They never generalize,
+  so correcting a single hardware charge does not silently re-pin every future one.
 
 Rules are data, not code. A different set of books means a different rules file, not a different
 build.
+
+### Entries are postings, not a category
+
+One charge can serve two properties. An entry therefore holds a list of postings rather than a
+single category, and a split is just more than one of them.
+
+Only the categorized side is stored. The posting against the account the statement came from is
+elided and inferred by the ledger, which is why an entry cannot be unbalanced: the postings must
+account for the whole line, and nothing else can name the source account.
 
 ## Design rules
 
@@ -65,12 +74,12 @@ go run ./cli categorize \
 Output:
 
 ```text
-DATE        PAYEE                AMOUNT   CATEGORY
+DATE        PAYEE                AMOUNT   POSTS TO                                    REVIEW
 2026-03-01  Fuel Stop            -62.40   Expenses:Consulting:Travel:Fuel
 2026-03-05  J. Smith             1600.00  Income:Real Estate:Rent:123 Example Street
-2026-03-12  UNKNOWN MERCHANT 88  -39.99   NEEDS REVIEW (no rule supplied a category)
+2026-03-12  UNKNOWN MERCHANT 88  -39.99   Suspense                                    ! no rule supplied a category
 
-9 lines: 8 categorized, 1 need review
+9 lines posted: 7 confident, 2 flagged for review
 ```
 
 ## Books
@@ -110,20 +119,20 @@ column names, date formats, and whether amounts are one signed column or a debit
 }
 ```
 
-A **rule** matches a description and supplies any subset of payee, category, and balancing
-account. Rules are ordered, and for each field the first rule that supplies it wins. That lets a
-specific rule name the payee and category while a trailing catch-all supplies the account's
-default balancing posting.
+A **rule** matches a description and supplies a payee, an account to post to, or both. Rules are
+ordered, and for each field the first rule that supplies it wins.
 
 ```json
 [
-  { "match": "acme hardware", "payee": "Acme Hardware", "category": "Expenses:Repairs:Materials" },
-  { "match": ".", "balance": "Liabilities:Card:Visa" }
+  { "match": "acme hardware", "payee": "Acme Hardware", "category": "Expenses:Repairs:Materials",
+    "uncertain": true, "reason": "hardware could serve any property" },
+  { "match": "city water", "payee": "City Water Utility", "category": "Expenses:Utilities:Water" }
 ]
 ```
 
 Categories are free-form account paths, so you can go as deep as your books do, down to the
-property and unit.
+property and unit. No catch-all rule is needed: a statement line already knows which account it
+came from, and a line no rule matches posts to `Suspense`.
 
 ## Development
 

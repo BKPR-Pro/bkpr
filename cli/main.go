@@ -1,9 +1,9 @@
 // Command bookkeeper categorizes bank and card statements into a set of books.
 //
 // This slice covers the deterministic tier: read a CSV statement, apply an ordered rule set, and
-// report what each line categorizes to. Lines no rule can categorize are surfaced rather than
-// guessed at; later slices escalate those to a model and then to a human, and record the answer
-// as a new rule.
+// report where each line posts. Every line posts. A line no rule categorizes parks in Suspense,
+// and one categorized by a defensible default posts to that default; both are flagged rather than
+// withheld. Later slices escalate the flagged ones to a model and then to a person.
 package main
 
 import (
@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/dallasread/bookkeeper/cli/internal/ledger"
@@ -79,16 +80,16 @@ func categorize(args []string) error {
 		return err
 	}
 
-	decisions := make([]model.Decision, len(txs))
+	entries := make([]model.Entry, len(txs))
 	for i, tx := range txs {
-		decisions[i] = engine.Apply(tx)
+		entries[i] = engine.Apply(tx)
 	}
 
 	switch *format {
 	case "table":
-		return report(os.Stdout, txs, decisions)
+		return report(os.Stdout, txs, entries)
 	case "ledger":
-		return ledger.WriteAll(os.Stdout, txs, decisions, *currency)
+		return ledger.WriteAll(os.Stdout, txs, entries, *currency)
 	default:
 		return fmt.Errorf("unknown format %q: want table or ledger", *format)
 	}
@@ -106,33 +107,24 @@ func loadMapping(path string) (source.Mapping, error) {
 	return m, nil
 }
 
-func report(out *os.File, txs []model.Transaction, decisions []model.Decision) error {
+func report(out *os.File, txs []model.Transaction, entries []model.Entry) error {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "DATE\tPAYEE\tAMOUNT\tCATEGORY\tREVIEW")
+	fmt.Fprintln(w, "DATE\tPAYEE\tAMOUNT\tPOSTS TO\tREVIEW")
 
 	var flagged int
 	for i, tx := range txs {
-		d := decisions[i]
-
-		payee := d.Payee
-		if payee == "" {
-			payee = tx.Description
-		}
+		e := entries[i]
 
 		// Every line posts. A flagged line still shows where it landed; the flag is how you find it
 		// again, not a reason to withhold it.
-		category := d.Category
-		if category == "" {
-			category = ledger.SuspenseAccount
-		}
-
 		review := ""
-		if d.NeedsReview {
+		if e.Pending {
 			flagged++
-			review = "! " + d.Reason
+			review = "! " + e.Reason
 		}
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", tx.Date.Format("2006-01-02"), payee, dollars(tx.AmountCents), category, review)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			tx.Date.Format("2006-01-02"), e.Payee, dollars(tx.AmountCents), accounts(e), review)
 	}
 	if err := w.Flush(); err != nil {
 		return err
@@ -140,6 +132,16 @@ func report(out *os.File, txs []model.Transaction, decisions []model.Decision) e
 
 	fmt.Fprintf(out, "\n%d lines posted: %d confident, %d flagged for review\n", len(txs), len(txs)-flagged, flagged)
 	return nil
+}
+
+// accounts names where an entry posted. A split posted to more than one place, and hiding that
+// would misreport the books.
+func accounts(e model.Entry) string {
+	names := make([]string, len(e.Postings))
+	for i, p := range e.Postings {
+		names[i] = p.Account
+	}
+	return strings.Join(names, " + ")
 }
 
 func dollars(cents int64) string {

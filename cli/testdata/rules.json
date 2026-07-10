@@ -9,7 +9,5 @@
     "uncertain": true, "reason": "hardware could serve any property; defaulted to the most common" },
 
   { "match": "e-transfer from j smith",   "payee": "J. Smith",           "category": "Income:Real Estate:Rent:123 Example Street" },
-  { "match": "widgetco",                  "payee": "WidgetCo",           "category": "Income:Consulting:Contract:WidgetCo" },
-
-  { "match": ".",                                                        "balance": "Assets:Bank:Chequing" }
+  { "match": "widgetco",                  "payee": "WidgetCo",           "category": "Income:Consulting:Contract:WidgetCo" }
 ]

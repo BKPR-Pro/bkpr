@@ -10,7 +10,7 @@ import (
 )
 
 func tx(description string) model.Transaction {
-	return model.Transaction{Description: description, Account: "Liabilities:Card:Visa"}
+	return model.Transaction{Description: description, Account: "Liabilities:Card:Visa", AmountCents: -8420}
 }
 
 func engine(t *testing.T, rs ...rules.Rule) *rules.Engine {
@@ -22,38 +22,45 @@ func engine(t *testing.T, rs ...rules.Rule) *rules.Engine {
 	return e
 }
 
-// The common shape: a specific rule names the payee and category, and a trailing catch-all
-// supplies the account's default balancing posting.
-func TestSpecificRuleThenCatchAllBalance(t *testing.T) {
-	e := engine(t,
-		rules.Rule{Match: `acme hardware`, Payee: "Acme Hardware", Category: "Expenses:Repairs:Materials"},
-		rules.Rule{Match: `.`, Balance: "Liabilities:Card:Visa"},
-	)
+func only(t *testing.T, e model.Entry) model.Posting {
+	t.Helper()
+	if len(e.Postings) != 1 {
+		t.Fatalf("want one posting, got %d: %+v", len(e.Postings), e.Postings)
+	}
+	return e.Postings[0]
+}
+
+func TestARuleNamesThePayeeAndTheAccountToPostTo(t *testing.T) {
+	e := engine(t, rules.Rule{Match: `acme hardware`, Payee: "Acme Hardware", Category: "Expenses:Repairs:Materials"})
 
 	got := e.Apply(tx("ACME HARDWARE #4471"))
 
-	if got.NeedsReview {
-		t.Fatalf("did not expect review, got reason %q", got.Reason)
+	if got.Pending {
+		t.Fatalf("did not expect a flag, got reason %q", got.Reason)
 	}
-	if got.Payee != "Acme Hardware" || got.Category != "Expenses:Repairs:Materials" {
-		t.Errorf("payee/category = %q/%q", got.Payee, got.Category)
+	if got.Payee != "Acme Hardware" {
+		t.Errorf("payee = %q", got.Payee)
 	}
-	if got.Balance != "Liabilities:Card:Visa" {
-		t.Errorf("balance = %q", got.Balance)
+	if only(t, got).Account != "Expenses:Repairs:Materials" {
+		t.Errorf("account = %q", only(t, got).Account)
 	}
-	if !got.Categorized() {
-		t.Error("expected a categorized decision")
+}
+
+// The statement's sign is from the source account's point of view, so the categorized posting
+// takes the opposite one. Money out of the account is money into an expense.
+func TestThePostingTakesTheOppositeSignOfTheStatementLine(t *testing.T) {
+	e := engine(t, rules.Rule{Match: `acme`, Category: "Expenses:Repairs"})
+
+	if got := only(t, e.Apply(tx("ACME HARDWARE"))); got.AmountCents != 8420 {
+		t.Errorf("amount = %d, want 8420", got.AmountCents)
 	}
 }
 
 func TestMatchingIsCaseInsensitive(t *testing.T) {
-	e := engine(t,
-		rules.Rule{Match: `city water`, Category: "Expenses:Utilities:Water"},
-		rules.Rule{Match: `.`, Balance: "Assets:Bank:Chequing"},
-	)
+	e := engine(t, rules.Rule{Match: `city water`, Category: "Expenses:Utilities:Water"})
 
-	if got := e.Apply(tx("CITY WATER UTILITY")); got.Category != "Expenses:Utilities:Water" {
-		t.Errorf("category = %q, want the water account", got.Category)
+	if got := only(t, e.Apply(tx("CITY WATER UTILITY"))); got.Account != "Expenses:Utilities:Water" {
+		t.Errorf("account = %q, want the water account", got.Account)
 	}
 }
 
@@ -63,13 +70,12 @@ func TestFirstMatchWinsPerField(t *testing.T) {
 	e := engine(t,
 		rules.Rule{Match: `coffee house`, Category: "Expenses:Meals"},
 		rules.Rule{Match: `coffee`, Category: "Expenses:Wrong", Payee: "Generic Coffee"},
-		rules.Rule{Match: `.`, Balance: "Assets:Bank:Chequing"},
 	)
 
 	got := e.Apply(tx("COFFEE HOUSE 12"))
 
-	if got.Category != "Expenses:Meals" {
-		t.Errorf("category = %q, want the earlier rule's", got.Category)
+	if only(t, got).Account != "Expenses:Meals" {
+		t.Errorf("account = %q, want the earlier rule's", only(t, got).Account)
 	}
 	// The later rule still contributes the field the earlier one left empty.
 	if got.Payee != "Generic Coffee" {
@@ -77,49 +83,41 @@ func TestFirstMatchWinsPerField(t *testing.T) {
 	}
 }
 
-// A line nothing categorizes is never guessed at. It goes to the human.
-func TestUncategorizedNeedsReview(t *testing.T) {
-	e := engine(t, rules.Rule{Match: `.`, Balance: "Assets:Bank:Chequing"})
+// The one thing never guessed at is the kind. A line nothing categorizes still posts, because the
+// books must stay complete, but it parks in a top-level suspense account rather than landing in
+// Expenses or Income and silently corrupting both totals.
+func TestUncategorizedLinePostsToSuspenseAndIsFlagged(t *testing.T) {
+	e := engine(t)
 
 	got := e.Apply(tx("SOME UNKNOWN MERCHANT"))
 
-	if !got.NeedsReview {
-		t.Fatal("expected review")
+	if only(t, got).Account != model.SuspenseAccount {
+		t.Errorf("account = %q, want suspense", only(t, got).Account)
+	}
+	if !got.Pending {
+		t.Error("expected a flag")
 	}
 	if got.Reason == "" {
 		t.Error("expected a reason explaining why")
-	}
-	if got.Categorized() {
-		t.Error("a review decision is not categorized")
-	}
-	// It still learned the balance account, which the human should not have to supply.
-	if got.Balance != "Assets:Bank:Chequing" {
-		t.Errorf("balance = %q", got.Balance)
 	}
 }
 
 // An ambiguous merchant still posts. The category is a defensible default, so the line is flagged
 // rather than withheld: guessing a leaf costs insight, and gating costs the thing this tool exists
 // to avoid.
-func TestUncertainRuleCategorizesAndFlags(t *testing.T) {
-	e := engine(t,
-		rules.Rule{
-			Match: `acme hardware`, Payee: "Acme Hardware",
-			Category:  "Expenses:Real Estate:Materials:45 Sample Avenue:Unit 2",
-			Uncertain: true, Reason: "hardware could serve any property",
-		},
-		rules.Rule{Match: `.`, Balance: "Assets:Bank:Chequing"},
-	)
+func TestUncertainRuleStillPostsToItsCategoryAndIsFlagged(t *testing.T) {
+	e := engine(t, rules.Rule{
+		Match: `acme hardware`, Payee: "Acme Hardware",
+		Category:  "Expenses:Real Estate:Materials:45 Sample Avenue:Unit 2",
+		Uncertain: true, Reason: "hardware could serve any property",
+	})
 
 	got := e.Apply(tx("ACME HARDWARE #4471"))
 
-	if got.Category != "Expenses:Real Estate:Materials:45 Sample Avenue:Unit 2" {
-		t.Errorf("category = %q, want the default to still be applied", got.Category)
+	if only(t, got).Account != "Expenses:Real Estate:Materials:45 Sample Avenue:Unit 2" {
+		t.Errorf("account = %q, want the default to still be applied", only(t, got).Account)
 	}
-	if !got.Categorized() {
-		t.Error("an uncertain line is still categorized, just not confidently")
-	}
-	if !got.NeedsReview {
+	if !got.Pending {
 		t.Error("an uncertain line should be flagged")
 	}
 	if got.Reason != "hardware could serve any property" {
@@ -127,16 +125,16 @@ func TestUncertainRuleCategorizesAndFlags(t *testing.T) {
 	}
 }
 
-// The catch-all matches every line. It must not clear the uncertainty of the rule that actually
-// supplied the category.
-func TestCatchAllDoesNotClobberUncertainty(t *testing.T) {
+// A later rule that matches for some other reason must not clear the uncertainty of the rule that
+// actually supplied the account.
+func TestALaterRuleDoesNotClobberUncertainty(t *testing.T) {
 	e := engine(t,
 		rules.Rule{Match: `acme`, Category: "Expenses:Materials", Uncertain: true},
-		rules.Rule{Match: `.`, Balance: "Assets:Bank:Chequing"},
+		rules.Rule{Match: `.`, Payee: "Somebody"},
 	)
 
-	if got := e.Apply(tx("ACME HARDWARE")); !got.NeedsReview {
-		t.Error("the catch-all cleared the uncertain flag")
+	if got := e.Apply(tx("ACME HARDWARE")); !got.Pending {
+		t.Error("a later rule cleared the uncertain flag")
 	}
 }
 
@@ -147,23 +145,28 @@ func TestCertainRuleIsNotFlagged(t *testing.T) {
 		rules.Rule{Match: `water`, Category: "Expenses:Wrong", Uncertain: true, Reason: "nope"},
 	)
 
-	if got := e.Apply(tx("CITY WATER UTILITY")); got.NeedsReview {
+	if got := e.Apply(tx("CITY WATER UTILITY")); got.Pending {
 		t.Errorf("unexpected flag: %s", got.Reason)
 	}
 }
 
-// A statement line already knows its own account, so a rule set needs no catch-all just to name
-// the balancing posting. Rules only override it for transfers.
-func TestBalanceDefaultsToTheTransactionsOwnAccount(t *testing.T) {
+// The bank's memo is a worse payee than a rule's, and a better one than nothing.
+func TestPayeeFallsBackToTheDescription(t *testing.T) {
 	e := engine(t, rules.Rule{Match: `acme`, Category: "Expenses:Repairs"})
 
-	got := e.Apply(tx("ACME HARDWARE"))
-
-	if got.Balance != "Liabilities:Card:Visa" {
-		t.Errorf("balance = %q, want the transaction's own account", got.Balance)
+	if got := e.Apply(tx("ACME HARDWARE #4471")); got.Payee != "ACME HARDWARE #4471" {
+		t.Errorf("payee = %q, want the description", got.Payee)
 	}
-	if got.NeedsReview {
-		t.Errorf("unexpected review: %s", got.Reason)
+}
+
+// Postings are the categorized side only, so an entry is balanced by construction: the elided
+// posting against the transaction's own account absorbs whatever is left.
+func TestASingleCategoryPostingBalancesTheTransaction(t *testing.T) {
+	e := engine(t, rules.Rule{Match: `acme`, Category: "Expenses:Repairs"})
+
+	line := tx("ACME HARDWARE")
+	if got := e.Apply(line); !got.Balances(line) {
+		t.Errorf("entry does not balance: %+v", got.Postings)
 	}
 }
 
@@ -175,10 +178,7 @@ func TestInvalidRegexIsRejected(t *testing.T) {
 
 func TestLoadFromJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rules.json")
-	body := `[
-	  {"match": "shell|petro", "payee": "Fuel Stop", "category": "Expenses:Auto:Fuel"},
-	  {"match": ".", "balance": "Liabilities:Card:Visa"}
-	]`
+	body := `[{"match": "shell|petro", "payee": "Fuel Stop", "category": "Expenses:Auto:Fuel"}]`
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestLoadFromJSON(t *testing.T) {
 	}
 
 	got := e.Apply(tx("SHELL GAS #123"))
-	if got.Category != "Expenses:Auto:Fuel" || got.Payee != "Fuel Stop" {
+	if got.Payee != "Fuel Stop" || only(t, got).Account != "Expenses:Auto:Fuel" {
 		t.Errorf("got %+v", got)
 	}
 }

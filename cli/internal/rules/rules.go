@@ -1,7 +1,7 @@
 // Package rules is the deterministic first tier of categorization. It is fast, free, and
-// reproducible: the same statement always yields the same books. Only lines no rule matches
-// escalate to the next tier, and every escalated answer comes back as a rule, so this tier
-// grows and the expensive tiers shrink.
+// reproducible: the same statement and the same rules always yield the same books. Rules are
+// defaults, keyed by pattern, and they are always followed. They are never learned automatically,
+// because a correction is real-world context about one charge, not evidence about a merchant.
 package rules
 
 import (
@@ -13,17 +13,15 @@ import (
 	"github.com/dallasread/bookkeeper/cli/internal/model"
 )
 
-// Rule matches a transaction's description and supplies any subset of payee, category, and
-// balance account. Matching is case-insensitive.
+// Rule matches a transaction's description and supplies a payee, an account to post to, or both.
+// Matching is case-insensitive.
 //
 // Rules are ordered, and for each field the first matching rule that supplies it wins. That is
-// what lets a specific rule name the payee and category while a trailing catch-all supplies the
-// account's default balancing posting.
+// what lets a specific rule name the account while a later, broader rule names the payee.
 type Rule struct {
 	Match    string `json:"match"`
 	Payee    string `json:"payee,omitempty"`
 	Category string `json:"category,omitempty"`
-	Balance  string `json:"balance,omitempty"`
 
 	// Uncertain marks a category that is a defensible default rather than a fact. An ambiguous
 	// merchant (a hardware store that could serve any property) sets this: the line still posts to
@@ -71,51 +69,51 @@ func Load(path string) (*Engine, error) {
 	return New(rs)
 }
 
-// Apply walks the rules in order, filling each field of the decision from the first rule that
-// matches and supplies it. A transaction that ends up with no category is never guessed at: it
-// is handed to the human.
-func (e *Engine) Apply(tx model.Transaction) model.Decision {
-	var d model.Decision
+// Apply walks the rules in order, taking each field from the first rule that matches and supplies
+// it, and turns the result into an entry. Every line posts: one no rule categorizes goes to
+// Suspense rather than being withheld, and one categorized by a default posts to that default.
+// Both are flagged.
+func (e *Engine) Apply(tx model.Transaction) model.Entry {
+	var payee, category, reason string
 	var uncertain bool
-	var reason string
 
 	for _, r := range e.rules {
 		if !r.re.MatchString(tx.Description) {
 			continue
 		}
-		if d.Payee == "" {
-			d.Payee = r.Payee
+		if payee == "" {
+			payee = r.Payee
 		}
-		// Guard on r.Category so the uncertainty of the rule that actually supplied the category is
-		// not clobbered by a later rule that matched for some other field, such as the catch-all.
-		if d.Category == "" && r.Category != "" {
-			d.Category = r.Category
+		// Guard on r.Category so the uncertainty of the rule that actually supplied the account is
+		// not cleared by a later rule that matched for some other field.
+		if category == "" && r.Category != "" {
+			category = r.Category
 			uncertain, reason = r.Uncertain, r.Reason
 		}
-		if d.Balance == "" {
-			d.Balance = r.Balance
-		}
-		if d.Payee != "" && d.Category != "" && d.Balance != "" {
+		if payee != "" && category != "" {
 			break
 		}
 	}
 
-	// The transaction already knows which account its statement came from, so that is the natural
-	// balancing posting. A rule only needs to name one when the entry is a transfer somewhere else.
-	if d.Balance == "" {
-		d.Balance = tx.Account
+	entry := model.Entry{Payee: payee}
+	if entry.Payee == "" {
+		entry.Payee = tx.Description
 	}
 
 	switch {
-	case d.Category == "":
-		d.NeedsReview = true
-		d.Reason = "no rule supplied a category"
+	case category == "":
+		entry.Postings = []model.Posting{{Account: model.SuspenseAccount, AmountCents: -tx.AmountCents}}
+		entry.Pending = true
+		entry.Reason = "no rule supplied a category"
 	case uncertain:
-		d.NeedsReview = true
-		d.Reason = reason
-		if d.Reason == "" {
-			d.Reason = "category is a default; confirm the attribution"
+		entry.Postings = []model.Posting{{Account: category, AmountCents: -tx.AmountCents}}
+		entry.Pending = true
+		entry.Reason = reason
+		if entry.Reason == "" {
+			entry.Reason = "category is a default; confirm the attribution"
 		}
+	default:
+		entry.Postings = []model.Posting{{Account: category, AmountCents: -tx.AmountCents}}
 	}
-	return d
+	return entry
 }

@@ -1,4 +1,4 @@
-// Package ledger renders categorized transactions as plain-text double-entry entries.
+// Package ledger renders entries as plain-text double-entry postings.
 //
 // The output is the artifact: greppable, diffable, and readable by ledger-cli. Entries drawn from
 // real bank data are cleared (*). A line that is a defensible default rather than a fact, or whose
@@ -14,16 +14,10 @@ import (
 	"github.com/dallasread/bookkeeper/cli/internal/model"
 )
 
-// SuspenseAccount holds a line whose kind is unknown. Never guess across kinds: an expense booked
-// as income breaks the books and does not self-correct. A top-level suspense account also keeps
-// the Income and Expenses totals honest while a line is unresolved, and `ledger bal Suspense`
-// lists everything still unclassified.
-const SuspenseAccount = "Suspense"
-
 // WriteAll renders one entry per transaction, in order.
-func WriteAll(w io.Writer, txs []model.Transaction, decisions []model.Decision, currency string) error {
-	if len(txs) != len(decisions) {
-		return fmt.Errorf("%d transactions but %d decisions", len(txs), len(decisions))
+func WriteAll(w io.Writer, txs []model.Transaction, entries []model.Entry, currency string) error {
+	if len(txs) != len(entries) {
+		return fmt.Errorf("%d transactions but %d entries", len(txs), len(entries))
 	}
 
 	for i, tx := range txs {
@@ -32,49 +26,43 @@ func WriteAll(w io.Writer, txs []model.Transaction, decisions []model.Decision, 
 				return err
 			}
 		}
-		if err := writeEntry(w, tx, decisions[i], currency); err != nil {
+		if err := writeEntry(w, tx, entries[i], currency); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func writeEntry(w io.Writer, tx model.Transaction, d model.Decision, currency string) error {
+func writeEntry(w io.Writer, tx model.Transaction, e model.Entry, currency string) error {
+	// The books are the artifact. An entry whose postings do not account for the whole statement
+	// line would be silently wrong once written, so it never gets written.
+	if !e.Balances(tx) {
+		return fmt.Errorf("%s %s: postings do not account for %s",
+			tx.Date.Format("2006/01/02"), e.Payee, amount(-tx.AmountCents))
+	}
+
 	flag := "*"
-	if d.NeedsReview {
+	if e.Pending {
 		flag = "!"
 	}
 
-	payee := d.Payee
-	if payee == "" {
-		payee = tx.Description
-	}
-
-	category := d.Category
-	if category == "" {
-		category = SuspenseAccount
-	}
-
-	balance := d.Balance
-	if balance == "" {
-		balance = tx.Account
-	}
-
-	if _, err := fmt.Fprintf(w, "%s  %s %s\n", tx.Date.Format("2006/01/02"), flag, payee); err != nil {
+	if _, err := fmt.Fprintf(w, "%s  %s %s\n", tx.Date.Format("2006/01/02"), flag, e.Payee); err != nil {
 		return err
 	}
-	if d.NeedsReview && d.Reason != "" {
-		if _, err := fmt.Fprintf(w, "  ; needs review: %s\n", d.Reason); err != nil {
+	if e.Pending && e.Reason != "" {
+		if _, err := fmt.Fprintf(w, "  ; needs review: %s\n", e.Reason); err != nil {
+			return err
+		}
+	}
+	for _, p := range e.Postings {
+		if _, err := fmt.Fprintf(w, "  %s  %s %s\n", p.Account, amount(p.AmountCents), currency); err != nil {
 			return err
 		}
 	}
 
-	// The statement's sign is from the source account's point of view, so the categorized posting
-	// takes the opposite sign. The source account is elided and inferred by the ledger.
-	if _, err := fmt.Fprintf(w, "  %s  %s %s\n", category, amount(-tx.AmountCents), currency); err != nil {
-		return err
-	}
-	_, err := fmt.Fprintf(w, "  %s\n", balance)
+	// The transaction already knows which account its statement came from, so that posting is
+	// elided and its amount inferred. Nothing else can name it, and nothing else can unbalance it.
+	_, err := fmt.Fprintf(w, "  %s\n", tx.Account)
 	return err
 }
 
