@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dallasread/bookkeeper/store"
+	"github.com/dallasread/bookkeeper/lib/store"
 )
 
 func TestInitCreatesABookOfRecord(t *testing.T) {

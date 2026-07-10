@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/dallasread/bookkeeper/model"
+	"github.com/dallasread/bookkeeper/lib/model"
 )
 
 // Rule matches a transaction's description and supplies a payee, an account to post to, or both.

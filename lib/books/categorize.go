@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dallasread/bookkeeper/eventlog"
-	"github.com/dallasread/bookkeeper/model"
-	"github.com/dallasread/bookkeeper/rules"
+	"github.com/dallasread/bookkeeper/lib/eventlog"
+	"github.com/dallasread/bookkeeper/lib/model"
+	"github.com/dallasread/bookkeeper/lib/rules"
 )
 
 // ActionCategorized records that a person or a model asserted the postings for one transaction.

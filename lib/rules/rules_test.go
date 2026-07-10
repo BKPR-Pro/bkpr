@@ -3,8 +3,8 @@ package rules_test
 import (
 	"testing"
 
-	"github.com/dallasread/bookkeeper/model"
-	"github.com/dallasread/bookkeeper/rules"
+	"github.com/dallasread/bookkeeper/lib/model"
+	"github.com/dallasread/bookkeeper/lib/rules"
 )
 
 func tx(description string) model.Transaction {

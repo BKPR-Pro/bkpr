@@ -3,7 +3,7 @@ package books
 import (
 	"encoding/json"
 
-	"github.com/dallasread/bookkeeper/eventlog"
+	"github.com/dallasread/bookkeeper/lib/eventlog"
 )
 
 // ActionDiscarded records that an imported line was garbage and must leave the books.

@@ -488,13 +488,14 @@ account can hold shares against cash) are a later slice; the `Amount` type is re
 The core is a library; the CLI is a thin wrapper over it.
 
 ```text
-model/     the normalized shapes: Amount, Transaction, Posting, Entry
-eventlog/  the append-only log and its storage adapters
-books/     the commands and folds: Import, AddRule, Categorize, Discard, Ledger, ...
-rules/     the deterministic categorization engine
-source/    connectors that turn the outside world into transactions (CSV today)
-store/     locating and opening a .bookkeeper book of record
-cli/       the command-line wrapper
+lib/model/     the normalized shapes: Amount, Transaction, Posting, Entry
+lib/eventlog/  the append-only log and its storage adapters
+lib/books/     the commands and folds: Import, AddRule, Categorize, Discard, Ledger, ...
+lib/rules/     the deterministic categorization engine
+lib/source/    connectors that turn the outside world into transactions (CSV today)
+lib/ledger/    renders the books as a plain-text double-entry artifact
+lib/store/     locating and opening a .bookkeeper book of record
+cli/           the command-line wrapper
 ```
 
 Every package is importable, so another program can drive the books directly:

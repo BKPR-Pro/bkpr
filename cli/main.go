@@ -15,13 +15,13 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/dallasread/bookkeeper/books"
-	"github.com/dallasread/bookkeeper/eventlog"
-	"github.com/dallasread/bookkeeper/ledger"
-	"github.com/dallasread/bookkeeper/model"
-	"github.com/dallasread/bookkeeper/rules"
-	"github.com/dallasread/bookkeeper/source"
-	"github.com/dallasread/bookkeeper/store"
+	"github.com/dallasread/bookkeeper/lib/books"
+	"github.com/dallasread/bookkeeper/lib/eventlog"
+	"github.com/dallasread/bookkeeper/lib/ledger"
+	"github.com/dallasread/bookkeeper/lib/model"
+	"github.com/dallasread/bookkeeper/lib/rules"
+	"github.com/dallasread/bookkeeper/lib/source"
+	"github.com/dallasread/bookkeeper/lib/store"
 )
 
 func main() {

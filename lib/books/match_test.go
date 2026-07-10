@@ -3,8 +3,8 @@ package books_test
 import (
 	"testing"
 
-	"github.com/dallasread/bookkeeper/eventlog"
-	"github.com/dallasread/bookkeeper/model"
+	"github.com/dallasread/bookkeeper/lib/eventlog"
+	"github.com/dallasread/bookkeeper/lib/model"
 )
 
 func lineIn(id, account string, day int, cents int64, description string) model.Transaction {

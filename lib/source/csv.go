@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dallasread/bookkeeper/model"
+	"github.com/dallasread/bookkeeper/lib/model"
 )
 
 // CSV is one account and how to read its statements. The account is its identity; the currency and

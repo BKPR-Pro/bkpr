@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dallasread/bookkeeper/books"
-	"github.com/dallasread/bookkeeper/eventlog"
-	"github.com/dallasread/bookkeeper/rules"
+	"github.com/dallasread/bookkeeper/lib/books"
+	"github.com/dallasread/bookkeeper/lib/eventlog"
+	"github.com/dallasread/bookkeeper/lib/rules"
 )
 
 func rule(match, category string) rules.Rule {

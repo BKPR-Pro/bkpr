@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bookkeeper/ledger"
-	"github.com/dallasread/bookkeeper/model"
+	"github.com/dallasread/bookkeeper/lib/ledger"
+	"github.com/dallasread/bookkeeper/lib/model"
 )
 
 func on(day int) time.Time {

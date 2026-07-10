@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bookkeeper/books"
-	"github.com/dallasread/bookkeeper/eventlog"
-	"github.com/dallasread/bookkeeper/model"
+	"github.com/dallasread/bookkeeper/lib/books"
+	"github.com/dallasread/bookkeeper/lib/eventlog"
+	"github.com/dallasread/bookkeeper/lib/model"
 )
 
 func newLog() *eventlog.Log { return eventlog.New(eventlog.NewMemory()) }

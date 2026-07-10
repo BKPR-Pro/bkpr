@@ -15,7 +15,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dallasread/bookkeeper/eventlog"
+	"github.com/dallasread/bookkeeper/lib/eventlog"
 )
 
 const (

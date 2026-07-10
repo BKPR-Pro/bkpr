@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dallasread/bookkeeper/books"
-	"github.com/dallasread/bookkeeper/eventlog"
-	"github.com/dallasread/bookkeeper/model"
+	"github.com/dallasread/bookkeeper/lib/books"
+	"github.com/dallasread/bookkeeper/lib/eventlog"
+	"github.com/dallasread/bookkeeper/lib/model"
 )
 
 func whole(account string, cents int64) []model.Posting {

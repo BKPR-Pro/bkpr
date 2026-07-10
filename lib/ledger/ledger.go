@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/dallasread/bookkeeper/model"
+	"github.com/dallasread/bookkeeper/lib/model"
 )
 
 // WriteAll renders one entry per transaction, in order. Each entry is written in the currency of

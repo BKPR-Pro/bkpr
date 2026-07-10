@@ -3,7 +3,7 @@ package books
 import (
 	"time"
 
-	"github.com/dallasread/bookkeeper/model"
+	"github.com/dallasread/bookkeeper/lib/model"
 )
 
 // transferDays is how far apart the two sightings of one movement may be dated. A transfer often
