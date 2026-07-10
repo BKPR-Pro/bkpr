@@ -31,6 +31,7 @@ const (
 // CSV, and re-normalizing would move every fingerprint and orphan every correction keyed to one.
 type importedData struct {
 	Account     string            `json:"account"`
+	Currency    string            `json:"currency"`
 	Date        time.Time         `json:"date"`
 	AmountCents int64             `json:"amount_cents"`
 	Description string            `json:"description"`
@@ -61,6 +62,7 @@ func Import(log *eventlog.Log, actor string, txs []model.Transaction) (ImportRes
 	for _, tx := range txs {
 		data, err := json.Marshal(importedData{
 			Account:     tx.Account,
+			Currency:    tx.Currency,
 			Date:        tx.Date,
 			AmountCents: tx.AmountCents,
 			Description: tx.Description,
@@ -110,6 +112,7 @@ func Transactions(log *eventlog.Log) ([]model.Transaction, error) {
 		txs = append(txs, model.Transaction{
 			ID:          e.RecordID,
 			Account:     data.Account,
+			Currency:    data.Currency,
 			Date:        data.Date,
 			AmountCents: data.AmountCents,
 			Description: data.Description,

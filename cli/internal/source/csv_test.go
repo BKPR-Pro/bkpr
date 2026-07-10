@@ -7,8 +7,8 @@ import (
 	"github.com/dallasread/bookkeeper/cli/internal/source"
 )
 
-func signedMapping() source.Mapping {
-	return source.Mapping{
+func signedMapping() source.CSV {
+	return source.CSV{
 		Account:     "Assets:Bank:Chequing",
 		Date:        "Date",
 		Description: "Description",
@@ -81,7 +81,7 @@ func TestDebitCreditColumns(t *testing.T) {
 			"2026-03-01,PURCHASE,84.20,\n" +
 			"2026-03-02,DEPOSIT,,1600.00\n")
 
-	m := source.Mapping{
+	m := source.CSV{
 		Account: "Assets:Bank:Chequing", Date: "Date", Description: "Description",
 		Debit: "Debit", Credit: "Credit", DateFormat: "2006-01-02",
 	}

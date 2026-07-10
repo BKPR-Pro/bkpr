@@ -165,6 +165,10 @@ lines normalize, which changes their fingerprints, which silently books a second
 Recording which source read a line makes that diagnosable and bounded, and `transaction.discarded`
 is how a badly-normalized import leaves the books.
 
+A source's identity is its **account**, so `import` names an account rather than a file, and
+importing against an account nobody has taught bookkeeper to read is an error that lists the
+accounts it does know.
+
 ### Nothing has to be acknowledged
 
 There is no `confirmed` event, and there is nothing to clear. Both would build an inbox: a list
@@ -227,13 +231,20 @@ got lost.
 
 ## Usage
 
+`sources load` teaches bookkeeper which accounts exist and how to read their statements:
+
+```sh
+go run ./cli sources load -db books.db -file cli/testdata/sources.json
+# 1 sources: 1 added, 0 changed, 0 removed
+```
+
 `import` records what a statement said. It writes facts, and it is safe to run twice:
 
 ```sh
-go run ./cli import -db books.db -mapping cli/testdata/mapping.json -csv cli/testdata/statement.csv
+go run ./cli import -db books.db -source "Assets:Bank:Chequing" -csv cli/testdata/statement.csv
 # 9 lines read: 9 imported, 0 already in the log
 
-go run ./cli import -db books.db -mapping cli/testdata/mapping.json -csv cli/testdata/statement.csv
+go run ./cli import -db books.db -source "Assets:Bank:Chequing" -csv cli/testdata/statement.csv
 # 9 lines read: 0 imported, 9 already in the log
 ```
 
@@ -306,17 +317,24 @@ ledger -f books.ledger print --uncleared  # empty, and correctly so
 
 ## Configuration
 
-A **mapping** says how one institution's CSV lines up with a transaction. Banks disagree about
-column names, date formats, and whether amounts are one signed column or a debit/credit pair.
+Both files below are editing surfaces. `sources load` and `rules load` record them into the log,
+which is what `import` and `books` read.
+
+A **source** is one account and how to read its statements. Banks disagree about column names, date
+formats, and whether amounts are one signed column or a debit/credit pair. The currency belongs to
+the account, not to whoever runs a render.
 
 ```json
-{
-  "account": "Assets:Bank:Chequing",
-  "date": "Date",
-  "description": "Description",
-  "amount": "Amount",
-  "date_format": "2006-01-02"
-}
+[
+  {
+    "account": "Assets:Bank:Chequing",
+    "currency": "CAD",
+    "date": "Date",
+    "description": "Description",
+    "amount": "Amount",
+    "date_format": "2006-01-02"
+  }
+]
 ```
 
 A **rule** matches a description and supplies a payee, an account to post to, or both. Rules are
@@ -353,14 +371,15 @@ statement line already knows which account it came from, and a line no rule matc
 
 ## Status
 
-Built: the CSV source, the rules engine, the ledger writer, the append-only event log with its
-in-memory and SQLite adapters, `import` plus the transaction projection, and `rules load` plus the
-rule projection. Re-importing an overlapping statement is a proven no-op, two renders of the same
-log are byte-identical, and changing a rule reclassifies history.
+Everything configurable now lives in the log: sources, rules, and transactions. Re-importing an
+overlapping statement is a proven no-op, two renders of the same log are byte-identical, and
+changing a rule reclassifies history.
 
-Sources are still a file rather than events, so nothing yet records which mapping read a line.
-Next, in order: the source events, then `Categorize`, which turns postings into event data. Then
-`Discard`, the model tier, the digest, and the destinations.
+Next, in order: `Categorize`, which turns postings into event data and makes a per-line correction
+possible. Then `Discard`, `Match`, the model tier, the digest, and the destinations.
+
+Known debt: `source.parseCents` routes money through a `float64` on its way to integer cents. It is
+safe at these magnitudes and it is still the wrong shape for a ledger.
 
 ## Development
 

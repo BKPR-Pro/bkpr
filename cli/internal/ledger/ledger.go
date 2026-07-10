@@ -15,8 +15,10 @@ import (
 	"github.com/dallasread/bookkeeper/cli/internal/model"
 )
 
-// WriteAll renders one entry per transaction, in order.
-func WriteAll(w io.Writer, txs []model.Transaction, entries []model.Entry, currency string) error {
+// WriteAll renders one entry per transaction, in order. Each entry is written in the currency of
+// the account its statement came from, which is a fact about the account rather than a choice made
+// at render time.
+func WriteAll(w io.Writer, txs []model.Transaction, entries []model.Entry) error {
 	if len(txs) != len(entries) {
 		return fmt.Errorf("%d transactions but %d entries", len(txs), len(entries))
 	}
@@ -27,14 +29,19 @@ func WriteAll(w io.Writer, txs []model.Transaction, entries []model.Entry, curre
 				return err
 			}
 		}
-		if err := writeEntry(w, tx, entries[i], currency); err != nil {
+		if err := writeEntry(w, tx, entries[i]); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func writeEntry(w io.Writer, tx model.Transaction, e model.Entry, currency string) error {
+func writeEntry(w io.Writer, tx model.Transaction, e model.Entry) error {
+	if tx.Currency == "" {
+		return fmt.Errorf("%s %s: the transaction has no currency", tx.Date.Format("2006/01/02"), e.Payee)
+	}
+	currency := tx.Currency
+
 	// The books are the artifact. An entry whose postings do not account for the whole statement
 	// line would be silently wrong once written, so it never gets written.
 	if !e.Balances(tx) {

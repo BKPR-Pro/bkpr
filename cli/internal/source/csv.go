@@ -17,11 +17,13 @@ import (
 	"github.com/dallasread/bookkeeper/cli/internal/model"
 )
 
-// Mapping describes how one institution's CSV export lines up with a Transaction. Banks disagree
-// about column names, date formats, and whether amounts are one signed column or a debit/credit
-// pair, so this is configuration rather than code.
-type Mapping struct {
+// CSV is one account and how to read its statements. The account is its identity; the currency and
+// the column layout belong to that account, not to whoever runs an import. Banks disagree about
+// column names, date formats, and whether amounts are one signed column or a debit/credit pair, so
+// this is configuration rather than code. A later OFX or aggregator source is a peer of this type.
+type CSV struct {
 	Account     string `json:"account"`     // ledger account this statement belongs to
+	Currency    string `json:"currency"`    // written on every posting drawn from it
 	Date        string `json:"date"`        // header of the date column
 	Description string `json:"description"` // header of the memo column
 	DateFormat  string `json:"date_format"` // Go layout, e.g. "2006-01-02"
@@ -35,9 +37,9 @@ type Mapping struct {
 var notAmount = regexp.MustCompile(`[^0-9.\-]`)
 
 // ReadCSV parses a statement into normalized transactions.
-func ReadCSV(r io.Reader, m Mapping) ([]model.Transaction, error) {
+func ReadCSV(r io.Reader, m CSV) ([]model.Transaction, error) {
 	if m.Amount == "" && m.Debit == "" && m.Credit == "" {
-		return nil, fmt.Errorf("mapping needs either an amount column or a debit/credit pair")
+		return nil, fmt.Errorf("source %s needs either an amount column or a debit/credit pair", m.Account)
 	}
 
 	reader := csv.NewReader(r)
@@ -92,6 +94,7 @@ func ReadCSV(r io.Reader, m Mapping) ([]model.Transaction, error) {
 		txs = append(txs, model.Transaction{
 			ID:          fmt.Sprintf("%s-%d", fingerprint, seen[fingerprint]),
 			Account:     m.Account,
+			Currency:    m.Currency,
 			Date:        date,
 			AmountCents: cents,
 			Description: description,
@@ -103,7 +106,7 @@ func ReadCSV(r io.Reader, m Mapping) ([]model.Transaction, error) {
 
 // indexHeader maps every column the mapping names onto its position, failing loudly when the
 // export does not carry a column we were told to read.
-func indexHeader(header []string, m Mapping) (map[string]int, error) {
+func indexHeader(header []string, m CSV) (map[string]int, error) {
 	positions := map[string]int{}
 	for i, name := range header {
 		positions[strings.TrimSpace(name)] = i
@@ -121,7 +124,7 @@ func indexHeader(header []string, m Mapping) (map[string]int, error) {
 
 // amountCents reads either the signed amount column or the debit/credit pair. Money is integer
 // cents everywhere; floats never touch a ledger.
-func amountCents(raw map[string]string, m Mapping) (int64, error) {
+func amountCents(raw map[string]string, m CSV) (int64, error) {
 	if m.Amount != "" {
 		return parseCents(raw[m.Amount])
 	}

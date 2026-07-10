@@ -33,6 +33,8 @@ func main() {
 	switch os.Args[1] {
 	case "import":
 		err = importStatement(os.Args[2:])
+	case "sources":
+		err = sourceSet(os.Args[2:])
 	case "rules":
 		err = ruleSet(os.Args[2:])
 	case "books":
@@ -52,10 +54,12 @@ func usage() {
 	fmt.Fprint(os.Stderr, `bookkeeper - turn statements into books
 
 usage:
-  bookkeeper import     -db <file> -mapping <file> -csv <file>
-  bookkeeper rules load -db <file> -file <file> [-why <reason>]
-  bookkeeper rules list -db <file>
-  bookkeeper books      -db <file> [-format table|ledger]
+  bookkeeper sources load -db <file> -file <file> [-why <reason>]
+  bookkeeper sources list -db <file>
+  bookkeeper rules   load -db <file> -file <file> [-why <reason>]
+  bookkeeper rules   list -db <file>
+  bookkeeper import       -db <file> -source <account> -csv <file>
+  bookkeeper books        -db <file> [-format table|ledger]
 `)
 }
 
@@ -71,28 +75,61 @@ func openLog(path string) (*eventlog.Log, func() error, error) {
 func importStatement(args []string) error {
 	fs := flag.NewFlagSet("import", flag.ExitOnError)
 	dbPath := fs.String("db", "books.db", "the event log")
-	mappingPath := fs.String("mapping", "", "JSON describing how this bank's CSV columns map onto a transaction")
+	account := fs.String("source", "", "the ledger account this statement belongs to")
 	csvPath := fs.String("csv", "", "CSV statement to read")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *mappingPath == "" || *csvPath == "" {
+	if *account == "" || *csvPath == "" {
 		fs.Usage()
-		return fmt.Errorf("mapping and csv are both required")
+		return fmt.Errorf("source and csv are both required")
 	}
 
-	mapping, err := loadMapping(*mappingPath)
+	log, closeLog, err := openLog(*dbPath)
 	if err != nil {
 		return err
 	}
+	defer closeLog()
+
+	src, err := books.Source(log, *account)
+	if err != nil {
+		return err
+	}
+
 	statement, err := os.Open(*csvPath)
 	if err != nil {
 		return err
 	}
 	defer statement.Close()
 
-	txs, err := source.ReadCSV(statement, mapping)
+	txs, err := source.ReadCSV(statement, src)
 	if err != nil {
+		return err
+	}
+
+	// The actor records which statement reported a line, so a bad source is traceable to the file
+	// that carried it.
+	result, err := books.Import(log, "statement:"+filepath.Base(*csvPath), txs)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("%d lines read: %d imported, %d already in the log\n", len(txs), result.Imported, result.Skipped)
+	return nil
+}
+
+// sourceSet records a sources file into the log, or shows what the log currently says.
+func sourceSet(args []string) error {
+	if len(args) == 0 {
+		usage()
+		return fmt.Errorf("sources needs load or list")
+	}
+
+	fs := flag.NewFlagSet("sources "+args[0], flag.ExitOnError)
+	dbPath := fs.String("db", "books.db", "the event log")
+	filePath := fs.String("file", "", "JSON source set to load")
+	why := fs.String("why", "", "why the sources changed; recorded with the edit")
+	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 
@@ -102,15 +139,48 @@ func importStatement(args []string) error {
 	}
 	defer closeLog()
 
-	// The actor records which statement reported a line, so a bad mapping is traceable to the file
-	// that carried it.
-	result, err := books.Import(log, "statement:"+filepath.Base(*csvPath), txs)
-	if err != nil {
-		return err
-	}
+	switch args[0] {
+	case "list":
+		set, err := books.Sources(log)
+		if err != nil {
+			return err
+		}
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "ACCOUNT\tCURRENCY\tDATE\tDESCRIPTION\tAMOUNT")
+		for _, s := range set {
+			amount := s.Amount
+			if amount == "" {
+				amount = s.Debit + " / " + s.Credit
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", s.Account, s.Currency, s.Date, s.Description, amount)
+		}
+		return w.Flush()
 
-	fmt.Printf("%d lines read: %d imported, %d already in the log\n", len(txs), result.Imported, result.Skipped)
-	return nil
+	case "load":
+		if *filePath == "" {
+			fs.Usage()
+			return fmt.Errorf("file is required")
+		}
+		var want []source.CSV
+		body, err := os.ReadFile(*filePath)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(body, &want); err != nil {
+			return fmt.Errorf("%s: %w", *filePath, err)
+		}
+		got, err := books.LoadSources(log, "human", *why, want)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%d sources: %d added, %d changed, %d removed\n",
+			len(want), got.Added, got.Changed, got.Removed)
+		return nil
+
+	default:
+		usage()
+		return fmt.Errorf("unknown sources subcommand %q", args[0])
+	}
 }
 
 // ruleSet records a rules file into the log, or shows what the log currently says.
@@ -174,7 +244,6 @@ func renderBooks(args []string) error {
 	fs := flag.NewFlagSet("books", flag.ExitOnError)
 	dbPath := fs.String("db", "books.db", "the event log")
 	format := fs.String("format", "table", "output format: table or ledger")
-	currency := fs.String("currency", "CAD", "currency written on ledger postings")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -208,22 +277,10 @@ func renderBooks(args []string) error {
 	case "table":
 		return report(os.Stdout, txs, entries)
 	case "ledger":
-		return ledger.WriteAll(os.Stdout, txs, entries, *currency)
+		return ledger.WriteAll(os.Stdout, txs, entries)
 	default:
 		return fmt.Errorf("unknown format %q: want table or ledger", *format)
 	}
-}
-
-func loadMapping(path string) (source.Mapping, error) {
-	var m source.Mapping
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return m, err
-	}
-	if err := json.Unmarshal(body, &m); err != nil {
-		return m, fmt.Errorf("%s: %w", path, err)
-	}
-	return m, nil
 }
 
 func report(out *os.File, txs []model.Transaction, entries []model.Entry) error {

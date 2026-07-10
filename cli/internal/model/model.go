@@ -24,6 +24,7 @@ const Uncategorized = "Uncategorized"
 type Transaction struct {
 	ID          string            // stable fingerprint of this line
 	Account     string            // ledger account the statement belongs to, e.g. Assets:Bank:Chequing
+	Currency    string            // the account's currency, not a choice made at render time
 	Date        time.Time         // when the line posted
 	AmountCents int64             // signed; negative is money out
 	Description string            // the raw memo the bank gave us

@@ -15,7 +15,7 @@ func on(day int) time.Time { return time.Date(2026, 3, day, 0, 0, 0, 0, time.UTC
 
 func line(id string, day int, cents int64, description string) model.Transaction {
 	return model.Transaction{
-		ID: id, Account: "Assets:Bank:Chequing", Date: on(day),
+		ID: id, Account: "Assets:Bank:Chequing", Currency: "CAD", Date: on(day),
 		AmountCents: cents, Description: description,
 		Raw: map[string]string{"Description": description},
 	}
@@ -108,6 +108,8 @@ func TestTransactionsFoldBackWithEveryFieldIntact(t *testing.T) {
 		t.Errorf("id = %q", got.ID)
 	case got.Account != want.Account:
 		t.Errorf("account = %q", got.Account)
+	case got.Currency != want.Currency:
+		t.Errorf("currency = %q; the ledger writer has nothing to post without it", got.Currency)
 	case !got.Date.Equal(want.Date):
 		t.Errorf("date = %s", got.Date)
 	case got.AmountCents != want.AmountCents:

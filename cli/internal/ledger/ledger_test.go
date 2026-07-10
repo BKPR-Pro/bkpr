@@ -16,7 +16,7 @@ func on(day int) time.Time {
 
 func chequing(day int, cents int64, description string) model.Transaction {
 	return model.Transaction{
-		Date: on(day), AmountCents: cents,
+		Date: on(day), AmountCents: cents, Currency: "CAD",
 		Description: description, Account: "Assets:Bank:Chequing",
 	}
 }
@@ -24,7 +24,7 @@ func chequing(day int, cents int64, description string) model.Transaction {
 func write(t *testing.T, tx model.Transaction, e model.Entry) string {
 	t.Helper()
 	var buf bytes.Buffer
-	if err := ledger.WriteAll(&buf, []model.Transaction{tx}, []model.Entry{e}, "CAD"); err != nil {
+	if err := ledger.WriteAll(&buf, []model.Transaction{tx}, []model.Entry{e}); err != nil {
 		t.Fatalf("WriteAll: %v", err)
 	}
 	return buf.String()
@@ -131,7 +131,7 @@ func TestPostingsThatDoNotAccountForTheLineAreRefused(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := ledger.WriteAll(&buf, []model.Transaction{tx}, []model.Entry{e}, "CAD")
+	err := ledger.WriteAll(&buf, []model.Transaction{tx}, []model.Entry{e})
 	if err == nil {
 		t.Fatalf("wrote an unbalanced entry:\n%s", buf.String())
 	}
@@ -148,7 +148,7 @@ func TestEntriesAreSeparatedByBlankLines(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := ledger.WriteAll(&buf, txs, entries, "CAD"); err != nil {
+	if err := ledger.WriteAll(&buf, txs, entries); err != nil {
 		t.Fatal(err)
 	}
 
@@ -157,21 +157,43 @@ func TestEntriesAreSeparatedByBlankLines(t *testing.T) {
 	}
 }
 
-func TestCurrencyIsConfigurable(t *testing.T) {
-	tx := chequing(1, -100, "A")
-	e := model.Entry{Payee: "A", Postings: []model.Posting{{Account: "Expenses:X", AmountCents: 100}}}
+// Currency belongs to the account the statement came from, not to whoever ran the render. Two
+// accounts in different currencies write different postings in one pass.
+func TestEachEntryIsWrittenInItsOwnAccountsCurrency(t *testing.T) {
+	usd := model.Transaction{
+		Date: on(1), AmountCents: -100, Currency: "USD",
+		Description: "B", Account: "Assets:Bank:Operating USD",
+	}
+	txs := []model.Transaction{chequing(1, -100, "A"), usd}
+	entries := []model.Entry{
+		{Payee: "A", Postings: []model.Posting{{Account: "Expenses:X", AmountCents: 100}}},
+		{Payee: "B", Postings: []model.Posting{{Account: "Expenses:X", AmountCents: 100}}},
+	}
 
 	var buf bytes.Buffer
-	if err := ledger.WriteAll(&buf, []model.Transaction{tx}, []model.Entry{e}, "USD"); err != nil {
+	if err := ledger.WriteAll(&buf, txs, entries); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(buf.String(), "1.00 USD") {
-		t.Errorf("want USD:\n%s", buf.String())
+
+	got := buf.String()
+	if !strings.Contains(got, "1.00 CAD") || !strings.Contains(got, "1.00 USD") {
+		t.Errorf("want one posting in each currency:\n%s", got)
+	}
+}
+
+// A currency-less transaction would write "84.20 " with a trailing space, which is not a ledger.
+func TestATransactionWithoutACurrencyIsRefused(t *testing.T) {
+	tx := chequing(1, -100, "A")
+	tx.Currency = ""
+	e := model.Entry{Payee: "A", Postings: []model.Posting{{Account: "Expenses:X", AmountCents: 100}}}
+
+	if err := ledger.WriteAll(&bytes.Buffer{}, []model.Transaction{tx}, []model.Entry{e}); err == nil {
+		t.Fatal("wrote an entry with no currency")
 	}
 }
 
 func TestMismatchedLengthsIsAnError(t *testing.T) {
-	if err := ledger.WriteAll(&bytes.Buffer{}, []model.Transaction{{}}, nil, "CAD"); err == nil {
+	if err := ledger.WriteAll(&bytes.Buffer{}, []model.Transaction{{}}, nil); err == nil {
 		t.Fatal("expected an error when entries do not line up with transactions")
 	}
 }
