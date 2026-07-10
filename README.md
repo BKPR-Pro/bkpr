@@ -249,8 +249,8 @@ response is the part that gets lost. It is designed for and not built.)
 
 ## Usage
 
-`bk` is the command-line wrapper; `go install github.com/dallasread/bookkeeper/cmd/bk@latest` builds
-it, or run it from a checkout with `go run ./cmd/bk`.
+`bk` is the command-line wrapper; `go build -o bk ./cli` builds it, or run it from a checkout with
+`go run ./cli`.
 
 `init` creates a set of books in the current directory, marked by a `.bookkeeper` directory the way
 a git repository is marked by `.git`. Every other command finds it by walking up, so you can run
@@ -494,7 +494,7 @@ books/     the commands and folds: Import, AddRule, Categorize, Discard, Ledger,
 rules/     the deterministic categorization engine
 source/    connectors that turn the outside world into transactions (CSV today)
 store/     locating and opening a .bookkeeper book of record
-cmd/bk/    the command-line wrapper
+cli/       the command-line wrapper
 ```
 
 Every package is importable, so another program can drive the books directly:
@@ -512,5 +512,5 @@ txs, entries, _ := books.Ledger(s.Log)
 go test ./...
 go vet ./...
 gofmt -l .
-go build ./cmd/bk
+go build ./cli
 ```
