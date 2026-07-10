@@ -1,0 +1,7 @@
+{
+  "account": "Assets:Bank:Chequing",
+  "date": "Date",
+  "description": "Description",
+  "amount": "Amount",
+  "date_format": "2006-01-02"
+}

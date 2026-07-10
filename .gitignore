@@ -1,0 +1,11 @@
+# Build output
+bin/
+
+# Local config and secrets
+*.local.json
+.env
+
+# SQLite (later slices)
+*.db
+*.db-wal
+*.db-shm
