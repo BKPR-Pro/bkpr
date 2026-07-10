@@ -52,6 +52,28 @@ DATE        PAYEE                AMOUNT   CATEGORY
 9 lines: 8 categorized, 1 need review
 ```
 
+## Books
+
+`-format ledger` emits plain-text double-entry entries. Lines drawn from real bank data are
+cleared (`*`). A line nothing could categorize is written as pending (`!`) against a placeholder
+account, carrying its reason as a comment, so the books stay complete and the open questions are
+trivial to find. Nothing is ever guessed at.
+
+```sh
+go run ./cli categorize \
+  -mapping cli/testdata/mapping.json \
+  -rules   cli/testdata/rules.json \
+  -csv     cli/testdata/statement.csv \
+  -format  ledger > statement.ledger
+```
+
+The output is a real ledger file, so the usual tools work:
+
+```sh
+ledger -f statement.ledger bal              # balances, which sum to zero
+ledger -f statement.ledger print --uncleared # only the lines still needing an answer
+```
+
 ## Configuration
 
 A **mapping** says how one institution's CSV lines up with a transaction. Banks disagree about

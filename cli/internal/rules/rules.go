@@ -88,13 +88,15 @@ func (e *Engine) Apply(tx model.Transaction) model.Decision {
 		}
 	}
 
-	switch {
-	case d.Category == "":
+	// The transaction already knows which account its statement came from, so that is the natural
+	// balancing posting. A rule only needs to name one when the entry is a transfer somewhere else.
+	if d.Balance == "" {
+		d.Balance = tx.Account
+	}
+
+	if d.Category == "" {
 		d.NeedsReview = true
 		d.Reason = "no rule supplied a category"
-	case d.Balance == "":
-		d.NeedsReview = true
-		d.Reason = "no rule supplied a balancing account"
 	}
 	return d
 }

@@ -98,6 +98,21 @@ func TestUncategorizedNeedsReview(t *testing.T) {
 	}
 }
 
+// A statement line already knows its own account, so a rule set needs no catch-all just to name
+// the balancing posting. Rules only override it for transfers.
+func TestBalanceDefaultsToTheTransactionsOwnAccount(t *testing.T) {
+	e := engine(t, rules.Rule{Match: `acme`, Category: "Expenses:Repairs"})
+
+	got := e.Apply(tx("ACME HARDWARE"))
+
+	if got.Balance != "Liabilities:Card:Visa" {
+		t.Errorf("balance = %q, want the transaction's own account", got.Balance)
+	}
+	if got.NeedsReview {
+		t.Errorf("unexpected review: %s", got.Reason)
+	}
+}
+
 func TestInvalidRegexIsRejected(t *testing.T) {
 	if _, err := rules.New([]rules.Rule{{Match: `([`}}); err == nil {
 		t.Fatal("expected an error for an invalid regex")

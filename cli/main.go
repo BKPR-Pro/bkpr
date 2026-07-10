@@ -13,6 +13,7 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/dallasread/bookkeepper/cli/internal/ledger"
 	"github.com/dallasread/bookkeepper/cli/internal/model"
 	"github.com/dallasread/bookkeepper/cli/internal/rules"
 	"github.com/dallasread/bookkeepper/cli/internal/source"
@@ -49,6 +50,8 @@ func categorize(args []string) error {
 	mappingPath := fs.String("mapping", "", "JSON describing how this bank's CSV columns map onto a transaction")
 	rulesPath := fs.String("rules", "", "JSON rule set")
 	csvPath := fs.String("csv", "", "CSV statement to read")
+	format := fs.String("format", "table", "output format: table or ledger")
+	currency := fs.String("currency", "CAD", "currency written on ledger postings")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -76,7 +79,19 @@ func categorize(args []string) error {
 		return err
 	}
 
-	return report(os.Stdout, txs, engine)
+	decisions := make([]model.Decision, len(txs))
+	for i, tx := range txs {
+		decisions[i] = engine.Apply(tx)
+	}
+
+	switch *format {
+	case "table":
+		return report(os.Stdout, txs, decisions)
+	case "ledger":
+		return ledger.WriteAll(os.Stdout, txs, decisions, *currency)
+	default:
+		return fmt.Errorf("unknown format %q: want table or ledger", *format)
+	}
 }
 
 func loadMapping(path string) (source.Mapping, error) {
@@ -91,13 +106,13 @@ func loadMapping(path string) (source.Mapping, error) {
 	return m, nil
 }
 
-func report(out *os.File, txs []model.Transaction, engine *rules.Engine) error {
+func report(out *os.File, txs []model.Transaction, decisions []model.Decision) error {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "DATE\tPAYEE\tAMOUNT\tCATEGORY")
 
 	var reviewed int
-	for _, tx := range txs {
-		d := engine.Apply(tx)
+	for i, tx := range txs {
+		d := decisions[i]
 
 		payee := d.Payee
 		if payee == "" {
