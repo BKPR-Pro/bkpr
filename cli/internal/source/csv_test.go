@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dallasread/bookkeepper/cli/internal/source"
+	"github.com/dallasread/bookkeeper/cli/internal/source"
 )
 
 func signedMapping() source.Mapping {

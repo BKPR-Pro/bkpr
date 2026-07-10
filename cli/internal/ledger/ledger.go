@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/dallasread/bookkeepper/cli/internal/model"
+	"github.com/dallasread/bookkeeper/cli/internal/model"
 )
 
 // UnknownAccount holds the amount for a line awaiting review, so the entry still balances.

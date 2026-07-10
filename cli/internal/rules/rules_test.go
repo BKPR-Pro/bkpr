@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dallasread/bookkeepper/cli/internal/model"
-	"github.com/dallasread/bookkeepper/cli/internal/rules"
+	"github.com/dallasread/bookkeeper/cli/internal/model"
+	"github.com/dallasread/bookkeeper/cli/internal/rules"
 )
 
 func tx(description string) model.Transaction {

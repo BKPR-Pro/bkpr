@@ -1,4 +1,4 @@
-// Command bookkeepper categorizes bank and card statements into a set of books.
+// Command bookkeeper categorizes bank and card statements into a set of books.
 //
 // This slice covers the deterministic tier: read a CSV statement, apply an ordered rule set, and
 // report what each line categorizes to. Lines no rule can categorize are surfaced rather than
@@ -13,10 +13,10 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/dallasread/bookkeepper/cli/internal/ledger"
-	"github.com/dallasread/bookkeepper/cli/internal/model"
-	"github.com/dallasread/bookkeepper/cli/internal/rules"
-	"github.com/dallasread/bookkeepper/cli/internal/source"
+	"github.com/dallasread/bookkeeper/cli/internal/ledger"
+	"github.com/dallasread/bookkeeper/cli/internal/model"
+	"github.com/dallasread/bookkeeper/cli/internal/rules"
+	"github.com/dallasread/bookkeeper/cli/internal/source"
 )
 
 func main() {
@@ -28,7 +28,7 @@ func main() {
 	switch os.Args[1] {
 	case "categorize":
 		if err := categorize(os.Args[2:]); err != nil {
-			fmt.Fprintf(os.Stderr, "bookkeepper: %v\n", err)
+			fmt.Fprintf(os.Stderr, "bookkeeper: %v\n", err)
 			os.Exit(1)
 		}
 	default:
@@ -38,10 +38,10 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `bookkeepper - categorize statements into books
+	fmt.Fprint(os.Stderr, `bookkeeper - categorize statements into books
 
 usage:
-  bookkeepper categorize -mapping <file> -rules <file> -csv <file>
+  bookkeeper categorize -mapping <file> -rules <file> -csv <file>
 `)
 }
 

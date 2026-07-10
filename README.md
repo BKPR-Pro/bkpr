@@ -1,4 +1,4 @@
-# bookkeepper
+# bookkeeper
 
 Turns bank and card statements into a set of books, and asks you about the few lines it cannot
 work out on its own.

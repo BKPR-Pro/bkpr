@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dallasread/bookkeepper/cli/internal/model"
+	"github.com/dallasread/bookkeeper/cli/internal/model"
 )
 
 // Mapping describes how one institution's CSV export lines up with a Transaction. Banks disagree

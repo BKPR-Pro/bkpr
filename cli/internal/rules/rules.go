@@ -10,7 +10,7 @@ import (
 	"os"
 	"regexp"
 
-	"github.com/dallasread/bookkeepper/cli/internal/model"
+	"github.com/dallasread/bookkeeper/cli/internal/model"
 )
 
 // Rule matches a transaction's description and supplies any subset of payee, category, and
