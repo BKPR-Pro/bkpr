@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/rentapp"
+	"github.com/dallasread/bookkeeper/lib/adapters/rentapp"
 )
 
 // The rent app is a spoke: bookkeeper pulls the rent roll to learn what is expected, and pushes

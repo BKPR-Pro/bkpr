@@ -270,13 +270,15 @@ bk sources add "Assets:Bank:Chequing" -currency CAD -amount Amount
 bk sources add "Liabilities:Card:Visa" -currency CAD -debit Charge -credit Payment -date Posted
 ```
 
-`import` records what a statement said. It writes facts, and it is safe to run twice:
+`import` records what a file said. It writes facts, and it is safe to run twice. A CSV is one
+account's statement, so it needs `-source` to say which; a ledger file names its own accounts and
+does not.
 
 ```sh
-bk import -source "Assets:Bank:Chequing" -csv statements/march.csv
+bk import statements/march.csv -source "Assets:Bank:Chequing"
 # 9 lines read: 9 imported, 0 already in the log
 
-bk import -source "Assets:Bank:Chequing" -csv statements/march.csv
+bk import statements/march.csv -source "Assets:Bank:Chequing"
 # 9 lines read: 0 imported, 9 already in the log
 ```
 
@@ -485,17 +487,18 @@ account can hold shares against cash) are a later slice; the `Amount` type is re
 
 ## Layout
 
-The core is a library; the CLI is a thin wrapper over it.
+Ports and adapters: a domain core, with the outside world reached only through adapters.
 
 ```text
-lib/model/     the normalized shapes: Amount, Transaction, Posting, Entry
-lib/eventlog/  the append-only log and its storage adapters
-lib/books/     the commands and folds: Import, AddRule, Categorize, Discard, Ledger, ...
-lib/rules/     the deterministic categorization engine
-lib/source/    connectors that turn the outside world into transactions (CSV today)
-lib/ledger/    renders the books as a plain-text double-entry artifact
-lib/store/     locating and opening a .bookkeeper book of record
-cli/           the command-line wrapper
+lib/model/            the normalized shapes: Amount, Transaction, Posting, Entry
+lib/books/            the commands and folds: Import, AddRule, Categorize, Discard, Ledger, ...
+lib/rules/            the deterministic categorization engine
+lib/eventlog/         the append-only log and its storage
+lib/store/            locating and opening a .bookkeeper book of record
+lib/adapters/source/  reads statements from the outside world (CSV today)
+lib/adapters/ledger/  renders the books as a plain-text double-entry artifact
+lib/adapters/rentapp/ pulls the rent roll and pushes recorded payments to the rent app
+cli/                  the command-line wrapper (the driving adapter)
 ```
 
 Every package is importable, so another program can drive the books directly:
@@ -506,6 +509,8 @@ defer s.Close()
 books.Import(s.Log, "statement:march", txs)
 txs, entries, _ := books.Ledger(s.Log)
 ```
+
+`bk docs` prints the full command reference, so the CLI is self-documenting.
 
 ## Development
 

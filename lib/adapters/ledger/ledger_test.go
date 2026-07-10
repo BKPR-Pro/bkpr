@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bookkeeper/lib/ledger"
+	"github.com/dallasread/bookkeeper/lib/adapters/ledger"
 	"github.com/dallasread/bookkeeper/lib/model"
 )
 

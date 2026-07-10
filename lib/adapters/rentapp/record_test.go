@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/rentapp"
+	"github.com/dallasread/bookkeeper/lib/adapters/rentapp"
 )
 
 // A recorded rent payment is pushed to the lease's rent-roll endpoint, carrying the real cleared

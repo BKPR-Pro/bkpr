@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/dallasread/bookkeeper/lib/adapters/source"
 	"github.com/dallasread/bookkeeper/lib/eventlog"
-	"github.com/dallasread/bookkeeper/lib/source"
 )
 
 // CollectionSource is keyed by the ledger account, which is a source's identity. A source says how

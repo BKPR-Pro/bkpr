@@ -10,17 +10,18 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/dallasread/bookkeeper/lib/adapters/ledger"
+	"github.com/dallasread/bookkeeper/lib/adapters/source"
 	"github.com/dallasread/bookkeeper/lib/books"
 	"github.com/dallasread/bookkeeper/lib/eventlog"
-	"github.com/dallasread/bookkeeper/lib/ledger"
 	"github.com/dallasread/bookkeeper/lib/model"
 	"github.com/dallasread/bookkeeper/lib/rules"
-	"github.com/dallasread/bookkeeper/lib/source"
 	"github.com/dallasread/bookkeeper/lib/store"
 )
 
@@ -46,6 +47,10 @@ func main() {
 		err = discard(os.Args[2:])
 	case "books":
 		err = renderBooks(os.Args[2:])
+	case "docs":
+		docs(os.Stdout)
+	case "help", "-h", "--help":
+		usage()
 	default:
 		usage()
 		os.Exit(2)
@@ -61,10 +66,11 @@ func usage() {
 	fmt.Fprint(os.Stderr, `bookkeeper - turn statements into books
 
 Every command finds the nearest .bookkeeper directory by walking up, as git does.
+Run "bookkeeper docs" for the full reference.
 
 usage:
   bookkeeper init         [dir]
-  bookkeeper sources add  <account> -currency <c> [-date <col> -description <col> -amount <col> | -debit <col> -credit <col>] [-date-format <layout>]
+  bookkeeper sources add  <account> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
   bookkeeper sources rm   <account>
   bookkeeper sources list
   bookkeeper rules   add  -match <re> -category <account> [-payee <name>] [-before <re>]
@@ -72,10 +78,63 @@ usage:
   bookkeeper rules   rm   -match <re>
   bookkeeper rules   mv   -match <re> [-before <re>]
   bookkeeper rules   list
-  bookkeeper import       -source <account> -csv <file>
+  bookkeeper import       <file> [-source <account>]
   bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>]
   bookkeeper discard      -tx <fingerprint> [-why <reason>]
   bookkeeper books        [-format table|ledger] [-stdout]
+  bookkeeper docs
+`)
+}
+
+// docs prints the full command reference, so the CLI is self-documenting.
+func docs(w io.Writer) {
+	fmt.Fprint(w, `bookkeeper - turn bank and card statements into a plain-text double-entry ledger.
+
+A set of books lives in a .bookkeeper directory, found by walking up from the current
+directory the way git finds .git. The log inside it (log.jsonl) is the book of record;
+everything else, including the ledger artifact, is a fold over it and is regenerated.
+
+SETUP
+  init [dir]
+      Create a set of books in dir (default: here).
+
+  sources add <account> -currency <c> (-amount <col> | -debit <col> -credit <col>)
+              [-date <col>] [-description <col>] [-date-format <layout>]
+      Teach bookkeeper how to read one account's statements. An upsert keyed by the
+      account: run again to change how it is read. -date-format is a Go layout, e.g.
+      2006-01-02. Default columns: Date, Description.
+  sources rm <account>            Forget how to read an account.
+  sources list                    Show the known sources.
+
+RULES  (deterministic categorization; first matching rule wins per field)
+  rules add -match <re> -category <account> [-payee <name>] [-before <re>]
+      Add a rule. Order decides which of two matching rules wins; a new rule lands last
+      unless -before places it ahead of another. Account paths are free-form and may stop
+      at Uncategorized wherever knowledge runs out.
+  rules set -match <re> [-category <account>] [-payee <name>] [-why <reason>]
+      Change an existing rule; only the fields you name change. This reclassifies every
+      past line the rule matched, so it takes a reason.
+  rules rm  -match <re>           Remove a rule.
+  rules mv  -match <re> [-before <re>]   Reorder a rule (-before omitted moves it last).
+  rules list                      Show the rules in order.
+
+BOOKKEEPING
+  import <file> [-source <account>]
+      Import transactions. A CSV is one account's statement and needs -source; a ledger
+      file names its own accounts and does not.
+  categorize -tx <fingerprint> (-category <account> | -post <account>=<amount> ...)
+             [-payee <name>] [-why <reason>]
+      Assert the postings for one line, overriding the rule for that line only. Use -post
+      more than once to split one charge across accounts.
+  discard -tx <fingerprint> [-why <reason>]
+      Drop a bad import from the books. The imported fact stays in the log; a later fact
+      supersedes it.
+  books [-format table|ledger] [-stdout]
+      Fold the log into a table (default), or regenerate .bookkeeper/books.ledger. -stdout
+      writes the ledger to standard output instead of the store.
+
+Fingerprints come from the log; find an uncategorized line's fingerprint there to
+categorize it. See the README for the design.
 `)
 }
 
@@ -109,16 +168,31 @@ func firstArg(args []string, desc string) (string, []string, error) {
 	return args[0], args[1:], nil
 }
 
+// importStatement reads transactions from a file into the log. The file is named positionally, and
+// its format is the file's business rather than a flag's: a CSV is one account's statement and
+// needs -source to say which account, while a ledger file names its own accounts and does not.
 func importStatement(args []string) error {
-	fs := flag.NewFlagSet("import", flag.ExitOnError)
-	account := fs.String("source", "", "the ledger account this statement belongs to")
-	csvPath := fs.String("csv", "", "CSV statement to read")
-	if err := fs.Parse(args); err != nil {
+	path, rest, err := firstArg(args, "the file to import")
+	if err != nil {
 		return err
 	}
-	if *account == "" || *csvPath == "" {
-		fs.Usage()
-		return fmt.Errorf("source and csv are both required")
+	fs := flag.NewFlagSet("import", flag.ExitOnError)
+	account := fs.String("source", "", "for a CSV, the ledger account this statement belongs to")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+
+	switch ext := strings.ToLower(filepath.Ext(path)); ext {
+	case ".csv":
+		return importCSV(path, *account)
+	default:
+		return fmt.Errorf("import: don't know how to read %q; CSV (.csv) is supported, ledger files are coming", path)
+	}
+}
+
+func importCSV(path, account string) error {
+	if account == "" {
+		return fmt.Errorf("-source is required for a CSV: which account's statement is this?")
 	}
 
 	s, err := store.Open(".")
@@ -128,12 +202,12 @@ func importStatement(args []string) error {
 	defer s.Close()
 	log := s.Log
 
-	src, err := books.Source(log, *account)
+	src, err := books.Source(log, account)
 	if err != nil {
 		return err
 	}
 
-	statement, err := os.Open(*csvPath)
+	statement, err := os.Open(path)
 	if err != nil {
 		return err
 	}
@@ -146,7 +220,7 @@ func importStatement(args []string) error {
 
 	// The actor records which statement reported a line, so a bad source is traceable to the file
 	// that carried it.
-	result, err := books.Import(log, "statement:"+filepath.Base(*csvPath), txs)
+	result, err := books.Import(log, "statement:"+filepath.Base(path), txs)
 	if err != nil {
 		return err
 	}

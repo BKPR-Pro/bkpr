@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dallasread/bookkeeper/lib/adapters/source"
 	"github.com/dallasread/bookkeeper/lib/books"
 	"github.com/dallasread/bookkeeper/lib/eventlog"
-	"github.com/dallasread/bookkeeper/lib/source"
 )
 
 func chequing() source.CSV {
