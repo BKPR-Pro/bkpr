@@ -186,10 +186,9 @@ A command captures one intent, guards a precondition, and emits one event. `Impo
 
 `TrackOnce` appends a fact that can only be true once and reports `ErrAlreadyTracked` otherwise,
 which is how re-importing an overlapping statement becomes a no-op rather than a second rent
-payment. `Track` appends a fact that may recur. Which facts are once-only is the caller's
-business, so storage carries no domain knowledge: ordinary events leave `once_key` NULL, SQLite
-counts NULLs as distinct in a unique index, and only once-only events collide. The idempotency
-invariant is physical rather than remembered.
+payment. `Track` appends a fact that may recur. Which facts are once-only is the caller's business,
+so storage carries no domain knowledge: it holds the set of once-only keys it has seen and refuses
+a repeat.
 
 Rules do not interleave with transactions in one chronological fold. If they did, a rule added in
 June would not reach a transaction imported in March, and fixing a rule would not fix history,
@@ -197,16 +196,30 @@ which is the whole point of regenerating. So it is two folds over one log: rule 
 current rule set, that set categorizes every transaction, and assertions keyed to a fingerprint
 override the result.
 
-### Storage
+### Storage: one JSON object per line, in git
 
-SQLite, because this is money. An interrupted cron run must not tear a line of the log in half,
-and fsync discipline for a book of record is not worth hand-rolling. `synchronous` is raised to
-`FULL`, because WAL's default trades away the last commit on power loss, which is the wrong trade
-here. [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) is pure Go, so deployment is
-still a single cross-compiled binary.
+The log is a `log.jsonl` file: one event per line, append-only, committed to git. That is the whole
+store. It is small (a set of books reaches a few hundred lines a year), so folding the file on
+every run costs nothing, and being text is what makes the rest true:
 
-Storage sits behind a small interface. The tests fold over an in-memory adapter; the file holds
-the books.
+- **Git is the backup and the audit trail.** A signed history over an append-only log is a
+  tamper-evident book of record. `bk log` is `cat`; restore is `git checkout`.
+- **The append-only invariant is git-checkable.** Every write appends, so `git diff log.jsonl`
+  should always be a pure addition. A diff that changes or deletes an existing line means something
+  rewrote history, and you would see it in review. Git becomes a continuous check on the one
+  property the whole design rests on.
+
+Durability is bought without a database. Each append is flushed and `fsync`ed before the caller is
+told the fact is recorded, so a fact survives a crash. Because the log only ever grows, a crash can
+only tear the *last* line; on open, a final line that will not parse is dropped and the file
+healed, while a bad line anywhere earlier is refused as corruption rather than guessed at. A single
+writer is held by an advisory lock, which is what lets the once-only check trust its in-memory set.
+
+The one guarantee this gives up against a database is that uniqueness is enforced by the writer
+rather than by the storage engine. The lock closes that: no second process can append behind the
+first's back. It is a trade taken deliberately, to keep the book of record readable, diffable, and
+dependency-free (the binary is stdlib only). Storage sits behind a small interface, and the tests
+fold over an in-memory adapter.
 
 ## Three tiers, and a model that never writes
 
@@ -231,20 +244,29 @@ got lost.
 
 ## Usage
 
+`init` creates a set of books in the current directory, marked by a `.bookkeeper` directory the way
+a git repository is marked by `.git`. Every other command finds it by walking up, so you can run
+them from anywhere inside your project.
+
+```sh
+bk init
+# Initialized a book of record in /your/project/.bookkeeper
+```
+
 `sources load` teaches bookkeeper which accounts exist and how to read their statements:
 
 ```sh
-go run ./cli sources load -db books.db -file cli/testdata/sources.json
+bk sources load -file sources.json
 # 1 sources: 1 added, 0 changed, 0 removed
 ```
 
 `import` records what a statement said. It writes facts, and it is safe to run twice:
 
 ```sh
-go run ./cli import -db books.db -source "Assets:Bank:Chequing" -csv cli/testdata/statement.csv
+bk import -source "Assets:Bank:Chequing" -csv statements/march.csv
 # 9 lines read: 9 imported, 0 already in the log
 
-go run ./cli import -db books.db -source "Assets:Bank:Chequing" -csv cli/testdata/statement.csv
+bk import -source "Assets:Bank:Chequing" -csv statements/march.csv
 # 9 lines read: 0 imported, 9 already in the log
 ```
 
@@ -252,17 +274,18 @@ go run ./cli import -db books.db -source "Assets:Bank:Chequing" -csv cli/testdat
 unchanged file records nothing:
 
 ```sh
-go run ./cli rules load -db books.db -file cli/testdata/rules.json
+bk rules load -file rules.json
 # 8 rules: 8 added, 0 changed, 0 removed, 0 moved
 
-go run ./cli rules load -db books.db -file cli/testdata/rules.json
+bk rules load -file rules.json
 # 8 rules: 0 added, 0 changed, 0 removed, 0 moved
 ```
 
-`books` folds the log back out. It writes nothing, so run it as often as you like:
+`books` folds the log into a table, or regenerates the ledger artifact in the store:
 
 ```sh
-go run ./cli books -db books.db
+bk books                 # a table, to read
+bk books -format ledger  # regenerates .bookkeeper/books.ledger
 ```
 
 ```text
@@ -280,26 +303,32 @@ DATE        PAYEE                AMOUNT   POSTS TO
 Learn that every hardware receipt was Unit 1, and say so once:
 
 ```sh
-go run ./cli rules load -db books.db -file rules.json --why "the receipts were all Unit 1"
+bk rules load -file rules.json --why "the receipts were all Unit 1"
 # 8 rules: 0 added, 1 changed, 0 removed, 0 moved
+bk books -format ledger
 ```
 
-Regenerate, and the books change by exactly one line per affected transaction:
+The books change by exactly one line per affected transaction, and so does the log, by exactly one
+appended event:
 
 ```diff
+# books.ledger
 -  Expenses:Real Estate:Materials:Uncategorized  84.20 CAD
 +  Expenses:Real Estate:Materials:45 Sample Avenue:Unit 1  84.20 CAD
+# log.jsonl
++{"collection":"rule","record_id":"acme hardware","action":"changed", ...}
 ```
 
 Twelve months of hardware charges would have moved together, from one edit. That is what the log
-buys.
+buys, and committing both files is how the change reviews.
 
 ## Books
 
-`-format ledger` emits plain-text double-entry entries.
+`-format ledger` regenerates `.bookkeeper/books.ledger`, the plain-text double-entry artifact.
 
 ```sh
-go run ./cli books -db books.db -format ledger > books.ledger
+bk books -format ledger           # into the store
+bk books -format ledger -stdout   # to stdout, to pipe
 ```
 
 Every entry is **cleared** (`*`), because every line came off a bank statement and so has cleared
@@ -371,12 +400,15 @@ statement line already knows which account it came from, and a line no rule matc
 
 ## Status
 
-Everything configurable now lives in the log: sources, rules, and transactions. Re-importing an
-overlapping statement is a proven no-op, two renders of the same log are byte-identical, and
-changing a rule reclassifies history.
+Everything lives in a `.bookkeeper` directory found by walking up, the way git finds `.git`. The
+log is `log.jsonl`, committed, one event per line; the ledger is its committed artifact.
+Re-importing an overlapping statement is a proven no-op, two renders of the same log are
+byte-identical, changing a rule reclassifies history in one appended event, and a wrong working
+directory is refused rather than turned into a new empty book of record.
 
 Next, in order: `Categorize`, which turns postings into event data and makes a per-line correction
-possible. Then `Discard`, `Match`, the model tier, the digest, and the destinations.
+possible. Then `Discard`, `Match`, the CSV views (`bk transactions --csv` and friends, for the
+tabular parts of the data), the model tier, the digest, and the destinations.
 
 Known debt: `source.parseCents` routes money through a `float64` on its way to integer cents. It is
 safe at these magnitudes and it is still the wrong shape for a ledger.

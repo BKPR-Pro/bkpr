@@ -11,7 +11,7 @@ import (
 )
 
 // Every storage adapter answers to the same suite. The in-memory one is what the rest of the
-// tests use; the SQLite one is what actually holds the books.
+// tests use; the JSONL one is what actually holds the books.
 func eachStorage(t *testing.T, fn func(t *testing.T, s eventlog.Storage)) {
 	t.Helper()
 
@@ -19,8 +19,8 @@ func eachStorage(t *testing.T, fn func(t *testing.T, s eventlog.Storage)) {
 		fn(t, eventlog.NewMemory())
 	})
 
-	t.Run("sqlite", func(t *testing.T) {
-		s, err := eventlog.OpenSQLite(filepath.Join(t.TempDir(), "books.db"))
+	t.Run("jsonl", func(t *testing.T) {
+		s, err := eventlog.OpenJSONL(filepath.Join(t.TempDir(), "log.jsonl"))
 		if err != nil {
 			t.Fatalf("open: %v", err)
 		}

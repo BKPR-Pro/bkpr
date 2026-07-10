@@ -1,9 +1,10 @@
 // Command bookkeeper turns bank and card statements into a set of books.
 //
-// `import` records what a statement said, once per line, into an append-only log. `books` folds
-// that log back out through a rule set and renders it. Where the rules run out of knowledge the
-// account path stops at Uncategorized rather than guessing, and later slices hand those to a model
-// and then to a person.
+// A directory holds a set of books the way it holds a git repository, marked by `.bookkeeper` and
+// found by walking up. `import` records what a statement said, once per line, into the append-only
+// log inside it. `books` folds that log back out through a rule set and renders it. Where the
+// rules run out of knowledge the account path stops at Uncategorized rather than guessing, and
+// later slices hand those to a model and then to a person.
 package main
 
 import (
@@ -16,11 +17,11 @@ import (
 	"text/tabwriter"
 
 	"github.com/dallasread/bookkeeper/cli/internal/books"
-	"github.com/dallasread/bookkeeper/cli/internal/eventlog"
 	"github.com/dallasread/bookkeeper/cli/internal/ledger"
 	"github.com/dallasread/bookkeeper/cli/internal/model"
 	"github.com/dallasread/bookkeeper/cli/internal/rules"
 	"github.com/dallasread/bookkeeper/cli/internal/source"
+	"github.com/dallasread/bookkeeper/cli/internal/store"
 )
 
 func main() {
@@ -31,6 +32,8 @@ func main() {
 
 	var err error
 	switch os.Args[1] {
+	case "init":
+		err = initStore(os.Args[2:])
 	case "import":
 		err = importStatement(os.Args[2:])
 	case "sources":
@@ -53,28 +56,34 @@ func main() {
 func usage() {
 	fmt.Fprint(os.Stderr, `bookkeeper - turn statements into books
 
+Every command finds the nearest .bookkeeper directory by walking up, as git does.
+
 usage:
-  bookkeeper sources load -db <file> -file <file> [-why <reason>]
-  bookkeeper sources list -db <file>
-  bookkeeper rules   load -db <file> -file <file> [-why <reason>]
-  bookkeeper rules   list -db <file>
-  bookkeeper import       -db <file> -source <account> -csv <file>
-  bookkeeper books        -db <file> [-format table|ledger]
+  bookkeeper init         [dir]
+  bookkeeper sources load [-file <file>] [-why <reason>]
+  bookkeeper sources list
+  bookkeeper rules   load [-file <file>] [-why <reason>]
+  bookkeeper rules   list
+  bookkeeper import       -source <account> -csv <file>
+  bookkeeper books        [-format table|ledger] [-stdout]
 `)
 }
 
-// openLog is the only place that decides where the books live.
-func openLog(path string) (*eventlog.Log, func() error, error) {
-	store, err := eventlog.OpenSQLite(path)
-	if err != nil {
-		return nil, nil, err
+func initStore(args []string) error {
+	dir := "."
+	if len(args) > 0 {
+		dir = args[0]
 	}
-	return eventlog.New(store), store.Close, nil
+	path, err := store.Init(dir)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Initialized a book of record in %s\n", path)
+	return nil
 }
 
 func importStatement(args []string) error {
 	fs := flag.NewFlagSet("import", flag.ExitOnError)
-	dbPath := fs.String("db", "books.db", "the event log")
 	account := fs.String("source", "", "the ledger account this statement belongs to")
 	csvPath := fs.String("csv", "", "CSV statement to read")
 	if err := fs.Parse(args); err != nil {
@@ -85,11 +94,12 @@ func importStatement(args []string) error {
 		return fmt.Errorf("source and csv are both required")
 	}
 
-	log, closeLog, err := openLog(*dbPath)
+	s, err := store.Open(".")
 	if err != nil {
 		return err
 	}
-	defer closeLog()
+	defer s.Close()
+	log := s.Log
 
 	src, err := books.Source(log, *account)
 	if err != nil {
@@ -126,18 +136,18 @@ func sourceSet(args []string) error {
 	}
 
 	fs := flag.NewFlagSet("sources "+args[0], flag.ExitOnError)
-	dbPath := fs.String("db", "books.db", "the event log")
 	filePath := fs.String("file", "", "JSON source set to load")
 	why := fs.String("why", "", "why the sources changed; recorded with the edit")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 
-	log, closeLog, err := openLog(*dbPath)
+	s, err := store.Open(".")
 	if err != nil {
 		return err
 	}
-	defer closeLog()
+	defer s.Close()
+	log := s.Log
 
 	switch args[0] {
 	case "list":
@@ -191,18 +201,18 @@ func ruleSet(args []string) error {
 	}
 
 	fs := flag.NewFlagSet("rules "+args[0], flag.ExitOnError)
-	dbPath := fs.String("db", "books.db", "the event log")
 	filePath := fs.String("file", "", "JSON rule set to load")
 	why := fs.String("why", "", "why the rule set changed; recorded with the edit")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 
-	log, closeLog, err := openLog(*dbPath)
+	s, err := store.Open(".")
 	if err != nil {
 		return err
 	}
-	defer closeLog()
+	defer s.Close()
+	log := s.Log
 
 	switch args[0] {
 	case "list":
@@ -242,17 +252,18 @@ func ruleSet(args []string) error {
 
 func renderBooks(args []string) error {
 	fs := flag.NewFlagSet("books", flag.ExitOnError)
-	dbPath := fs.String("db", "books.db", "the event log")
 	format := fs.String("format", "table", "output format: table or ledger")
+	stdout := fs.Bool("stdout", false, "write the ledger to stdout instead of the store")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	log, closeLog, err := openLog(*dbPath)
+	s, err := store.Open(".")
 	if err != nil {
 		return err
 	}
-	defer closeLog()
+	defer s.Close()
+	log := s.Log
 
 	set, err := books.Rules(log)
 	if err != nil {
@@ -277,10 +288,32 @@ func renderBooks(args []string) error {
 	case "table":
 		return report(os.Stdout, txs, entries)
 	case "ledger":
-		return ledger.WriteAll(os.Stdout, txs, entries)
+		if *stdout {
+			return ledger.WriteAll(os.Stdout, txs, entries)
+		}
+		return writeLedger(s, txs, entries)
 	default:
 		return fmt.Errorf("unknown format %q: want table or ledger", *format)
 	}
+}
+
+// writeLedger regenerates the artifact in place. The books are a fold, so the ledger is derived
+// output: bookkeeper owns the file and rewrites it whole, and its git diff is the readable account
+// of what changed.
+func writeLedger(s *store.Store, txs []model.Transaction, entries []model.Entry) error {
+	f, err := os.Create(s.Ledger())
+	if err != nil {
+		return err
+	}
+	if err := ledger.WriteAll(f, txs, entries); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	fmt.Printf("wrote %d entries to %s\n", len(txs), s.Ledger())
+	return nil
 }
 
 func report(out *os.File, txs []model.Transaction, entries []model.Entry) error {
