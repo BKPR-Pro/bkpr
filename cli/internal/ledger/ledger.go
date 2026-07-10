@@ -1,9 +1,10 @@
 // Package ledger renders categorized transactions as plain-text double-entry entries.
 //
 // The output is the artifact: greppable, diffable, and readable by ledger-cli. Entries drawn from
-// real bank data are cleared (*). A line the machine could not categorize is written as pending
-// (!) against a placeholder account, with the reason as a comment, so the books stay complete and
-// the open questions are trivial to find. Nothing is ever guessed at.
+// real bank data are cleared (*). A line that is a defensible default rather than a fact, or whose
+// kind could not be determined, is written as pending (!) with its reason as a comment. Every line
+// posts, so the books stay complete and balanced; `ledger print --uncleared` is the correction
+// list.
 package ledger
 
 import (
@@ -13,8 +14,11 @@ import (
 	"github.com/dallasread/bookkeeper/cli/internal/model"
 )
 
-// UnknownAccount holds the amount for a line awaiting review, so the entry still balances.
-const UnknownAccount = "Expenses:Unknown"
+// SuspenseAccount holds a line whose kind is unknown. Never guess across kinds: an expense booked
+// as income breaks the books and does not self-correct. A top-level suspense account also keeps
+// the Income and Expenses totals honest while a line is unresolved, and `ledger bal Suspense`
+// lists everything still unclassified.
+const SuspenseAccount = "Suspense"
 
 // WriteAll renders one entry per transaction, in order.
 func WriteAll(w io.Writer, txs []model.Transaction, decisions []model.Decision, currency string) error {
@@ -48,7 +52,7 @@ func writeEntry(w io.Writer, tx model.Transaction, d model.Decision, currency st
 
 	category := d.Category
 	if category == "" {
-		category = UnknownAccount
+		category = SuspenseAccount
 	}
 
 	balance := d.Balance

@@ -108,9 +108,9 @@ func loadMapping(path string) (source.Mapping, error) {
 
 func report(out *os.File, txs []model.Transaction, decisions []model.Decision) error {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "DATE\tPAYEE\tAMOUNT\tCATEGORY")
+	fmt.Fprintln(w, "DATE\tPAYEE\tAMOUNT\tCATEGORY\tREVIEW")
 
-	var reviewed int
+	var flagged int
 	for i, tx := range txs {
 		d := decisions[i]
 
@@ -119,19 +119,26 @@ func report(out *os.File, txs []model.Transaction, decisions []model.Decision) e
 			payee = tx.Description
 		}
 
+		// Every line posts. A flagged line still shows where it landed; the flag is how you find it
+		// again, not a reason to withhold it.
 		category := d.Category
-		if d.NeedsReview {
-			reviewed++
-			category = "NEEDS REVIEW (" + d.Reason + ")"
+		if category == "" {
+			category = ledger.SuspenseAccount
 		}
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", tx.Date.Format("2006-01-02"), payee, dollars(tx.AmountCents), category)
+		review := ""
+		if d.NeedsReview {
+			flagged++
+			review = "! " + d.Reason
+		}
+
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", tx.Date.Format("2006-01-02"), payee, dollars(tx.AmountCents), category, review)
 	}
 	if err := w.Flush(); err != nil {
 		return err
 	}
 
-	fmt.Fprintf(out, "\n%d lines: %d categorized, %d need review\n", len(txs), len(txs)-reviewed, reviewed)
+	fmt.Fprintf(out, "\n%d lines posted: %d confident, %d flagged for review\n", len(txs), len(txs)-flagged, flagged)
 	return nil
 }
 

@@ -98,6 +98,60 @@ func TestUncategorizedNeedsReview(t *testing.T) {
 	}
 }
 
+// An ambiguous merchant still posts. The category is a defensible default, so the line is flagged
+// rather than withheld: guessing a leaf costs insight, and gating costs the thing this tool exists
+// to avoid.
+func TestUncertainRuleCategorizesAndFlags(t *testing.T) {
+	e := engine(t,
+		rules.Rule{
+			Match: `acme hardware`, Payee: "Acme Hardware",
+			Category:  "Expenses:Real Estate:Materials:45 Sample Avenue:Unit 2",
+			Uncertain: true, Reason: "hardware could serve any property",
+		},
+		rules.Rule{Match: `.`, Balance: "Assets:Bank:Chequing"},
+	)
+
+	got := e.Apply(tx("ACME HARDWARE #4471"))
+
+	if got.Category != "Expenses:Real Estate:Materials:45 Sample Avenue:Unit 2" {
+		t.Errorf("category = %q, want the default to still be applied", got.Category)
+	}
+	if !got.Categorized() {
+		t.Error("an uncertain line is still categorized, just not confidently")
+	}
+	if !got.NeedsReview {
+		t.Error("an uncertain line should be flagged")
+	}
+	if got.Reason != "hardware could serve any property" {
+		t.Errorf("reason = %q", got.Reason)
+	}
+}
+
+// The catch-all matches every line. It must not clear the uncertainty of the rule that actually
+// supplied the category.
+func TestCatchAllDoesNotClobberUncertainty(t *testing.T) {
+	e := engine(t,
+		rules.Rule{Match: `acme`, Category: "Expenses:Materials", Uncertain: true},
+		rules.Rule{Match: `.`, Balance: "Assets:Bank:Chequing"},
+	)
+
+	if got := e.Apply(tx("ACME HARDWARE")); !got.NeedsReview {
+		t.Error("the catch-all cleared the uncertain flag")
+	}
+}
+
+// A confident rule stays confident even when a later uncertain rule also matches.
+func TestCertainRuleIsNotFlagged(t *testing.T) {
+	e := engine(t,
+		rules.Rule{Match: `city water`, Category: "Expenses:Utilities:Water"},
+		rules.Rule{Match: `water`, Category: "Expenses:Wrong", Uncertain: true, Reason: "nope"},
+	)
+
+	if got := e.Apply(tx("CITY WATER UTILITY")); got.NeedsReview {
+		t.Errorf("unexpected flag: %s", got.Reason)
+	}
+}
+
 // A statement line already knows its own account, so a rule set needs no catch-all just to name
 // the balancing posting. Rules only override it for transfers.
 func TestBalanceDefaultsToTheTransactionsOwnAccount(t *testing.T) {

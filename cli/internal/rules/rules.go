@@ -25,6 +25,13 @@ type Rule struct {
 	Category string `json:"category,omitempty"`
 	Balance  string `json:"balance,omitempty"`
 
+	// Uncertain marks a category that is a defensible default rather than a fact. An ambiguous
+	// merchant (a hardware store that could serve any property) sets this: the line still posts to
+	// Category, but it is flagged pending so it is easy to find and correct later. The attribution
+	// lives in the real world, not in the description, so no amount of matching recovers it.
+	Uncertain bool   `json:"uncertain,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+
 	re *regexp.Regexp
 }
 
@@ -69,6 +76,8 @@ func Load(path string) (*Engine, error) {
 // is handed to the human.
 func (e *Engine) Apply(tx model.Transaction) model.Decision {
 	var d model.Decision
+	var uncertain bool
+	var reason string
 
 	for _, r := range e.rules {
 		if !r.re.MatchString(tx.Description) {
@@ -77,8 +86,11 @@ func (e *Engine) Apply(tx model.Transaction) model.Decision {
 		if d.Payee == "" {
 			d.Payee = r.Payee
 		}
-		if d.Category == "" {
+		// Guard on r.Category so the uncertainty of the rule that actually supplied the category is
+		// not clobbered by a later rule that matched for some other field, such as the catch-all.
+		if d.Category == "" && r.Category != "" {
 			d.Category = r.Category
+			uncertain, reason = r.Uncertain, r.Reason
 		}
 		if d.Balance == "" {
 			d.Balance = r.Balance
@@ -94,9 +106,16 @@ func (e *Engine) Apply(tx model.Transaction) model.Decision {
 		d.Balance = tx.Account
 	}
 
-	if d.Category == "" {
+	switch {
+	case d.Category == "":
 		d.NeedsReview = true
 		d.Reason = "no rule supplied a category"
+	case uncertain:
+		d.NeedsReview = true
+		d.Reason = reason
+		if d.Reason == "" {
+			d.Reason = "category is a default; confirm the attribution"
+		}
 	}
 	return d
 }

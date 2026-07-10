@@ -73,8 +73,55 @@ func TestNeedsReviewEntryIsPendingAndExplained(t *testing.T) {
 	if !strings.Contains(got, "  ; needs review: no rule supplied a category\n") {
 		t.Errorf("want the reason as a comment:\n%s", got)
 	}
-	if !strings.Contains(got, ledger.UnknownAccount) {
-		t.Errorf("want the unknown account placeholder:\n%s", got)
+	if !strings.Contains(got, ledger.SuspenseAccount) {
+		t.Errorf("want the suspense account:\n%s", got)
+	}
+}
+
+// An ambiguous merchant posts to its real category, not to suspense. The books are complete and
+// the leaf is a defensible guess; the pending flag is how you find it again.
+func TestUncertainLinePostsToItsCategoryAndIsPending(t *testing.T) {
+	tx := model.Transaction{
+		Date: on(2), AmountCents: -8420,
+		Description: "ACME HARDWARE #4471", Account: "Assets:Bank:Chequing",
+	}
+	d := model.Decision{
+		Payee: "Acme Hardware", Category: "Expenses:Real Estate:Materials:45 Sample Avenue:Unit 2",
+		Balance: "Assets:Bank:Chequing", NeedsReview: true, Reason: "hardware could serve any property",
+	}
+
+	got := write(t, tx, d)
+
+	if !strings.HasPrefix(got, "2026/03/02  ! Acme Hardware\n") {
+		t.Errorf("want a pending flag with the real payee:\n%s", got)
+	}
+	if !strings.Contains(got, "  ; needs review: hardware could serve any property\n") {
+		t.Errorf("want the reason as a comment:\n%s", got)
+	}
+	if !strings.Contains(got, "Expenses:Real Estate:Materials:45 Sample Avenue:Unit 2  84.20 CAD") {
+		t.Errorf("an uncertain line still posts to its category:\n%s", got)
+	}
+	if strings.Contains(got, ledger.SuspenseAccount) {
+		t.Errorf("an uncertain line must not go to suspense:\n%s", got)
+	}
+}
+
+// The one thing never guessed at is the kind. An unclassified deposit must not land in Expenses,
+// which would silently corrupt both totals. It goes to a top-level suspense account instead.
+func TestUnknownKindGoesToSuspenseNotExpenses(t *testing.T) {
+	tx := model.Transaction{
+		Date: on(6), AmountCents: 250000,
+		Description: "MYSTERY DEPOSIT", Account: "Assets:Bank:Chequing",
+	}
+	d := model.Decision{Balance: "Assets:Bank:Chequing", NeedsReview: true, Reason: "no rule supplied a category"}
+
+	got := write(t, tx, d)
+
+	if strings.Contains(got, "Expenses") || strings.Contains(got, "Income") {
+		t.Errorf("an unclassified line must not touch Income or Expenses:\n%s", got)
+	}
+	if !strings.Contains(got, "Suspense  -2500.00 CAD") {
+		t.Errorf("want the deposit parked in suspense:\n%s", got)
 	}
 }
 

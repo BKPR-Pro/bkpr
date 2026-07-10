@@ -21,17 +21,22 @@ type Transaction struct {
 //
 // Category is the income or expense account the money belongs to. Balance is the account that
 // balances the entry (in ledger terms the elided posting, whose amount is omitted and inferred).
-// A Decision with NeedsReview set is one the machine would not guess at: it goes to the human,
-// and the answer becomes a rule so the same question is never asked twice.
+//
+// NeedsReview flags a line; it never blocks one. Every line posts. A flagged line is either a
+// defensible default (an ambiguous merchant, where the attribution is real-world context the
+// description does not contain) or a line whose kind is unknown. Both are written as pending so
+// they are trivial to find and correct later. Guessing beats gating: a wrong leaf costs insight,
+// and a gate costs the thing this tool exists to avoid.
 type Decision struct {
 	Payee       string
 	Category    string
 	Balance     string
 	NeedsReview bool
-	Reason      string // why review is needed, when it is
+	Reason      string // why the line was flagged, when it was
 }
 
-// Categorized reports whether the decision is complete enough to post.
+// Categorized reports whether a category was assigned. A flagged line is still categorized; it is
+// just not confidently so.
 func (d Decision) Categorized() bool {
-	return !d.NeedsReview && d.Category != "" && d.Balance != ""
+	return d.Category != ""
 }
