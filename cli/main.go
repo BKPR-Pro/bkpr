@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -40,6 +41,8 @@ func main() {
 		err = sourceSet(os.Args[2:])
 	case "rules":
 		err = ruleSet(os.Args[2:])
+	case "categorize":
+		err = categorize(os.Args[2:])
 	case "books":
 		err = renderBooks(os.Args[2:])
 	default:
@@ -65,6 +68,7 @@ usage:
   bookkeeper rules   load [-file <file>] [-why <reason>]
   bookkeeper rules   list
   bookkeeper import       -source <account> -csv <file>
+  bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>]
   bookkeeper books        [-format table|ledger] [-stdout]
 `)
 }
@@ -250,6 +254,93 @@ func ruleSet(args []string) error {
 	}
 }
 
+// postings collects repeated -post account=amount flags, so a correction can be a split.
+type postings []model.Posting
+
+func (p *postings) String() string { return "" }
+
+func (p *postings) Set(s string) error {
+	i := strings.LastIndex(s, "=")
+	if i < 0 {
+		return fmt.Errorf("posting %q must be account=amount", s)
+	}
+	cents, err := parseAmount(strings.TrimSpace(s[i+1:]))
+	if err != nil {
+		return err
+	}
+	*p = append(*p, model.Posting{Account: strings.TrimSpace(s[:i]), AmountCents: cents})
+	return nil
+}
+
+// categorize records a human's answer for one line: its category, or a split across several.
+func categorize(args []string) error {
+	var split postings
+	fs := flag.NewFlagSet("categorize", flag.ExitOnError)
+	txID := fs.String("tx", "", "the transaction fingerprint to categorize")
+	category := fs.String("category", "", "post the whole line to this one account")
+	payee := fs.String("payee", "", "the payee to record on the entry")
+	why := fs.String("why", "", "why this line is categorized so; recorded with the assertion")
+	fs.Var(&split, "post", "account=amount, repeatable, for a line that splits across accounts")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *txID == "" || (*category == "" && len(split) == 0) {
+		fs.Usage()
+		return fmt.Errorf("tx and one of -category or -post are required")
+	}
+	if *category != "" && len(split) > 0 {
+		return fmt.Errorf("give -category or -post, not both")
+	}
+
+	s, err := store.Open(".")
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	// -category is the common case: post the whole line to one account. The amount is the line's
+	// own, taken with the opposite sign, so the caller never has to restate it.
+	if *category != "" {
+		tx, err := books.Transaction(s.Log, *txID)
+		if err != nil {
+			return err
+		}
+		split = postings{{Account: *category, AmountCents: -tx.AmountCents}}
+	}
+
+	if err := books.Categorize(s.Log, "human", *why, *txID, *payee, split); err != nil {
+		return err
+	}
+	fmt.Printf("categorized %s\n", *txID)
+	return nil
+}
+
+// parseAmount reads a dollar string like "84.20" or "-40" into integer cents.
+func parseAmount(s string) (int64, error) {
+	neg := strings.HasPrefix(s, "-")
+	s = strings.TrimPrefix(strings.TrimPrefix(s, "-"), "+")
+	dollars, cents, found := strings.Cut(s, ".")
+	whole, err := strconv.ParseInt(dollars, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("amount %q is not a number", s)
+	}
+	total := whole * 100
+	if found {
+		if len(cents) != 2 {
+			return 0, fmt.Errorf("amount %q needs exactly two decimal places", s)
+		}
+		frac, err := strconv.ParseInt(cents, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("amount %q is not a number", s)
+		}
+		total += frac
+	}
+	if neg {
+		total = -total
+	}
+	return total, nil
+}
+
 func renderBooks(args []string) error {
 	fs := flag.NewFlagSet("books", flag.ExitOnError)
 	format := fs.String("format", "table", "output format: table or ledger")
@@ -263,25 +354,10 @@ func renderBooks(args []string) error {
 		return err
 	}
 	defer s.Close()
-	log := s.Log
 
-	set, err := books.Rules(log)
+	txs, entries, err := books.Ledger(s.Log)
 	if err != nil {
 		return err
-	}
-	engine, err := rules.New(set)
-	if err != nil {
-		return err
-	}
-
-	txs, err := books.Transactions(log)
-	if err != nil {
-		return err
-	}
-
-	entries := make([]model.Entry, len(txs))
-	for i, tx := range txs {
-		entries[i] = engine.Apply(tx)
 	}
 
 	switch *format {

@@ -322,6 +322,30 @@ appended event:
 Twelve months of hardware charges would have moved together, from one edit. That is what the log
 buys, and committing both files is how the change reviews.
 
+### Correcting a single line
+
+Some attributions are not a rule. A hardware receipt in your truck says Unit 1, and no pattern over
+the description could have known that. So `categorize` asserts the answer for that one line, keyed
+by its fingerprint, and it wins over whatever the rule said:
+
+```sh
+bk categorize -tx 0d76f1f1... -category "Expenses:...:Unit 1" -payee "Acme" -why "receipt was Unit 1"
+```
+
+One charge can serve two properties, so an assertion can be a split, and it is only accepted if the
+postings still account for the whole line:
+
+```sh
+bk categorize -tx 0d76f1f1... \
+  -post "Expenses:Materials:Unit 1=40.00" \
+  -post "Expenses:Materials:Unit 2=44.20"
+```
+
+An assertion is a fact about one transaction. It never generalizes into a rule, so correcting one
+hardware charge does not re-pin every future one, and it survives a later rule change: fixing the
+rule moves every line except the ones you have already spoken for. Assert twice and the later fact
+wins, with both kept in the log.
+
 ## Books
 
 `-format ledger` regenerates `.bookkeeper/books.ledger`, the plain-text double-entry artifact.
@@ -403,11 +427,11 @@ statement line already knows which account it came from, and a line no rule matc
 Everything lives in a `.bookkeeper` directory found by walking up, the way git finds `.git`. The
 log is `log.jsonl`, committed, one event per line; the ledger is its committed artifact.
 Re-importing an overlapping statement is a proven no-op, two renders of the same log are
-byte-identical, changing a rule reclassifies history in one appended event, and a wrong working
+byte-identical, changing a rule reclassifies history in one appended event, correcting a single
+line overrides the rule for that line only and survives later rule changes, and a wrong working
 directory is refused rather than turned into a new empty book of record.
 
-Next, in order: `Categorize`, which turns postings into event data and makes a per-line correction
-possible. Then `Discard`, `Match`, the CSV views (`bk transactions --csv` and friends, for the
+Next, in order: `Discard`, `Match`, the CSV views (`bk transactions --csv` and friends, for the
 tabular parts of the data), the model tier, the digest, and the destinations.
 
 Known debt: `source.parseCents` routes money through a `float64` on its way to integer cents. It is

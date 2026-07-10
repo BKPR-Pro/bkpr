@@ -129,3 +129,26 @@ func Transactions(log *eventlog.Log) ([]model.Transaction, error) {
 	})
 	return txs, nil
 }
+
+// Transaction folds out the one imported line with this fingerprint.
+func Transaction(log *eventlog.Log, id string) (model.Transaction, error) {
+	txs, err := Transactions(log)
+	if err != nil {
+		return model.Transaction{}, err
+	}
+	for _, tx := range txs {
+		if tx.ID == id {
+			return tx, nil
+		}
+	}
+	return model.Transaction{}, fmt.Errorf("books: no transaction %q; import it before categorizing it", id)
+}
+
+// dollars renders integer cents the way an error message reads best.
+func dollars(cents int64) string {
+	sign := ""
+	if cents < 0 {
+		sign, cents = "-", -cents
+	}
+	return fmt.Sprintf("%s%d.%02d", sign, cents/100, cents%100)
+}
