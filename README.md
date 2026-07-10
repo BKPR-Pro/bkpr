@@ -101,7 +101,7 @@ Events are immutable, past-tense facts.
 | --- | --- |
 | `transaction.imported` | a statement line was read in. Once per fingerprint, ever |
 | `transaction.categorized` | a person or a model asserted the postings for this line |
-| `transaction.matched` | this line is the same movement as another; do not book it twice |
+| `transaction.matched` | force or break a transfer pairing the automatic fold got wrong (planned) |
 | `transaction.discarded` | that line was garbage; keep it out of the books |
 | `rule.added` | a pattern should be handled |
 | `rule.changed` | a rule's answer is wrong |
@@ -346,6 +346,25 @@ hardware charge does not re-pin every future one, and it survives a later rule c
 rule moves every line except the ones you have already spoken for. Assert twice and the later fact
 wins, with both kept in the log.
 
+### Transfers between your own accounts
+
+Move $500 from chequing to savings and it appears in both statements: once leaving chequing, once
+arriving in savings. Each sighting, categorized to the other account, is a complete balanced entry
+on its own, so booking both would move the money out and then back and net it to zero, losing the
+movement.
+
+So the second sighting is suppressed. Two sightings pair when each names the other's account, their
+amounts are equal and opposite, and their dates fall within a few days; the earlier one is kept and
+books the transfer, the later is dropped. Import a statement that has not been paired yet and the
+transfer books normally on its own; import its other half later and the duplicate is recognised and
+dropped.
+
+This is a pure fold, so no event records a pairing: it is recomputed from the lines and their
+categorization every time the books are built. The mutual-naming check is what keeps it honest. A
+$500 expense and a coincidental $500 deposit are not a transfer, because neither names the other's
+account, so both are booked. Suppression only ever happens when two accounts you own each point at
+the other.
+
 ## Books
 
 `-format ledger` regenerates `.bookkeeper/books.ledger`, the plain-text double-entry artifact.
@@ -437,7 +456,11 @@ ledger-style string like `84.20 CAD` or `10 AAPL`. No float touches money at any
 reader's old float is gone. An entry is single-commodity for now: mixing commodities balances only
 through a price, which is refused until that slice exists.
 
-Next, in order: `Discard`, `Match`, the CSV views (`bk transactions --csv` and friends, for the
+Internal transfers seen in both accounts' statements are recognised and booked once, as a
+deterministic fold over the lines and their categorization, so the money is not double-counted.
+
+Next, in order: the manual transfer override (`transaction.matched`, to correct a pairing the fold
+missed or got wrong), `Discard`, the CSV views (`bk transactions --csv` and friends, for the
 tabular parts of the data), the model tier, the digest, and the destinations. Prices and cost basis
 (so a brokerage account can hold shares against cash) are a later slice; the `Amount` type is ready
 for them.

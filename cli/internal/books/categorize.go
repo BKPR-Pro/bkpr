@@ -79,7 +79,20 @@ func Ledger(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) {
 		}
 		entries[i] = engine.Apply(tx)
 	}
-	return txs, entries, nil
+
+	// The duplicate sighting of an internal transfer must not book a second entry, so it is dropped
+	// from the books entirely rather than rendered.
+	dup := suppressed(txs, entries)
+	keptTxs := make([]model.Transaction, 0, len(txs))
+	keptEntries := make([]model.Entry, 0, len(entries))
+	for i, tx := range txs {
+		if dup[tx.ID] {
+			continue
+		}
+		keptTxs = append(keptTxs, tx)
+		keptEntries = append(keptEntries, entries[i])
+	}
+	return keptTxs, keptEntries, nil
 }
 
 // assertions folds the categorized events into the current entry per transaction. A later event
