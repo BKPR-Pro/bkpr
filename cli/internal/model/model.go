@@ -3,13 +3,20 @@
 // any particular accounting app.
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
-// SuspenseAccount holds a line whose kind is unknown. Never guess across kinds: an expense booked
-// as income breaks the books and does not self-correct, while a wrong leaf costs only insight. A
-// top-level suspense account keeps the Income and Expenses totals honest while a line is
-// unresolved, and `ledger bal Suspense` lists everything still unclassified.
-const SuspenseAccount = "Suspense"
+// Uncategorized is where an account path stops when the rules run out of knowledge. As a leaf it
+// says the kind is known but the detail is not (Expenses:Real Estate:Materials:Uncategorized). As
+// the whole account it says not even the kind is known (Uncategorized).
+//
+// It is not a guess and not a warning. It is the truth about what the rules can tell, so every
+// total above it stays honest, and `ledger bal Uncategorized` finds all of them at once. The fix
+// is usually a better rule, which reclassifies the whole history at once, rather than a
+// correction on each line.
+const Uncategorized = "Uncategorized"
 
 // Transaction is one normalized bank or card line. Every Source connector produces these,
 // whatever its transport. ID is a stable fingerprint of the line and is the idempotency root:
@@ -36,16 +43,9 @@ type Posting struct {
 // unbalanced: the categorized postings must account for the whole line. A split is simply more
 // than one of them, and it is the shape a real correction usually takes, because one charge can
 // serve two properties.
-//
-// Pending flags an entry; it never withholds one. Every line posts. A flagged entry is either a
-// defensible default (an ambiguous merchant, where the attribution is real-world context the
-// description does not contain) or a line whose kind is unknown and so parked in Suspense. Both
-// are written as pending so they are trivial to find and correct later.
 type Entry struct {
 	Payee    string
 	Postings []Posting
-	Pending  bool
-	Reason   string // why the entry was flagged, when it was
 }
 
 // Balances reports whether the postings account for the whole statement line. The statement's sign
@@ -56,4 +56,14 @@ func (e Entry) Balances(tx Transaction) bool {
 		sum += p.AmountCents
 	}
 	return sum == -tx.AmountCents
+}
+
+// Uncategorized reports whether any posting stops short of a full account path.
+func (e Entry) Uncategorized() bool {
+	for _, p := range e.Postings {
+		if p.Account == Uncategorized || strings.HasSuffix(p.Account, ":"+Uncategorized) {
+			return true
+		}
+	}
+	return false
 }

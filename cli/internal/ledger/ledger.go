@@ -1,10 +1,11 @@
 // Package ledger renders entries as plain-text double-entry postings.
 //
-// The output is the artifact: greppable, diffable, and readable by ledger-cli. Entries drawn from
-// real bank data are cleared (*). A line that is a defensible default rather than a fact, or whose
-// kind could not be determined, is written as pending (!) with its reason as a comment. Every line
-// posts, so the books stay complete and balanced; `ledger print --uncleared` is the correction
-// list.
+// The output is the artifact: greppable, diffable, and readable by ledger-cli. Every entry is
+// cleared (*), because every line came off a bank statement and so has cleared the bank. Pending
+// (!) means the bank has not reported a transaction yet, and nothing written here is that.
+//
+// Nothing else is annotated. Where the rules ran out of knowledge the account path says so, and
+// `ledger bal Uncategorized` finds every one of them at any depth.
 package ledger
 
 import (
@@ -41,18 +42,8 @@ func writeEntry(w io.Writer, tx model.Transaction, e model.Entry, currency strin
 			tx.Date.Format("2006/01/02"), e.Payee, amount(-tx.AmountCents))
 	}
 
-	flag := "*"
-	if e.Pending {
-		flag = "!"
-	}
-
-	if _, err := fmt.Fprintf(w, "%s  %s %s\n", tx.Date.Format("2006/01/02"), flag, e.Payee); err != nil {
+	if _, err := fmt.Fprintf(w, "%s  * %s\n", tx.Date.Format("2006/01/02"), e.Payee); err != nil {
 		return err
-	}
-	if e.Pending && e.Reason != "" {
-		if _, err := fmt.Fprintf(w, "  ; needs review: %s\n", e.Reason); err != nil {
-			return err
-		}
 	}
 	for _, p := range e.Postings {
 		if _, err := fmt.Fprintf(w, "  %s  %s %s\n", p.Account, amount(p.AmountCents), currency); err != nil {

@@ -35,14 +35,14 @@ func TestARuleNamesThePayeeAndTheAccountToPostTo(t *testing.T) {
 
 	got := e.Apply(tx("ACME HARDWARE #4471"))
 
-	if got.Pending {
-		t.Fatalf("did not expect a flag, got reason %q", got.Reason)
-	}
 	if got.Payee != "Acme Hardware" {
 		t.Errorf("payee = %q", got.Payee)
 	}
 	if only(t, got).Account != "Expenses:Repairs:Materials" {
 		t.Errorf("account = %q", only(t, got).Account)
+	}
+	if got.Uncategorized() {
+		t.Error("a fully named account is categorized")
 	}
 }
 
@@ -83,70 +83,38 @@ func TestFirstMatchWinsPerField(t *testing.T) {
 	}
 }
 
-// The one thing never guessed at is the kind. A line nothing categorizes still posts, because the
-// books must stay complete, but it parks in a top-level suspense account rather than landing in
-// Expenses or Income and silently corrupting both totals.
-func TestUncategorizedLinePostsToSuspenseAndIsFlagged(t *testing.T) {
+// The books must stay complete, so a line nothing matches still posts. It posts to a top-level
+// Uncategorized account rather than being guessed into Expenses or Income, which would silently
+// corrupt both totals. Never guess across kinds.
+func TestALineNoRuleMatchesPostsToUncategorized(t *testing.T) {
 	e := engine(t)
 
 	got := e.Apply(tx("SOME UNKNOWN MERCHANT"))
 
-	if only(t, got).Account != model.SuspenseAccount {
-		t.Errorf("account = %q, want suspense", only(t, got).Account)
+	if only(t, got).Account != model.Uncategorized {
+		t.Errorf("account = %q, want %q", only(t, got).Account, model.Uncategorized)
 	}
-	if !got.Pending {
-		t.Error("expected a flag")
-	}
-	if got.Reason == "" {
-		t.Error("expected a reason explaining why")
+	if !got.Uncategorized() {
+		t.Error("the entry should report itself uncategorized")
 	}
 }
 
-// An ambiguous merchant still posts. The category is a defensible default, so the line is flagged
-// rather than withheld: guessing a leaf costs insight, and gating costs the thing this tool exists
-// to avoid.
-func TestUncertainRuleStillPostsToItsCategoryAndIsFlagged(t *testing.T) {
+// A hardware store charge could serve any property, and that fact lives on the receipt rather than
+// in the description. The rule says so, and says nothing more. Expenses:Real Estate:Materials is
+// still exactly right, so every total above the leaf stays honest.
+func TestARuleMayStopAtAnUncategorizedLeaf(t *testing.T) {
 	e := engine(t, rules.Rule{
 		Match: `acme hardware`, Payee: "Acme Hardware",
-		Category:  "Expenses:Real Estate:Materials:45 Sample Avenue:Unit 2",
-		Uncertain: true, Reason: "hardware could serve any property",
+		Category: "Expenses:Real Estate:Materials:Uncategorized",
 	})
 
 	got := e.Apply(tx("ACME HARDWARE #4471"))
 
-	if only(t, got).Account != "Expenses:Real Estate:Materials:45 Sample Avenue:Unit 2" {
-		t.Errorf("account = %q, want the default to still be applied", only(t, got).Account)
+	if only(t, got).Account != "Expenses:Real Estate:Materials:Uncategorized" {
+		t.Errorf("account = %q", only(t, got).Account)
 	}
-	if !got.Pending {
-		t.Error("an uncertain line should be flagged")
-	}
-	if got.Reason != "hardware could serve any property" {
-		t.Errorf("reason = %q", got.Reason)
-	}
-}
-
-// A later rule that matches for some other reason must not clear the uncertainty of the rule that
-// actually supplied the account.
-func TestALaterRuleDoesNotClobberUncertainty(t *testing.T) {
-	e := engine(t,
-		rules.Rule{Match: `acme`, Category: "Expenses:Materials", Uncertain: true},
-		rules.Rule{Match: `.`, Payee: "Somebody"},
-	)
-
-	if got := e.Apply(tx("ACME HARDWARE")); !got.Pending {
-		t.Error("a later rule cleared the uncertain flag")
-	}
-}
-
-// A confident rule stays confident even when a later uncertain rule also matches.
-func TestCertainRuleIsNotFlagged(t *testing.T) {
-	e := engine(t,
-		rules.Rule{Match: `city water`, Category: "Expenses:Utilities:Water"},
-		rules.Rule{Match: `water`, Category: "Expenses:Wrong", Uncertain: true, Reason: "nope"},
-	)
-
-	if got := e.Apply(tx("CITY WATER UTILITY")); got.Pending {
-		t.Errorf("unexpected flag: %s", got.Reason)
+	if !got.Uncategorized() {
+		t.Error("an uncategorized leaf should report itself, at any depth")
 	}
 }
 

@@ -31,7 +31,6 @@ func write(t *testing.T, tx model.Transaction, e model.Entry) string {
 }
 
 // Money out of the source account debits the expense and credits the account, which is elided.
-// Bank data is real, so the entry is cleared.
 func TestExpenseEntry(t *testing.T) {
 	tx := chequing(2, -8420, "ACME HARDWARE #4471")
 	e := model.Entry{
@@ -58,6 +57,42 @@ func TestIncomeEntry(t *testing.T) {
 
 	if got := write(t, tx, e); !strings.Contains(got, "Income:Real Estate:Rent:123 Example Street  -1600.00 CAD") {
 		t.Errorf("income posting should be negative:\n%s", got)
+	}
+}
+
+// Every line bookkeeper writes came off a bank statement, so every line has cleared the bank.
+// The pending flag means the bank has not reported a transaction yet, and nothing here is that.
+func TestEveryEntryIsCleared(t *testing.T) {
+	tx := chequing(12, -3999, "UNKNOWN MERCHANT 88")
+	e := model.Entry{
+		Payee:    "UNKNOWN MERCHANT 88",
+		Postings: []model.Posting{{Account: model.Uncategorized, AmountCents: 3999}},
+	}
+
+	got := write(t, tx, e)
+
+	if !strings.HasPrefix(got, "2026/03/12  * UNKNOWN MERCHANT 88\n") {
+		t.Errorf("an imported line is cleared, whatever its account:\n%s", got)
+	}
+	if strings.Contains(got, "!") {
+		t.Errorf("nothing imported from a statement is pending:\n%s", got)
+	}
+}
+
+// The account path is the only marker there is. Nothing annotates it.
+func TestAnUncategorizedLineCarriesNoAnnotation(t *testing.T) {
+	tx := chequing(2, -8420, "ACME HARDWARE #4471")
+	e := model.Entry{
+		Payee:    "Acme Hardware",
+		Postings: []model.Posting{{Account: "Expenses:Real Estate:Materials:Uncategorized", AmountCents: 8420}},
+	}
+
+	want := "2026/03/02  * Acme Hardware\n" +
+		"  Expenses:Real Estate:Materials:Uncategorized  84.20 CAD\n" +
+		"  Assets:Bank:Chequing\n"
+
+	if got := write(t, tx, e); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
 
@@ -102,29 +137,6 @@ func TestPostingsThatDoNotAccountForTheLineAreRefused(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "84.20") {
 		t.Errorf("the error should say what the line was worth: %v", err)
-	}
-}
-
-// A line that is a defensible default rather than a fact is pending, and carries its reason, so
-// `ledger print --uncleared` is the correction list.
-func TestPendingEntryIsFlaggedAndExplained(t *testing.T) {
-	tx := chequing(2, -8420, "ACME HARDWARE #4471")
-	e := model.Entry{
-		Payee:    "Acme Hardware",
-		Postings: []model.Posting{{Account: "Expenses:Materials:45 Sample Avenue:Unit 2", AmountCents: 8420}},
-		Pending:  true, Reason: "hardware could serve any property",
-	}
-
-	got := write(t, tx, e)
-
-	if !strings.HasPrefix(got, "2026/03/02  ! Acme Hardware\n") {
-		t.Errorf("want a pending flag with the real payee:\n%s", got)
-	}
-	if !strings.Contains(got, "  ; needs review: hardware could serve any property\n") {
-		t.Errorf("want the reason as a comment:\n%s", got)
-	}
-	if !strings.Contains(got, "Expenses:Materials:45 Sample Avenue:Unit 2  84.20 CAD") {
-		t.Errorf("a flagged line still posts to its category:\n%s", got)
 	}
 }
 

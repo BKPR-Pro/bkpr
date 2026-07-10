@@ -5,30 +5,50 @@ Turns bank and card statements into a set of books.
 The goal is Mint's touch with a real ledger's resolution: you set it up, it runs, and the only
 recurring work is re-categorizing a couple of things every once in a while.
 
-## Follow the rules; correct later
+## Every line posts, and nothing is guessed
 
-**Every line posts. Nothing blocks on a question.** Re-categorizing presupposes a category was
-assigned, so the machine always assigns one. A gate would be exactly the friction this tool exists
-to remove.
+**Nothing blocks on a question.** A gate would be exactly the friction this tool exists to remove.
+So every statement line becomes an entry, always.
 
-Where a rule's category is a defensible default rather than a fact, the rule is marked `uncertain`
-and its entry is written as **pending** (`!`) with the reason as a comment. Your correction list is
-one command you already know:
+Where the rules run out of knowledge, the account path stops:
 
-```sh
-ledger -f books.ledger print --uncleared
+```text
+Expenses:Real Estate:Utilities:Water:123 Example Street   the rules know all of it
+Expenses:Real Estate:Materials:Uncategorized              they know the kind, not the property
+Uncategorized                                             they do not even know the kind
 ```
 
-### The guardrail is depth, not certainty
+A hardware store charge could serve any property. That fact lives on the receipt, not in the
+description, and no amount of matching recovers it. So the rule says `Materials:Uncategorized`,
+which is **true**, rather than picking the likeliest unit and marking it as a guess.
 
-- A wrong **leaf** (Unit 1 vs Unit 2) costs insight only. Guess freely.
-- A wrong **kind** (an expense booked as income, a transfer booked as an expense) breaks the books
-  and does not self-correct. Never guess here: a line whose kind is unknown posts to a top-level
-  `Suspense` account, which keeps the `Income` and `Expenses` totals honest until you resolve it.
+### Truncate, do not guess
 
-Some attributions are simply not in the data. A hardware store charge could serve any property;
-that fact lives on the receipt, not in the description. No amount of matching recovers it, so the
-rule defaults and flags rather than pretending.
+A wrong leaf (Unit 1 instead of Unit 2) costs insight only. An absent leaf costs exactly the same
+insight and tells no lie. So there is never a reason to guess one.
+
+A wrong **kind** is different. An expense booked as income breaks the books and does not
+self-correct, so an unrecognized line posts to a top-level `Uncategorized` account rather than
+being guessed into `Expenses`. Every total above the truncation stays honest: `Expenses` and
+`Expenses:Real Estate:Materials` are both exactly right even while the unit is unknown.
+
+The account path is the only marker there is. No tags, no flags, no review queue:
+
+```sh
+ledger -f books.ledger bal Uncategorized
+```
+
+That finds every unknown at every depth, because ledger matches on the whole account name.
+
+### Fix the rule, not the line
+
+`Uncategorized` is not a to-do list of corrections. It is a pointer to **a rule you have not
+written yet**.
+
+The books are a fold over the log, so writing that rule reclassifies the entire history at once.
+Twelve months of hardware charges are one rule, not twelve corrections. You only ever correct a
+single line when the fact is genuinely about that one charge and cannot generalize, which is what
+a receipt in your truck is.
 
 ### Rules are defaults; corrections are about one line
 
@@ -36,7 +56,7 @@ rule defaults and flags rather than pretending.
 - **Corrections** are facts about one transaction, keyed by its fingerprint. They never generalize,
   so correcting a single hardware charge does not silently re-pin every future one.
 
-Rules are data, not code. A different set of books means a different rules file, not a different
+Rules are data, not code. A different set of books means a different rule set, not a different
 build.
 
 ### Entries are postings, not a category
@@ -61,56 +81,70 @@ The whole design follows from one rule:
 | input | recomputable? | so it lives |
 | --- | --- | --- |
 | a statement line | no, it came from outside | in the log |
+| a rule | no, it is authored out of what you know | in the log |
 | a model's answer | no, it is nondeterministic and it cost money | in the log |
 | your judgment | no, the receipt is in your truck | in the log |
-| a rule | yes, it is deterministic data | in git |
 | a categorization | yes, it is `rules(transaction)` | derived on read |
 | a transfer pairing | yes, from the movement key | derived on read |
-| the ledger file | yes, from the log and the rules | a generated artifact |
+| the ledger file | yes, from the log | a generated artifact |
 
 The last row is the one that changes how you work. **The ledger file is read-only output.** You
 correct the books by recording a fact and regenerating, not by editing the artifact. That is what
-buys the property everything else rests on: the books are a pure function of the log and the
-rules, so regenerating them is boring, and a changed diff line means something actually changed.
+buys the property everything else rests on: the books are a pure function of the log, so
+regenerating them is boring, and a changed diff line means something actually changed.
 
 ### Events
 
-Events are immutable, past-tense facts, in the collection `transaction`, keyed by the
-transaction's fingerprint.
+Events are immutable, past-tense facts.
 
 | event | what it means |
 | --- | --- |
 | `transaction.imported` | a statement line was read in. Once per fingerprint, ever |
-| `transaction.categorized` | a line that had no categorization now has one |
-| `transaction.confirmed` | a flagged default was reviewed and kept |
-| `transaction.recategorized` | a categorization was reviewed and replaced |
+| `transaction.categorized` | a person or a model asserted the postings for this line |
 | `transaction.matched` | this line is the same movement as another; do not book it twice |
+| `rule.added` | a pattern should be handled |
+| `rule.changed` | a rule's answer is wrong |
+| `rule.removed` | a rule should stop firing |
+| `rule.moved` | two rules fire in the wrong order |
 
-An event's name says **what happened**. Its `actor` says **who**: you, a model, or a rule set at a
-given commit. Reading `actor` should never be necessary to know what kind of fact you are looking
-at, which is why there is no `categorized_by_model`. A person answering a `Suspense` line and a
-model answering one are doing the same thing, and the log should say so.
+An event's name says **what happened**. Its `actor` says **who**. Reading `actor` should never be
+necessary to know what kind of fact you are looking at, which is why there is no
+`categorized_by_model`. A person answering an `Uncategorized` line and a model answering one are
+doing the same thing, and the log should say so.
 
-Nothing is ever edited. Correcting a line twice appends two facts, the later fold wins, and how a
-categorization came to be survives next to what it currently is.
+Nothing is ever edited. Asserting a line's postings twice appends two facts, the later fold wins,
+and how a categorization came to be survives next to what it currently is.
 
-### Why `confirmed` and `recategorized` are separate
+### Rules are facts too
 
-They fold identically. A single `settled` event would produce the same books, and it would be
-wrong.
+Editing a rule retroactively rewrites the books. Change `acme hardware` from `Uncategorized` to
+`Unit 1` and every past line matching it reclassifies on the next regeneration. That is the most
+consequential operation in the system, so `rule.changed` sits in the log, in order, next to the
+transactions it rewrote, carrying a `why`.
 
-Count them per rule instead. Six confirmations against the same `uncertain` rule mean the default
-is good and it should stop flagging. Six recategorizations mean the rule is wrong and you should
-go edit it. That is the only signal that ever tells you which, and a correction still never
-promotes itself to a rule, because the attribution is context the description does not contain.
+A rule is authored out of what you know about a merchant. It is exactly as unrecomputable as a
+correction, and keeping rules in a file elsewhere would only mean the books were a function of two
+histories joined by a commit nobody wrote down.
 
-Collapse the two and the signal is gone permanently: the log is append-only, and you cannot
-recover a distinction you never wrote down. This is the real cost of a vague event name.
+Per-rule events rather than snapshots of the set, because a snapshot names the effect (the set is
+different now) instead of the intent, and because the signal that tells a good rule from a bad one
+needs a rule to have an identity that survives being edited. Order is semantic, so `rule.moved`
+anchors on the rule it now precedes; if that anchor was later removed, the fold appends.
+
+### Nothing has to be acknowledged
+
+There is no `confirmed` event, and there is nothing to clear. Both would build an inbox: a list
+that only empties if you work it. The queue is the friction this tool exists to remove.
+
+**Silence is the confirmation.** If you did not correct a line, the rule stood. The signal that
+tells a good rule from a bad one is corrections divided by how often the rule fired, and both of
+those are already folds over the log. Six corrections out of six firings means go fix the rule. Six
+out of six hundred means it is fine.
 
 ### Commands and folds
 
 A command captures one intent, guards a precondition, and emits one event. `ImportStatement`,
-`Categorize`, `Confirm`, `Recategorize`, `Match`. Nothing else writes.
+`AddRule`, `ChangeRule`, `RemoveRule`, `MoveRule`, `Categorize`, `Match`. Nothing else writes.
 
 `TrackOnce` appends a fact that can only be true once and reports `ErrAlreadyTracked` otherwise,
 which is how re-importing an overlapping statement becomes a no-op rather than a second rent
@@ -119,9 +153,11 @@ business, so storage carries no domain knowledge: ordinary events leave `once_ke
 counts NULLs as distinct in a unique index, and only once-only events collide. The idempotency
 invariant is physical rather than remembered.
 
-Derived state stays derived. The pending flag is not stored: a line is pending when its
-categorization came from an `uncertain` rule and no `confirmed` or `recategorized` event follows
-it.
+Rules do not interleave with transactions in one chronological fold. If they did, a rule added in
+June would not reach a transaction imported in March, and fixing a rule would not fix history,
+which is the whole point of regenerating. So it is two folds over one log: rule events fold to the
+current rule set, that set categorizes every transaction, and assertions keyed to a fingerprint
+override the result.
 
 ### Storage
 
@@ -137,7 +173,7 @@ the books.
 ## Three tiers, and a model that never writes
 
 1. **Rules.** Deterministic, free, reproducible. Handles almost everything.
-2. **A model.** Only the lines no rule matched. It proposes a categorization; code writes it.
+2. **A model.** Only the lines that came out `Uncategorized`. It proposes postings; code writes.
 3. **You.** Never blocking. A digest, not a queue.
 
 A model may label. Code does the writing, the deduplication, and the arithmetic. Quarantining the
@@ -169,34 +205,38 @@ go run ./cli categorize \
 Output:
 
 ```text
-DATE        PAYEE                AMOUNT   POSTS TO                                    REVIEW
+DATE        PAYEE                AMOUNT   POSTS TO
 2026-03-01  Fuel Stop            -62.40   Expenses:Consulting:Travel:Fuel
+2026-03-02  Acme Hardware        -84.20   Expenses:Real Estate:Materials:Uncategorized
 2026-03-05  J. Smith             1600.00  Income:Real Estate:Rent:123 Example Street
-2026-03-12  UNKNOWN MERCHANT 88  -39.99   Suspense                                    ! no rule supplied a category
+2026-03-12  UNKNOWN MERCHANT 88  -39.99   Uncategorized
 
-9 lines posted: 7 confident, 2 flagged for review
+9 lines posted, 2 of them uncategorized
 ```
 
 ## Books
 
-`-format ledger` emits plain-text double-entry entries. Lines the rules are confident about are
-cleared (`*`). A line that is a defensible default, or whose kind is unknown, is written as pending
-(`!`) with its reason as a comment. Every line posts, so the books stay complete and balanced, and
-the guesses are trivial to find.
+`-format ledger` emits plain-text double-entry entries.
 
 ```sh
 go run ./cli categorize \
   -mapping cli/testdata/mapping.json \
   -rules   cli/testdata/rules.json \
   -csv     cli/testdata/statement.csv \
-  -format  ledger > statement.ledger
+  -format  ledger > books.ledger
 ```
+
+Every entry is **cleared** (`*`), because every line came off a bank statement and so has cleared
+the bank. Pending (`!`) means the bank has not reported a transaction yet, which is a real state
+and not one bookkeeper can produce from a statement. Nothing here borrows those flags to mean
+anything about categorization.
 
 The output is a real ledger file, so the usual tools work:
 
 ```sh
-ledger -f statement.ledger bal              # balances, which sum to zero
-ledger -f statement.ledger print --uncleared # only the lines still needing an answer
+ledger -f books.ledger bal                # balances, which sum to zero
+ledger -f books.ledger bal Uncategorized  # everything the rules could not name, at any depth
+ledger -f books.ledger print --uncleared  # empty, and correctly so
 ```
 
 ## Configuration
@@ -219,25 +259,29 @@ ordered, and for each field the first rule that supplies it wins.
 
 ```json
 [
-  { "match": "acme hardware", "payee": "Acme Hardware", "category": "Expenses:Repairs:Materials",
-    "uncertain": true, "reason": "hardware could serve any property" },
-  { "match": "city water", "payee": "City Water Utility", "category": "Expenses:Utilities:Water" }
+  { "match": "acme hardware", "payee": "Acme Hardware",
+    "category": "Expenses:Real Estate:Materials:Uncategorized" },
+  { "match": "city water", "payee": "City Water Utility",
+    "category": "Expenses:Real Estate:Utilities:Water:123 Example Street" }
 ]
 ```
 
 Categories are free-form account paths, so you can go as deep as your books do, down to the
-property and unit. No catch-all rule is needed: a statement line already knows which account it
-came from, and a line no rule matches posts to `Suspense`.
+property and unit, and stop at `Uncategorized` wherever you cannot. No catch-all rule is needed: a
+statement line already knows which account it came from, and a line no rule matches posts to
+`Uncategorized`.
 
 ## Design rules
 
-- **Deterministic where money is recorded.** The books are a pure function of the log and the
-  rules. A model proposes; code writes.
+- **Deterministic where money is recorded.** The books are a pure function of the log. A model
+  proposes; code writes.
 - **Idempotent end to end.** Every line carries a stable fingerprint, so a re-import is always
   safe. Two genuinely identical charges on one day stay two charges.
 - **Money is integer cents.** Floats never touch a ledger. Event data is raw JSON precisely so
   nothing round-trips through a float on the way in.
 - **Connectors know the outside world; the core does not.**
+- **Say only what is known.** Truncate an account path rather than guess a leaf, and never guess a
+  kind.
 - **Nothing blocks.** Every line posts, every question is a digest, and every correction is cheap
   because regenerating is cheap.
 
@@ -247,8 +291,9 @@ Built: the CSV source, the rules engine, the ledger writer, and the append-only 
 in-memory and SQLite adapters.
 
 Next, in order: `ImportStatement` and the transaction projection, so `categorize` reads the log and
-a re-import is a proven no-op. Then `Confirm` and `Recategorize`, which turn postings into event
-data and the pending flag into a fold. Then the model tier, the digest, and the destinations.
+a re-import is a proven no-op. Then the rule events, which move the rule set off disk and into the
+log. Then `Categorize`, which turns postings into event data. Then the model tier, the digest, and
+the destinations.
 
 ## Development
 

@@ -43,7 +43,7 @@ func TestTrackStampsEachEventAndReadsThemBackInOrder(t *testing.T) {
 	eachStorage(t, func(t *testing.T, s eventlog.Storage) {
 		log := eventlog.New(s)
 
-		for _, action := range []string{"imported", "categorized", "confirmed"} {
+		for _, action := range []string{"imported", "categorized", "matched"} {
 			e, err := log.Track(fact("abc", action))
 			if err != nil {
 				t.Fatalf("track %s: %v", action, err)
@@ -64,7 +64,7 @@ func TestTrackStampsEachEventAndReadsThemBackInOrder(t *testing.T) {
 		for _, e := range events {
 			got = append(got, e.Action)
 		}
-		want := []string{"imported", "categorized", "confirmed"}
+		want := []string{"imported", "categorized", "matched"}
 		if len(got) != len(want) {
 			t.Fatalf("got %v, want %v", got, want)
 		}
@@ -102,8 +102,8 @@ func TestTrackOnceScopesUniquenessToTheAction(t *testing.T) {
 		if _, err := log.TrackOnce(fact("abc", "imported")); err != nil {
 			t.Fatalf("import: %v", err)
 		}
-		if _, err := log.TrackOnce(fact("abc", "confirmed")); err != nil {
-			t.Fatalf("confirm: %v", err)
+		if _, err := log.TrackOnce(fact("abc", "matched")); err != nil {
+			t.Fatalf("match: %v", err)
 		}
 
 		events, _ := log.All()
@@ -113,15 +113,15 @@ func TestTrackOnceScopesUniquenessToTheAction(t *testing.T) {
 	})
 }
 
-// Correcting the same line twice is two facts, not an overwrite. The later fold wins, and the
+// Asserting a line's postings twice is two facts, not an overwrite. The later fold wins, and the
 // history of every correction survives.
 func TestTrackAllowsRepeatedEventsForTheSameRecordAndAction(t *testing.T) {
 	eachStorage(t, func(t *testing.T, s eventlog.Storage) {
 		log := eventlog.New(s)
 
 		for range 2 {
-			if _, err := log.Track(fact("abc", "recategorized")); err != nil {
-				t.Fatalf("recategorize: %v", err)
+			if _, err := log.Track(fact("abc", "categorized")); err != nil {
+				t.Fatalf("categorize: %v", err)
 			}
 		}
 
@@ -176,7 +176,7 @@ func TestDataRoundTripsWithoutPassingThroughAFloat(t *testing.T) {
 			t.Fatalf("marshal: %v", err)
 		}
 
-		e := fact("abc", "recategorized")
+		e := fact("abc", "categorized")
 		e.Data = data
 		if _, err := log.Track(e); err != nil {
 			t.Fatalf("track: %v", err)
@@ -201,7 +201,7 @@ func TestEventWithoutDataIsStillValidJSON(t *testing.T) {
 	eachStorage(t, func(t *testing.T, s eventlog.Storage) {
 		log := eventlog.New(s)
 
-		if _, err := log.Track(fact("abc", "confirmed")); err != nil {
+		if _, err := log.Track(fact("abc", "matched")); err != nil {
 			t.Fatalf("track: %v", err)
 		}
 

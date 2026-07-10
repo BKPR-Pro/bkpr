@@ -1,9 +1,9 @@
 // Command bookkeeper categorizes bank and card statements into a set of books.
 //
 // This slice covers the deterministic tier: read a CSV statement, apply an ordered rule set, and
-// report where each line posts. Every line posts. A line no rule categorizes parks in Suspense,
-// and one categorized by a defensible default posts to that default; both are flagged rather than
-// withheld. Later slices escalate the flagged ones to a model and then to a person.
+// report where each line posts. Every line posts. Where the rules run out of knowledge the account
+// path stops at Uncategorized rather than guessing, and later slices hand those to a model and
+// then to a person.
 package main
 
 import (
@@ -109,28 +109,23 @@ func loadMapping(path string) (source.Mapping, error) {
 
 func report(out *os.File, txs []model.Transaction, entries []model.Entry) error {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "DATE\tPAYEE\tAMOUNT\tPOSTS TO\tREVIEW")
+	fmt.Fprintln(w, "DATE\tPAYEE\tAMOUNT\tPOSTS TO")
 
-	var flagged int
+	var unknown int
 	for i, tx := range txs {
 		e := entries[i]
-
-		// Every line posts. A flagged line still shows where it landed; the flag is how you find it
-		// again, not a reason to withhold it.
-		review := ""
-		if e.Pending {
-			flagged++
-			review = "! " + e.Reason
+		if e.Uncategorized() {
+			unknown++
 		}
-
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			tx.Date.Format("2006-01-02"), e.Payee, dollars(tx.AmountCents), accounts(e), review)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			tx.Date.Format("2006-01-02"), e.Payee, dollars(tx.AmountCents), accounts(e))
 	}
 	if err := w.Flush(); err != nil {
 		return err
 	}
 
-	fmt.Fprintf(out, "\n%d lines posted: %d confident, %d flagged for review\n", len(txs), len(txs)-flagged, flagged)
+	// Every line posts, so the only thing left to say is where the rules ran out.
+	fmt.Fprintf(out, "\n%d lines posted, %d of them uncategorized\n", len(txs), unknown)
 	return nil
 }
 
