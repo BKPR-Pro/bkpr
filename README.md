@@ -48,17 +48,112 @@ Only the categorized side is stored. The posting against the account the stateme
 elided and inferred by the ledger, which is why an entry cannot be unbalanced: the postings must
 account for the whole line, and nothing else can name the source account.
 
-## Design rules
+## The log is the book of record
 
-- **Deterministic where money is recorded.** A model may propose categories; code does the writing,
-  the deduplication, and the arithmetic. The books are a pure function of statements, rules, and
-  decisions, so regenerating them is boring and a diff line means something actually changed.
-- **Idempotent end to end.** Every line carries a stable fingerprint, so a re-import is always
-  safe. Two genuinely identical charges on one day stay two charges.
-- **Money is integer cents.** Floats never touch a ledger.
-- **Connectors know the outside world; the core does not.** The core understands only normalized
-  transactions. CSV is the default transport because every bank exports it and it needs no
-  credentials.
+Double-entry bookkeeping is the oldest event-sourced system in continuous use. A ledger file is
+already an append-only log of immutable, time-ordered facts, and `ledger bal` is already a fold
+over it. So bookkeeper is built the same way, and the vocabulary is borrowed rather than invented.
+
+The whole design follows from one rule:
+
+> **The log holds only what cannot be recomputed. Everything else is a fold.**
+
+| input | recomputable? | so it lives |
+| --- | --- | --- |
+| a statement line | no, it came from outside | in the log |
+| a model's answer | no, it is nondeterministic and it cost money | in the log |
+| your judgment | no, the receipt is in your truck | in the log |
+| a rule | yes, it is deterministic data | in git |
+| a categorization | yes, it is `rules(transaction)` | derived on read |
+| a transfer pairing | yes, from the movement key | derived on read |
+| the ledger file | yes, from the log and the rules | a generated artifact |
+
+The last row is the one that changes how you work. **The ledger file is read-only output.** You
+correct the books by recording a fact and regenerating, not by editing the artifact. That is what
+buys the property everything else rests on: the books are a pure function of the log and the
+rules, so regenerating them is boring, and a changed diff line means something actually changed.
+
+### Events
+
+Events are immutable, past-tense facts, in the collection `transaction`, keyed by the
+transaction's fingerprint.
+
+| event | what it means |
+| --- | --- |
+| `transaction.imported` | a statement line was read in. Once per fingerprint, ever |
+| `transaction.categorized` | a line that had no categorization now has one |
+| `transaction.confirmed` | a flagged default was reviewed and kept |
+| `transaction.recategorized` | a categorization was reviewed and replaced |
+| `transaction.matched` | this line is the same movement as another; do not book it twice |
+
+An event's name says **what happened**. Its `actor` says **who**: you, a model, or a rule set at a
+given commit. Reading `actor` should never be necessary to know what kind of fact you are looking
+at, which is why there is no `categorized_by_model`. A person answering a `Suspense` line and a
+model answering one are doing the same thing, and the log should say so.
+
+Nothing is ever edited. Correcting a line twice appends two facts, the later fold wins, and how a
+categorization came to be survives next to what it currently is.
+
+### Why `confirmed` and `recategorized` are separate
+
+They fold identically. A single `settled` event would produce the same books, and it would be
+wrong.
+
+Count them per rule instead. Six confirmations against the same `uncertain` rule mean the default
+is good and it should stop flagging. Six recategorizations mean the rule is wrong and you should
+go edit it. That is the only signal that ever tells you which, and a correction still never
+promotes itself to a rule, because the attribution is context the description does not contain.
+
+Collapse the two and the signal is gone permanently: the log is append-only, and you cannot
+recover a distinction you never wrote down. This is the real cost of a vague event name.
+
+### Commands and folds
+
+A command captures one intent, guards a precondition, and emits one event. `ImportStatement`,
+`Categorize`, `Confirm`, `Recategorize`, `Match`. Nothing else writes.
+
+`TrackOnce` appends a fact that can only be true once and reports `ErrAlreadyTracked` otherwise,
+which is how re-importing an overlapping statement becomes a no-op rather than a second rent
+payment. `Track` appends a fact that may recur. Which facts are once-only is the caller's
+business, so storage carries no domain knowledge: ordinary events leave `once_key` NULL, SQLite
+counts NULLs as distinct in a unique index, and only once-only events collide. The idempotency
+invariant is physical rather than remembered.
+
+Derived state stays derived. The pending flag is not stored: a line is pending when its
+categorization came from an `uncertain` rule and no `confirmed` or `recategorized` event follows
+it.
+
+### Storage
+
+SQLite, because this is money. An interrupted cron run must not tear a line of the log in half,
+and fsync discipline for a book of record is not worth hand-rolling. `synchronous` is raised to
+`FULL`, because WAL's default trades away the last commit on power loss, which is the wrong trade
+here. [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) is pure Go, so deployment is
+still a single cross-compiled binary.
+
+Storage sits behind a small interface. The tests fold over an in-memory adapter; the file holds
+the books.
+
+## Three tiers, and a model that never writes
+
+1. **Rules.** Deterministic, free, reproducible. Handles almost everything.
+2. **A model.** Only the lines no rule matched. It proposes a categorization; code writes it.
+3. **You.** Never blocking. A digest, not a queue.
+
+A model may label. Code does the writing, the deduplication, and the arithmetic. Quarantining the
+nondeterminism is what keeps the books regenerable, and it is why a model's answer is written to
+the log: it cannot be recomputed, so it must be remembered.
+
+## Sources and destinations
+
+The core understands only normalized transactions. A **source** brings lines in; a **destination**
+acts on them. Only a connector knows about the outside world, and CSV is the default transport
+because every bank exports it and it needs no credentials.
+
+A destination that must not act twice sends `Event.Key()` as its `Idempotency-Key`. The event is
+durable before any side effect runs, so a retry rebuilds the identical key from the identical
+stored event. That is the only thing that makes a retry safe when the response was the part that
+got lost.
 
 ## Usage
 
@@ -133,6 +228,27 @@ ordered, and for each field the first rule that supplies it wins.
 Categories are free-form account paths, so you can go as deep as your books do, down to the
 property and unit. No catch-all rule is needed: a statement line already knows which account it
 came from, and a line no rule matches posts to `Suspense`.
+
+## Design rules
+
+- **Deterministic where money is recorded.** The books are a pure function of the log and the
+  rules. A model proposes; code writes.
+- **Idempotent end to end.** Every line carries a stable fingerprint, so a re-import is always
+  safe. Two genuinely identical charges on one day stay two charges.
+- **Money is integer cents.** Floats never touch a ledger. Event data is raw JSON precisely so
+  nothing round-trips through a float on the way in.
+- **Connectors know the outside world; the core does not.**
+- **Nothing blocks.** Every line posts, every question is a digest, and every correction is cheap
+  because regenerating is cheap.
+
+## Status
+
+Built: the CSV source, the rules engine, the ledger writer, and the append-only event log with its
+in-memory and SQLite adapters.
+
+Next, in order: `ImportStatement` and the transaction projection, so `categorize` reads the log and
+a re-import is a proven no-op. Then `Confirm` and `Recategorize`, which turn postings into event
+data and the pending flag into a fold. Then the model tier, the digest, and the destinations.
 
 ## Development
 
