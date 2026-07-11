@@ -70,7 +70,7 @@ Run "bookkeeper docs" for the full reference.
 
 usage:
   bookkeeper init         [dir]
-  bookkeeper rules   add  -match <re> -category <account> [-payee <name>] [-before <re>]
+  bookkeeper rules   add  -match <re> -category <account> [-payee <name>] [-meta <k=v> ...] [-before <re>]
   bookkeeper rules   set  -match <re> [-category <account>] [-payee <name>] [-why <reason>]
   bookkeeper rules   rm   -match <re>
   bookkeeper rules   mv   -match <re> [-before <re>]
@@ -108,10 +108,12 @@ SETUP
   sources list                    Show the registered connectors.
 
 RULES  (deterministic categorization; first matching rule wins per field)
-  rules add -match <re> -category <account> [-payee <name>] [-before <re>]
+  rules add -match <re> -category <account> [-payee <name>] [-meta <k=v> ...] [-before <re>]
       Add a rule. Order decides which of two matching rules wins; a new rule lands last
       unless -before places it ahead of another. Account paths are free-form and may stop
-      at Uncategorized wherever knowledge runs out.
+      at Uncategorized wherever knowledge runs out. -meta attaches opaque key=value pairs
+      (repeatable) that a destination reads by name, e.g. -meta rentapp.lease=31 tells the
+      push which lease a matching rent deposit belongs to.
   rules set -match <re> [-category <account>] [-payee <name>] [-why <reason>]
       Change an existing rule; only the fields you name change. This reclassifies every
       past line the rule matched, so it takes a reason.
@@ -348,18 +350,45 @@ func ruleSet(args []string) error {
 	}
 }
 
+// metaFlag collects repeated -meta key=value pairs into a rule's opaque metadata bag. The key is a
+// namespaced identifier a destination reads (e.g. rentapp.lease); the value is kept verbatim.
+type metaFlag map[string]string
+
+func (m metaFlag) String() string { return "" }
+
+func (m *metaFlag) Set(s string) error {
+	i := strings.Index(s, "=")
+	if i < 0 {
+		return fmt.Errorf("metadata %q must be key=value", s)
+	}
+	key := strings.TrimSpace(s[:i])
+	if key == "" {
+		return fmt.Errorf("metadata %q has an empty key", s)
+	}
+	if *m == nil {
+		*m = metaFlag{}
+	}
+	(*m)[key] = s[i+1:]
+	return nil
+}
+
 func ruleAdd(args []string) error {
 	fs := flag.NewFlagSet("rules add", flag.ExitOnError)
 	var r rules.Rule
+	var meta metaFlag
 	fs.StringVar(&r.Match, "match", "", "case-insensitive pattern to match the description")
 	fs.StringVar(&r.Category, "category", "", "account to post the line to")
 	fs.StringVar(&r.Payee, "payee", "", "payee to record on the entry")
+	fs.Var(&meta, "meta", "key=value carried onto the entry, repeatable, e.g. rentapp.lease=31")
 	before := fs.String("before", "", "place this rule ahead of the one matching this pattern")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if r.Match == "" {
 		return fmt.Errorf("-match is required")
+	}
+	if len(meta) > 0 {
+		r.Metadata = meta
 	}
 
 	log, closeLog, err := open()
