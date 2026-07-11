@@ -108,7 +108,7 @@ Events are immutable, past-tense facts.
 | `rule.changed` | a rule's answer is wrong |
 | `rule.removed` | a rule should stop firing |
 | `rule.moved` | two rules fire in the wrong order |
-| `source.added` / `source.removed` | a live connector, registered by name |
+| `connector.added` / `connector.removed` | a live connector, registered by name |
 
 An event's name says **what happened**. Its `actor` says **who**. Reading `actor` should never be
 necessary to know what kind of fact you are looking at, which is why there is no
@@ -159,7 +159,7 @@ lands under a new fingerprint) and `discard` the garbage one.
 
 A connector is the other kind of input, and it is bidirectional in principle: `push` writes to it
 today, and pulling from it by name is the same `pull` verb, built later. It is registered once
-(`sources add`) and logged, unlike a file's inline flags, because it persists; its bearer token is
+(`connectors add`) and logged, unlike a file's inline flags, because it persists; its bearer token is
 never stored, the registration keeping the name of the environment variable that holds it, read
 when the connector is used, so the log stays committable. Rent goes out before it comes in only
 because the bank statement is where the money is read from first, not because pulling a rent roll
@@ -284,7 +284,7 @@ deposit against that lease, keyed by the deposit's fingerprint so a repeat is a 
 
 ```sh
 export BK_RENT_TOKEN=...   # the rent app's bearer token
-bk sources add rent -kind rentapp -url https://rent.stcroixproperties.ca \
+bk connectors add rent -kind rentapp -url https://rent.stcroixproperties.ca \
   -token-env BK_RENT_TOKEN -account "Assets:Bank:Chequing" -currency CAD
 bk rules set -match "hyungjin" -category "Income:Real Estate:Rent:22 Lisgar Street" \
   -meta rentapp.lease=31

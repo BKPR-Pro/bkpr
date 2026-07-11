@@ -149,15 +149,15 @@ func push(args []string) error {
 	}
 	defer s.Close()
 
-	dest, ok, err := books.SourceByName(s.Log, name)
+	dest, ok, err := books.ConnectorByName(s.Log, name)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("push: no destination named %q; register it with `sources add`", name)
+		return fmt.Errorf("push: no connector named %q; register it with `connectors add`", name)
 	}
 	if dest.Kind != "rentapp" {
-		return fmt.Errorf("push: destination %q has kind %q, which cannot be pushed to", name, dest.Kind)
+		return fmt.Errorf("push: connector %q has kind %q, which cannot be pushed to", name, dest.Kind)
 	}
 	token := os.Getenv(dest.TokenEnv)
 	if token == "" {

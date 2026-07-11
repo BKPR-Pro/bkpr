@@ -37,8 +37,8 @@ func main() {
 		err = initStore(os.Args[2:])
 	case "pull":
 		err = pull(os.Args[2:])
-	case "sources":
-		err = sourceSet(os.Args[2:])
+	case "connectors":
+		err = connectorSet(os.Args[2:])
 	case "rules":
 		err = ruleSet(os.Args[2:])
 	case "categorize":
@@ -76,9 +76,9 @@ usage:
   bookkeeper rules   rm   -match <re>
   bookkeeper rules   mv   -match <re> [-before <re>]
   bookkeeper rules   list
-  bookkeeper sources add  <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
-  bookkeeper sources rm   <name>
-  bookkeeper sources list
+  bookkeeper connectors add  <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
+  bookkeeper connectors rm   <name>
+  bookkeeper connectors list
   bookkeeper pull         <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
   bookkeeper pull         <file.ledger>
   bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>]
@@ -101,13 +101,13 @@ SETUP
   init [dir]
       Create a set of books in dir (default: here).
 
-  sources add <name> -kind <kind> -url <url> -token-env <ENV> -account <a> [-currency <c>]
+  connectors add <name> -kind <kind> -url <url> -token-env <ENV> -account <a> [-currency <c>]
       Register a live connector. The bearer token is never stored: -token-env names the
       environment variable that holds it, read when the connector is used. A connector is
       bidirectional in principle: push writes to it today, and pulling from it by name is
       the same registry, built later. Registering one does not itself move any data.
-  sources rm <name>               Forget a connector.
-  sources list                    Show the registered connectors.
+  connectors rm <name>            Forget a connector.
+  connectors list                 Show the registered connectors.
 
 RULES  (deterministic categorization; first matching rule wins per field)
   rules set -match <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>]
@@ -137,7 +137,7 @@ BOOKKEEPING
       Drop a bad line from the books. The pulled fact stays in the log; a later fact
       supersedes it.
   push <connector> [-confirm]
-      Record rent the books already booked into a registered connector (see sources add),
+      Record rent the books already booked into a registered connector (see connectors add),
       so its paid/unpaid state stays current. Each rent deposit that a rule attributed to a
       lease (via -meta rentapp.lease=<id>) is recorded against that lease, keyed by the
       deposit's fingerprint so a repeat is a no-op. Without -confirm it is a dry run that
@@ -248,41 +248,41 @@ func pullCSV(log *eventlog.Log, path string, args []string) error {
 	return nil
 }
 
-// sourceSet dispatches `sources add|rm|list`.
-func sourceSet(args []string) error {
+// connectorSet dispatches `connectors add|rm|list`.
+func connectorSet(args []string) error {
 	if len(args) == 0 {
 		usage()
-		return fmt.Errorf("sources needs add, rm, or list")
+		return fmt.Errorf("connectors needs add, rm, or list")
 	}
 	switch args[0] {
 	case "add":
-		return sourceAdd(args[1:])
+		return connectorAdd(args[1:])
 	case "rm":
-		return sourceRemove(args[1:])
+		return connectorRemove(args[1:])
 	case "list":
-		return sourceList(args[1:])
+		return connectorList(args[1:])
 	default:
 		usage()
-		return fmt.Errorf("unknown sources subcommand %q", args[0])
+		return fmt.Errorf("unknown connectors subcommand %q", args[0])
 	}
 }
 
-func sourceAdd(args []string) error {
-	name, rest, err := firstArg(args, "a name for the source, e.g. rent")
+func connectorAdd(args []string) error {
+	name, rest, err := firstArg(args, "a name for the connector, e.g. rent")
 	if err != nil {
 		return err
 	}
-	fs := flag.NewFlagSet("sources add", flag.ExitOnError)
-	var s books.Source
-	fs.StringVar(&s.Kind, "kind", "rentapp", "which connector this source uses")
-	fs.StringVar(&s.URL, "url", "", "the connector's base URL")
-	fs.StringVar(&s.TokenEnv, "token-env", "", "the environment variable holding its bearer token")
-	fs.StringVar(&s.Account, "account", "", "the ledger account its transactions land in")
-	fs.StringVar(&s.Currency, "currency", "CAD", "the currency of its transactions")
+	fs := flag.NewFlagSet("connectors add", flag.ExitOnError)
+	var c books.Connector
+	fs.StringVar(&c.Kind, "kind", "rentapp", "which connector this is")
+	fs.StringVar(&c.URL, "url", "", "the connector's base URL")
+	fs.StringVar(&c.TokenEnv, "token-env", "", "the environment variable holding its bearer token")
+	fs.StringVar(&c.Account, "account", "", "the ledger account its transactions land in")
+	fs.StringVar(&c.Currency, "currency", "CAD", "the currency of its transactions")
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
-	s.Name = name
+	c.Name = name
 
 	log, closeLog, err := open()
 	if err != nil {
@@ -290,15 +290,15 @@ func sourceAdd(args []string) error {
 	}
 	defer closeLog()
 
-	if err := books.AddSource(log, "human", s); err != nil {
+	if err := books.AddConnector(log, "human", c); err != nil {
 		return err
 	}
-	fmt.Printf("source %s\n", s.Name)
+	fmt.Printf("connector %s\n", c.Name)
 	return nil
 }
 
-func sourceRemove(args []string) error {
-	name, _, err := firstArg(args, "the source to forget")
+func connectorRemove(args []string) error {
+	name, _, err := firstArg(args, "the connector to forget")
 	if err != nil {
 		return err
 	}
@@ -308,28 +308,28 @@ func sourceRemove(args []string) error {
 	}
 	defer closeLog()
 
-	if err := books.RemoveSource(log, "human", name); err != nil {
+	if err := books.RemoveConnector(log, "human", name); err != nil {
 		return err
 	}
-	fmt.Printf("removed source %s\n", name)
+	fmt.Printf("removed connector %s\n", name)
 	return nil
 }
 
-func sourceList(args []string) error {
+func connectorList(args []string) error {
 	log, closeLog, err := open()
 	if err != nil {
 		return err
 	}
 	defer closeLog()
 
-	set, err := books.Sources(log)
+	set, err := books.Connectors(log)
 	if err != nil {
 		return err
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tKIND\tURL\tACCOUNT\tCURRENCY\tTOKEN-ENV")
-	for _, s := range set {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, s.Kind, s.URL, s.Account, s.Currency, s.TokenEnv)
+	for _, c := range set {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", c.Name, c.Kind, c.URL, c.Account, c.Currency, c.TokenEnv)
 	}
 	return w.Flush()
 }
