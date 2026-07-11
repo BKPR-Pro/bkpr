@@ -46,6 +46,11 @@ type Posting struct {
 type Entry struct {
 	Payee    string
 	Postings []Posting
+
+	// Metadata is an opaque bag carried from the rule that categorized the line. The core neither
+	// reads nor validates it; a destination reads its own namespaced keys (e.g. rentapp.lease) to
+	// learn where to push. Empty when no rule supplied any.
+	Metadata map[string]string
 }
 
 // Balances reports whether the postings account for the whole statement line. The statement's sign

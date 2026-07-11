@@ -48,6 +48,39 @@ func TestAddRuleAppendsInOrder(t *testing.T) {
 	assertOrder(t, log, "city water", "water")
 }
 
+// A rule's metadata is part of the rule, so it must survive the round trip through the log: the
+// event stores it and the fold rebuilds it. This is what lets a destination read rentapp.lease off
+// a rule that was registered in a past session.
+func TestARulesMetadataSurvivesTheLog(t *testing.T) {
+	log := newLog()
+	r := rule("hyungjin", "Income:Real Estate:Rent:22 Lisgar Street")
+	r.Metadata = map[string]string{"rentapp.lease": "31"}
+	loaded(t, log, r)
+
+	set, err := books.Rules(log)
+	if err != nil {
+		t.Fatalf("Rules: %v", err)
+	}
+	if len(set) != 1 || set[0].Metadata["rentapp.lease"] != "31" {
+		t.Errorf("folded rule = %+v, want rentapp.lease=31 intact", set[0])
+	}
+}
+
+// End to end: a rule's metadata rides the fold onto the entry the push reads, so a categorized rent
+// deposit names the lease it should be recorded against.
+func TestLedgerCarriesRuleMetadataOntoTheEntry(t *testing.T) {
+	log := newLog()
+	r := rule("hyungjin", "Income:Real Estate:Rent:22 Lisgar Street")
+	r.Metadata = map[string]string{"rentapp.lease": "31"}
+	loaded(t, log, r)
+	importOne(t, log, line("dep", 3, 168000, "E-TRANSFER FROM HYUNGJIN SON"))
+
+	_, entries := ledger(t, log)
+	if len(entries) != 1 || entries[0].Metadata["rentapp.lease"] != "31" {
+		t.Fatalf("entry metadata = %v, want rentapp.lease=31", entries[0].Metadata)
+	}
+}
+
 // Order is semantic, so a rule can be placed ahead of another: `city water` must beat `water`.
 func TestAddRuleBeforePositionsIt(t *testing.T) {
 	log := newLog()

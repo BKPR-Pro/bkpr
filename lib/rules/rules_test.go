@@ -144,3 +144,48 @@ func TestInvalidRegexIsRejected(t *testing.T) {
 		t.Fatal("expected an error for an invalid regex")
 	}
 }
+
+// A rule carries an opaque metadata bag the engine neither reads nor validates, and Apply lands it
+// on the entry. It is the seam a destination (e.g. the rent app) reads its own keys from, so a
+// deposit categorized to a property can also name the lease it should be pushed against.
+func TestARuleCarriesItsMetadataOntoTheEntry(t *testing.T) {
+	e := engine(t, rules.Rule{
+		Match: `hyungjin`, Category: "Income:Real Estate:Rent:22 Lisgar Street",
+		Metadata: map[string]string{"rentapp.lease": "31"},
+	})
+
+	got := e.Apply(tx("E-TRANSFER FROM HYUNGJIN SON"))
+
+	if got.Metadata["rentapp.lease"] != "31" {
+		t.Errorf("metadata = %v, want rentapp.lease=31 carried onto the entry", got.Metadata)
+	}
+}
+
+// Metadata is first-wins per key, like the other fields: the earliest matching rule that supplies a
+// key owns it, and a later matching rule fills only the keys still empty. So the lease follows the
+// specific tenant rule even when a broader rule also matches.
+func TestMetadataIsFirstWinsPerKey(t *testing.T) {
+	e := engine(t,
+		rules.Rule{Match: `hyungjin`, Metadata: map[string]string{"rentapp.lease": "31"}},
+		rules.Rule{Match: `e-transfer`, Metadata: map[string]string{"rentapp.lease": "99", "channel": "etransfer"}},
+	)
+
+	got := e.Apply(tx("E-TRANSFER FROM HYUNGJIN SON"))
+
+	if got.Metadata["rentapp.lease"] != "31" {
+		t.Errorf("rentapp.lease = %q, want the specific rule's 31", got.Metadata["rentapp.lease"])
+	}
+	if got.Metadata["channel"] != "etransfer" {
+		t.Errorf("channel = %q, want the later rule to fill the empty key", got.Metadata["channel"])
+	}
+}
+
+// A line no rule matches, or a rule with no metadata, leaves the bag empty rather than non-nil
+// noise, so a reader can treat "no metadata" and "empty metadata" the same.
+func TestAnEntryWithoutRuleMetadataHasNone(t *testing.T) {
+	e := engine(t, rules.Rule{Match: `acme`, Category: "Expenses:Repairs"})
+
+	if got := e.Apply(tx("ACME HARDWARE")); len(got.Metadata) != 0 {
+		t.Errorf("metadata = %v, want none", got.Metadata)
+	}
+}

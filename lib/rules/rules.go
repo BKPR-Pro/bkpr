@@ -25,6 +25,11 @@ type Rule struct {
 	Payee    string `json:"payee,omitempty"`
 	Category string `json:"category,omitempty"`
 
+	// Metadata is an opaque bag the engine neither reads nor validates. Apply carries it onto the
+	// entry, first-wins per key, so a destination can read its own namespaced keys (e.g.
+	// rentapp.lease) off a categorized line without the core knowing what they mean.
+	Metadata map[string]string `json:"metadata,omitempty"`
+
 	re *regexp.Regexp
 }
 
@@ -55,7 +60,10 @@ func New(rs []Rule) (*Engine, error) {
 // Uncategorized rather than being withheld, or guessed into Expenses or Income.
 func (e *Engine) Apply(tx model.Transaction) model.Entry {
 	var payee, category string
+	var metadata map[string]string
 
+	// Every field is first-wins, so the walk cannot stop early: a later matching rule may still be
+	// the first to supply a payee, a category, or a metadata key an earlier match left empty.
 	for _, r := range e.rules {
 		if !r.re.MatchString(tx.Description) {
 			continue
@@ -66,8 +74,14 @@ func (e *Engine) Apply(tx model.Transaction) model.Entry {
 		if category == "" {
 			category = r.Category
 		}
-		if payee != "" && category != "" {
-			break
+		for k, v := range r.Metadata {
+			if _, taken := metadata[k]; taken {
+				continue
+			}
+			if metadata == nil {
+				metadata = map[string]string{}
+			}
+			metadata[k] = v
 		}
 	}
 
@@ -81,5 +95,6 @@ func (e *Engine) Apply(tx model.Transaction) model.Entry {
 	return model.Entry{
 		Payee:    payee,
 		Postings: []model.Posting{{Account: category, Amount: tx.Amount.Negate()}},
+		Metadata: metadata,
 	}
 }

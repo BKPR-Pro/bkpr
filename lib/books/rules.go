@@ -24,10 +24,11 @@ const (
 // ruleData is the payload of every rule event. Before names the rule this one precedes, because
 // order is semantic: `city water` must beat `water`. An empty Before means last.
 type ruleData struct {
-	Payee    string `json:"payee,omitempty"`
-	Category string `json:"category,omitempty"`
-	Before   string `json:"before,omitempty"`
-	Why      string `json:"why,omitempty"`
+	Payee    string            `json:"payee,omitempty"`
+	Category string            `json:"category,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+	Before   string            `json:"before,omitempty"`
+	Why      string            `json:"why,omitempty"`
 }
 
 // Rules folds the log into the current rule set, in order.
@@ -49,10 +50,10 @@ func Rules(log *eventlog.Log) ([]rules.Rule, error) {
 
 		switch e.Action {
 		case ActionAdded:
-			set = insertBefore(set, rules.Rule{Match: e.RecordID, Payee: data.Payee, Category: data.Category}, data.Before)
+			set = insertBefore(set, rules.Rule{Match: e.RecordID, Payee: data.Payee, Category: data.Category, Metadata: data.Metadata}, data.Before)
 		case ActionChanged:
 			if i := indexOf(set, e.RecordID); i >= 0 {
-				set[i].Payee, set[i].Category = data.Payee, data.Category
+				set[i].Payee, set[i].Category, set[i].Metadata = data.Payee, data.Category, data.Metadata
 			}
 		case ActionRemoved:
 			set, _ = takeOut(set, e.RecordID)
@@ -84,7 +85,7 @@ func AddRule(log *eventlog.Log, actor string, r rules.Rule, before string) error
 	if before != "" && indexOf(current, before) < 0 {
 		return fmt.Errorf("books: no rule matches %q to place this one before", before)
 	}
-	return trackRule(log, actor, r.Match, ActionAdded, ruleData{Payee: r.Payee, Category: r.Category, Before: before})
+	return trackRule(log, actor, r.Match, ActionAdded, ruleData{Payee: r.Payee, Category: r.Category, Metadata: r.Metadata, Before: before})
 }
 
 // SetRule changes what an existing rule answers. This reclassifies every past line the rule
@@ -97,7 +98,7 @@ func SetRule(log *eventlog.Log, actor, why string, r rules.Rule) error {
 	if indexOf(current, r.Match) < 0 {
 		return fmt.Errorf("books: no rule matches %q; add it first", r.Match)
 	}
-	return trackRule(log, actor, r.Match, ActionChanged, ruleData{Payee: r.Payee, Category: r.Category, Why: why})
+	return trackRule(log, actor, r.Match, ActionChanged, ruleData{Payee: r.Payee, Category: r.Category, Metadata: r.Metadata, Why: why})
 }
 
 // RemoveRule drops a rule. The lines it categorized fall back to whatever else matches, or to
