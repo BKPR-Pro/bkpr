@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -60,8 +61,14 @@ func main() {
 		err = renderBooks(os.Args[2:])
 	case "docs":
 		docs(os.Stdout)
+	case "version":
+		versionCmd(os.Stdout)
 	case "help", "-h", "--help":
-		usage()
+		if len(os.Args) > 2 {
+			err = helpTopic(os.Stdout, os.Args[2])
+		} else {
+			usage()
+		}
 	default:
 		usage()
 		os.Exit(2)
@@ -74,76 +81,102 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `bookkeeper - turn statements into books
+	fmt.Fprint(os.Stderr, `bookkeeper (bk) - turn statements into books
 
 Every command finds the nearest .bookkeeper directory by walking up, as git does.
-Run "bookkeeper docs" for the full reference.
+Run "bk help <command>" for one command, "bk docs" for the full reference.
+Wherever a command takes a fingerprint, a unique prefix is enough, as with a git hash.
 
 usage:
-  bookkeeper init         [dir]
-  bookkeeper rules   set  -match <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]
-  bookkeeper rules   rm   -match <re>
-  bookkeeper rules   mv   -match <re> [-before <re>]
-  bookkeeper rules   list
-  bookkeeper connectors register <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
-  bookkeeper connectors rm   <name>
-  bookkeeper connectors list
-  bookkeeper import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
-  bookkeeper import       <file.ledger>
-  bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
-  bookkeeper void         -tx <fingerprint> [-why <reason>] [-actor <name>]
-  bookkeeper match        -tx <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
-  bookkeeper invoice raise   -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
-  bookkeeper invoice settle  -id <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
-  bookkeeper invoice void    -id <fingerprint> [-why <reason>] [-actor <name>]
-  bookkeeper invoice list
-  bookkeeper invoice aging   [-as-of <YYYY-MM-DD>]
-  bookkeeper bill    receive -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
-  bookkeeper bill    settle  -id <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
-  bookkeeper bill    void    -id <fingerprint> [-why <reason>] [-actor <name>]
-  bookkeeper bill    list
-  bookkeeper bill    aging   [-as-of <YYYY-MM-DD>]
-  bookkeeper review
-  bookkeeper export       <connector> [-confirm]
-  bookkeeper books        [-format table|ledger] [-basis cash|accrual] [-stdout]
-  bookkeeper docs
+  bk init         [dir]
+  bk rules   set  -match <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]
+  bk rules   rm   -match <re>
+  bk rules   mv   -match <re> [-before <re>]
+  bk rules   list
+  bk connectors register <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
+  bk connectors rm   <name>
+  bk connectors list
+  bk import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
+  bk import       <file.ledger>
+  bk categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
+  bk void         -tx <fingerprint> [-why <reason>] [-actor <name>]
+  bk match        -tx <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
+  bk invoice raise   -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
+  bk invoice settle  -id <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
+  bk invoice void    -id <fingerprint> [-why <reason>] [-actor <name>]
+  bk invoice list
+  bk invoice aging   [-as-of <YYYY-MM-DD>]
+  bk bill    receive -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
+  bk bill    settle  -id <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
+  bk bill    void    -id <fingerprint> [-why <reason>] [-actor <name>]
+  bk bill    list
+  bk bill    aging   [-as-of <YYYY-MM-DD>]
+  bk review       [-format table|json]
+  bk export       <connector> [-confirm]
+  bk books        [-format table|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-stdout]
+  bk help         [command]
+  bk docs
+  bk version
 `)
 }
 
-// docs prints the full command reference, so the CLI is self-documenting.
-func docs(w io.Writer) {
-	fmt.Fprint(w, `bookkeeper - turn bank and card statements into a plain-text double-entry ledger.
+// docTopic is one command's block of the reference: the names `help` answers to, and the text
+// `docs` prints. One source feeds both, so the two can never drift apart.
+type docTopic struct {
+	names []string
+	text  string
+}
+
+// docGroup is a titled run of topics, so `docs` keeps the reference's shape.
+type docGroup struct {
+	title  string
+	topics []docTopic
+}
+
+const docsPreamble = `bookkeeper (bk) - turn bank and card statements into a plain-text double-entry ledger.
 
 A set of books lives in a .bookkeeper directory, found by walking up from the current
 directory the way git finds .git. The log inside it (log.jsonl) is the book of record;
 everything else, including the ledger artifact, is a fold over it and is regenerated.
 
-SETUP
-  init [dir]
-      Create a set of books in dir (default: here).
+`
 
-  connectors register <name> -kind <kind> -url <url> -token-env <ENV> -account <a> [-currency <c>]
+const docsFooter = `Wherever a command takes a fingerprint (-tx, -id, -with), a unique prefix of at least
+four characters is enough, as with a git hash; review and the list commands print the
+fingerprints to quote. See the README for the design.
+`
+
+var reference = []docGroup{
+	{"SETUP", []docTopic{
+		{[]string{"init"}, `  init [dir]
+      Create a set of books in dir (default: here).
+`},
+		{[]string{"connectors"}, `  connectors register <name> -kind <kind> -url <url> -token-env <ENV> -account <a> [-currency <c>]
       Register a live connector. The bearer token is never stored: -token-env names the
       environment variable that holds it, read when the connector is used. A connector is
       bidirectional in principle: export writes to it today, and importing from it by name
       is the same registry, built later. Registering one does not itself move any data.
   connectors rm <name>            Forget a connector.
   connectors list                 Show the registered connectors.
-
-RULES  (deterministic categorization; first matching rule wins per field)
-  rules set -match <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>]
+`},
+	}},
+	{"RULES  (deterministic categorization; first matching rule wins per field)", []docTopic{
+		{[]string{"rules"}, `  rules set -match <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>]
       Add a rule, or change one already matching this pattern. On an existing rule only the
       fields you name change, and since that reclassifies every past line it matched, it
       takes a -why. A new rule lands last unless -before places it ahead of another. Account
       paths are free-form and may stop at Uncategorized wherever knowledge runs out. -meta
       attaches opaque key=value pairs (repeatable) that a connector reads by name, e.g.
       -meta rentapp.lease=31 tells the export which lease a matching rent deposit belongs to.
+      Either way it reports how many lines the books reclassified, so a pattern that catches
+      nothing (or too much) is visible the moment it is written.
   rules rm  -match <re>           Remove a rule.
   rules mv  -match <re> [-before <re>]   Reorder a rule (-before omitted moves it last).
   rules list                      Show the rules in order.
-
-BOOKKEEPING
-  import <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>)
+`},
+	}},
+	{"BOOKKEEPING", []docTopic{
+		{[]string{"import"}, `  import <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>)
                     [-date <col>] [-description <col>] [-date-format <layout>]
   import <file.ledger>
       Read transactions in. A file is a one-time input: a CSV does not name its own account,
@@ -152,7 +185,10 @@ BOOKKEEPING
       imported raw and the rules place it, so a ledger file's own categorization is not
       carried in. Importing from a registered connector by name is the same verb, built
       later; the bank statement is where the money is read from first.
-  categorize -tx <fingerprint> (-category <account> | -post <account>=<amount> ... |
+      -date-format is a Go layout: the reference date Jan 2, 2006 written the way the column
+      writes dates, so MM/DD/YYYY is -date-format 01/02/2006 (the default is 2006-01-02).
+`},
+		{[]string{"categorize"}, `  categorize -tx <fingerprint> (-category <account> | -post <account>=<amount> ... |
              -sell <account>=<qty> ... -gain <account>) [-payee <name>] [-why <reason>] [-actor <name>]
       Assert the postings for one line, overriding the rule for that line only. Use -post
       more than once to split one charge across accounts. A -post amount may name its own
@@ -162,25 +198,31 @@ BOOKKEEPING
       gain, is folded from your purchases: -sell "Assets:Brokerage:AAPL=10 AAPL" -gain "Income:Capital Gains".
       -actor records who decided (default human), so a model driving this command is told
       apart from a person in the log; rules set and void take it too.
-  void -tx <fingerprint> [-why <reason>] [-actor <name>]
+`},
+		{[]string{"void"}, `  void -tx <fingerprint> [-why <reason>] [-actor <name>]
       Annul a bad imported line. The imported fact stays in the log; a later fact supersedes
       it. Voiding an invoice is the same verb on a different noun: invoice void.
-  match -tx <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
+`},
+		{[]string{"match"}, `  match -tx <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
       Override the automatic transfer fold, which pairs the two sightings of one movement
       only when each names the other's account. -with forces a pair it missed, dropping the
       later sighting; -break keeps a line the fold wrongly paired. A later match supersedes.
-  review
-      Print the decision queue as JSON: the lines the rules could not place, each with its
-      fingerprint, date, amount, description, and where it currently posts. This is the
-      surface an external model reads to know what needs categorizing; it never writes, and
-      the model answers back through categorize and rules set.
-  export <connector> [-confirm]
+`},
+		{[]string{"review"}, `  review [-format table|json]
+      Print the decision queue: the lines the rules could not place, each with its
+      fingerprint, date, amount, description, and where it currently posts. The table
+      (default) is for a person; -format json is the surface an external model reads to
+      know what needs categorizing. It never writes, and the answers come back through
+      categorize and rules set.
+`},
+		{[]string{"export"}, `  export <connector> [-confirm]
       Write rent the books already booked out to a registered connector (see connectors register),
       so its paid/unpaid state stays current. Each rent deposit that a rule attributed to a
       lease (via -meta rentapp.lease=<id>) is recorded against that lease, keyed by the
       deposit's fingerprint so a repeat is a no-op. Without -confirm it is a dry run that
       prints what it would send.
-  books [-format table|ledger] [-basis cash|accrual] [-since YYYY-MM-DD] [-stdout]
+`},
+		{[]string{"books"}, `  books [-format table|ledger] [-basis cash|accrual] [-since YYYY-MM-DD] [-stdout]
       Fold the log into a table (default), or regenerate .bookkeeper/books.ledger. -stdout
       writes the ledger to standard output instead of the store. -basis chooses the lens:
       cash (the default) books only money that moved; accrual also books every open invoice and
@@ -191,45 +233,119 @@ BOOKKEEPING
       accruing everything. An accrual before the date reads as cash (its payment books as income
       or expense when it lands). The caveat is a receivable open across the date: it is not shown
       until it is paid, when it books as cash.
-
-INVOICES AND BILLS  (value recognized before its cash; only shown on -basis accrual)
-  invoice raise -party <name> -amount <amt> -category <Income:...> [-account <a>] [-date <d>] [-currency <c>]
+`},
+	}},
+	{"INVOICES AND BILLS  (value recognized before its cash; only shown on -basis accrual)", []docTopic{
+		{[]string{"invoice"}, `  invoice raise -party <name> -amount <amt> -category <Income:...> [-account <a>] [-date <d>] [-currency <c>]
       Raise an invoice: revenue owed to you, earned and billed before the cash moves. It debits
       a receivable and credits income. -account names where it parks, defaulting to
       Assets:Receivable. -date is when the revenue was earned (default today), not when it will
       be paid. The amount is a positive magnitude. Raising the same invoice twice is a no-op,
       keyed by a fingerprint of its content, exactly as re-importing a statement is.
-  bill receive -party <name> -amount <amt> -category <Expenses:...> [-account <a>] [-date <d>] [-currency <c>]
+`},
+		{[]string{"bill"}, `  bill receive -party <name> -amount <amt> -category <Expenses:...> [-account <a>] [-date <d>] [-currency <c>]
       Receive a bill: money you owe, the mirror of an invoice. It debits an expense and credits
       a payable, defaulting to Liabilities:Payable. Everything else matches invoice raise.
-  invoice settle -id <fingerprint> (-tx <fingerprint> | -reopen)
+`},
+		{[]string{"invoice", "bill"}, `  invoice settle -id <fingerprint> (-tx <fingerprint> | -reopen)
   bill settle    -id <fingerprint> (-tx <fingerprint> | -reopen)
       Record that a bank line paid an invoice or bill, so on the accrual basis the cash clears
       the receivable or payable instead of booking the income or expense a second time (that
       was booked when the accrual was raised). A memo does not reliably name which accrual a
       line clears, so this pairing is recorded rather than guessed. -reopen unlinks it; a later
       settle supersedes.
-  invoice void -id <fingerprint> [-why <reason>]
+`},
+		{[]string{"invoice", "bill"}, `  invoice void -id <fingerprint> [-why <reason>]
   bill void    -id <fingerprint> [-why <reason>]
       Drop an accrual that should not have been raised. The same verb as voiding a bad import:
       the raised fact stays in the log; a later fact supersedes it.
-  invoice list
+`},
+		{[]string{"invoice", "bill"}, `  invoice list
   bill list
       List the invoices or bills with their fingerprints, date, party, amount, category, parked
       account, and the line that settled each. An open one also lists CANDIDATES: the bank lines
       that plausibly settle it (same amount, within a few months, not already used elsewhere), so
       settling is picking a fingerprint from a short list rather than grepping the log. The offer
       is never applied on its own, because a memo does not prove which accrual a line clears.
-  invoice aging [-as-of <YYYY-MM-DD>]
+`},
+		{[]string{"invoice", "bill"}, `  invoice aging [-as-of <YYYY-MM-DD>]
   bill aging    [-as-of <YYYY-MM-DD>]
       Age the open receivables (invoices) or payables (bills): what is still owed, oldest first,
       each bucketed by how long — current, 31-60, 61-90, 90+ — with a subtotal per bucket. -as-of
       ages against a date other than today. Settled and voided accruals have already left the fold,
       so only what is genuinely outstanding appears.
+`},
+	}},
+}
 
-Fingerprints come from the log; find an uncategorized line's fingerprint there to
-categorize it. See the README for the design.
-`)
+// docs prints the full command reference, so the CLI is self-documenting.
+func docs(w io.Writer) {
+	fmt.Fprint(w, docsPreamble)
+	for _, g := range reference {
+		fmt.Fprintln(w, g.title)
+		for i, t := range g.topics {
+			if i > 0 {
+				fmt.Fprintln(w)
+			}
+			fmt.Fprint(w, t.text)
+		}
+		fmt.Fprintln(w)
+	}
+	fmt.Fprint(w, docsFooter)
+}
+
+// helpTopic prints the reference for one command, so finding a flag does not mean scrolling the
+// whole of docs.
+func helpTopic(w io.Writer, name string) error {
+	var found bool
+	for _, g := range reference {
+		for _, t := range g.topics {
+			for _, n := range t.names {
+				if n != name {
+					continue
+				}
+				if found {
+					fmt.Fprintln(w)
+				}
+				fmt.Fprint(w, t.text)
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		return fmt.Errorf(`no help for %q; run "bk docs" for the full reference`, name)
+	}
+	return nil
+}
+
+// versionCmd prints what build this is, from the info the Go toolchain embeds: the module version
+// when installed by tag, or the VCS revision when built from a checkout.
+func versionCmd(w io.Writer) {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		fmt.Fprintln(w, "bk (unknown build)")
+		return
+	}
+	line := "bk " + info.Main.Version
+	var revision, modified string
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			revision = s.Value
+		case "vcs.modified":
+			if s.Value == "true" {
+				modified = ", modified"
+			}
+		}
+	}
+	if len(revision) > 12 {
+		revision = revision[:12]
+	}
+	if revision != "" {
+		line += fmt.Sprintf(" (%s%s)", revision, modified)
+	}
+	fmt.Fprintln(w, line)
 }
 
 func initStore(args []string) error {
@@ -308,7 +424,27 @@ func importLedger(log *eventlog.Log, path string) error {
 		return err
 	}
 	fmt.Printf("%d entries read: %d imported, %d already in the log\n", len(txs), result.Imported, result.Skipped)
+	uncategorizedHint(log)
 	return nil
+}
+
+// uncategorizedHint says where the rules ran out after an import, so the next step is named rather
+// than remembered. It is best-effort: the import it follows has already succeeded, so a fold that
+// cannot run only costs the hint.
+func uncategorizedHint(log *eventlog.Log) {
+	_, entries, err := books.Ledger(log)
+	if err != nil {
+		return
+	}
+	var n int
+	for _, e := range entries {
+		if e.Uncategorized() {
+			n++
+		}
+	}
+	if n > 0 {
+		fmt.Printf("%d lines in the books are uncategorized; bk review lists them\n", n)
+	}
 }
 
 func importCSV(log *eventlog.Log, path string, args []string) error {
@@ -318,7 +454,7 @@ func importCSV(log *eventlog.Log, path string, args []string) error {
 	fs.StringVar(&m.Currency, "currency", "", "the account's currency, e.g. CAD")
 	fs.StringVar(&m.Date, "date", "Date", "header of the date column")
 	fs.StringVar(&m.Description, "description", "Description", "header of the memo column")
-	fs.StringVar(&m.DateFormat, "date-format", "2006-01-02", "Go date layout the column uses")
+	fs.StringVar(&m.DateFormat, "date-format", "2006-01-02", "Go date layout the column uses, e.g. 01/02/2006 for MM/DD/YYYY")
 	fs.StringVar(&m.Amount, "amount", "", "header of a single signed amount column")
 	fs.StringVar(&m.Debit, "debit", "", "header of the debit column, if amounts are a pair")
 	fs.StringVar(&m.Credit, "credit", "", "header of the credit column, if amounts are a pair")
@@ -351,6 +487,7 @@ func importCSV(log *eventlog.Log, path string, args []string) error {
 	}
 
 	fmt.Printf("%d lines read: %d imported, %d already in the log\n", len(txs), result.Imported, result.Skipped)
+	uncategorizedHint(log)
 	return nil
 }
 
@@ -517,11 +654,53 @@ func ruleSetOne(args []string) error {
 	}
 	defer closeLog()
 
+	was, err := entriesByTx(log)
+	if err != nil {
+		return err
+	}
 	if err := upsertRule(log, r, provided, *before, *why, *actor); err != nil {
 		return err
 	}
-	fmt.Printf("rule %q\n", r.Match)
+	now, err := entriesByTx(log)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("rule %q: %d lines reclassified\n", r.Match, reclassified(was, now))
 	return nil
+}
+
+// entriesByTx folds the books into a comparable rendering per line, keyed by fingerprint, so the
+// effect of a rule edit can be counted: fold before, fold after, and the differing lines are the
+// reclassification. Editing a rule rewrites history, and the count says how much, at the moment it
+// happens — a pattern that catches nothing (or everything) is visible without rendering the books.
+func entriesByTx(log *eventlog.Log) (map[string]string, error) {
+	txs, entries, err := books.Ledger(log)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(txs))
+	for i, tx := range txs {
+		out[tx.ID] = entries[i].Payee + "\x00" + accounts(entries[i])
+	}
+	return out, nil
+}
+
+// reclassified counts the lines whose entries differ between two folds of the books, including
+// lines the edit added or removed (a changed category can make or break a transfer pairing, which
+// drops or restores a line).
+func reclassified(was, now map[string]string) int {
+	var n int
+	for id, before := range was {
+		if after, ok := now[id]; !ok || after != before {
+			n++
+		}
+	}
+	for id := range now {
+		if _, ok := was[id]; !ok {
+			n++
+		}
+	}
+	return n
 }
 
 // upsertRule adds r, or changes the rule already matching its pattern. On a change only the named
@@ -583,10 +762,18 @@ func ruleRemove(args []string) error {
 	}
 	defer closeLog()
 
+	was, err := entriesByTx(log)
+	if err != nil {
+		return err
+	}
 	if err := books.RemoveRule(log, "human", *match); err != nil {
 		return err
 	}
-	fmt.Printf("removed rule %q\n", *match)
+	now, err := entriesByTx(log)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("removed rule %q: %d lines reclassified\n", *match, reclassified(was, now))
 	return nil
 }
 
@@ -607,10 +794,18 @@ func ruleMove(args []string) error {
 	}
 	defer closeLog()
 
+	was, err := entriesByTx(log)
+	if err != nil {
+		return err
+	}
 	if err := books.MoveRule(log, "human", *match, *before); err != nil {
 		return err
 	}
-	fmt.Printf("moved rule %q\n", *match)
+	now, err := entriesByTx(log)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("moved rule %q: %d lines reclassified\n", *match, reclassified(was, now))
 	return nil
 }
 
@@ -755,7 +950,8 @@ func categorize(args []string) error {
 	if err := books.Categorize(s.Log, *actor, *why, *txID, *payee, post); err != nil {
 		return err
 	}
-	fmt.Printf("categorized %s\n", *txID)
+	// tx.ID rather than the argument: a quoted prefix echoes back as the whole fingerprint.
+	fmt.Printf("categorized %s\n", tx.ID)
 	return nil
 }
 
@@ -1344,8 +1540,13 @@ func report(out *os.File, txs []model.Transaction, entries []model.Entry) error 
 		return err
 	}
 
-	// Every line posts, so the only thing left to say is where the rules ran out.
-	fmt.Fprintf(out, "\n%d lines posted, %d of them uncategorized\n", len(txs), unknown)
+	// Every line posts, so the only thing left to say is where the rules ran out, and where the
+	// fingerprints to fix them are found.
+	if unknown > 0 {
+		fmt.Fprintf(out, "\n%d lines posted, %d of them uncategorized (bk review lists them with fingerprints)\n", len(txs), unknown)
+	} else {
+		fmt.Fprintf(out, "\n%d lines posted, %d of them uncategorized\n", len(txs), unknown)
+	}
 	return nil
 }
 

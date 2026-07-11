@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,6 +72,38 @@ func TestReviewIncludesAnUncategorizedLeaf(t *testing.T) {
 	}
 	if len(rep.Uncategorized) != 1 || rep.Uncategorized[0].PostsTo[0] != "Expenses:Materials:Uncategorized" {
 		t.Fatalf("got %+v, want the leaf line with its partial account", rep.Uncategorized)
+	}
+}
+
+// The table is the human surface of the queue: the fingerprint every correction is keyed by, in
+// the first column, and a closing line naming the two ways to answer.
+func TestReviewTableListsTheFingerprints(t *testing.T) {
+	rep, err := reviewData(reviewLog(t))
+	if err != nil {
+		t.Fatalf("reviewData: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := reviewTable(&buf, rep); err != nil {
+		t.Fatalf("reviewTable: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "FINGERPRINT") || !strings.Contains(out, "mystery") {
+		t.Errorf("table should carry the fingerprint column:\n%s", out)
+	}
+	if !strings.Contains(out, "categorize -tx") {
+		t.Errorf("table should close by naming the next step:\n%s", out)
+	}
+}
+
+// An empty queue says so, rather than printing a bare header over nothing.
+func TestReviewTableSaysWhenThereIsNothingToPlace(t *testing.T) {
+	var buf bytes.Buffer
+	if err := reviewTable(&buf, reviewReport{}); err != nil {
+		t.Fatalf("reviewTable: %v", err)
+	}
+	if !strings.Contains(buf.String(), "nothing to review") {
+		t.Errorf("got %q, want the all-clear", buf.String())
 	}
 }
 

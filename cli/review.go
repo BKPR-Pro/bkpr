@@ -2,7 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
 	"os"
+	"strings"
+	"text/tabwriter"
 
 	"github.com/dallasread/bookkeeper/lib/books"
 	"github.com/dallasread/bookkeeper/lib/eventlog"
@@ -63,9 +68,16 @@ func postingAccounts(e model.Entry) []string {
 	return out
 }
 
-// review prints the decision queue as JSON, the surface an external model reads to know what needs
-// categorizing. It never writes; the model answers back through categorize and rules set.
+// review prints the decision queue: the lines the rules could not place, each with the fingerprint
+// a correction is keyed by. The table is for a person; -format json is the surface an external
+// model reads. It never writes; the answers come back through categorize and rules set.
 func review(args []string) error {
+	fs := flag.NewFlagSet("review", flag.ExitOnError)
+	format := fs.String("format", "table", "output format: table for a person, json for a model")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
 	s, err := store.Open(".")
 	if err != nil {
 		return err
@@ -76,7 +88,39 @@ func review(args []string) error {
 	if err != nil {
 		return err
 	}
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(rep)
+
+	switch *format {
+	case "table":
+		return reviewTable(os.Stdout, rep)
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(rep)
+	default:
+		return fmt.Errorf("unknown format %q: want table or json", *format)
+	}
+}
+
+// reviewTable renders the queue for a person: the fingerprint first, because it is the handle every
+// correction takes, and a closing line that says what to do with one.
+func reviewTable(out io.Writer, rep reviewReport) error {
+	if len(rep.Uncategorized) == 0 {
+		fmt.Fprintln(out, "nothing to review: every line is categorized")
+		return nil
+	}
+
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "FINGERPRINT\tDATE\tACCOUNT\tAMOUNT\tDESCRIPTION\tPOSTS TO")
+	for _, item := range rep.Uncategorized {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			item.Fingerprint, item.Date, item.Account, item.Amount, item.Description,
+			strings.Join(item.PostsTo, " + "))
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(out, "\n%d lines to place: categorize -tx <fingerprint> answers one, rules set answers every line like it\n",
+		len(rep.Uncategorized))
+	return nil
 }
