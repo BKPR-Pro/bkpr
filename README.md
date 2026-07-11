@@ -405,9 +405,21 @@ The offer is never taken on its own — the fold still will not decide which lin
 
 Because the basis is a lens and invoices are additive facts, you can **start on cash and turn on
 accrual later** with no migration: raise invoices from whatever day you begin, and every period
-before that reads identically under both bases, because there is nothing there to accrue. The one
-honest caveat is the seam — a period that straddles the switch mixes the two — and the log dates
-exactly when the first `invoice.raised` appears, so the switch documents itself.
+before that reads identically under both bases, because there is nothing there to accrue.
+
+`-since` makes that switch explicit when you want it:
+
+```sh
+bk books -basis accrual -since 2026-07-01   # accrue only invoices/bills dated on or after July 1
+```
+
+On the accrual basis it books only accruals dated on or after the effective date; an earlier one is
+dropped whole and reads as cash — no receivable, and its payment books as ordinary income or expense
+when it lands. This is a read-time argument, never stored, so the seam it creates is a fact about how
+you are reading the log, not a change to it. The one honest caveat is a receivable open *across* the
+date: it is not shown until its cash arrives, when it books as cash rather than clearing a receivable
+that was never raised. (Carrying those forward as an opening balance is the natural next step, and is
+not precluded.)
 
 ### Fixing a rule fixes history
 

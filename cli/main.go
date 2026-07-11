@@ -178,12 +178,17 @@ BOOKKEEPING
       lease (via -meta rentapp.lease=<id>) is recorded against that lease, keyed by the
       deposit's fingerprint so a repeat is a no-op. Without -confirm it is a dry run that
       prints what it would send.
-  books [-format table|ledger] [-basis cash|accrual] [-stdout]
+  books [-format table|ledger] [-basis cash|accrual] [-since YYYY-MM-DD] [-stdout]
       Fold the log into a table (default), or regenerate .bookkeeper/books.ledger. -stdout
       writes the ledger to standard output instead of the store. -basis chooses the lens:
-      cash (the default) books only money that moved; accrual also books every open invoice,
-      and lets the deposit that pays one clear its receivable. The basis is a read-time choice
-      over one log, so the same books read either way and switch with no rewrite.
+      cash (the default) books only money that moved; accrual also books every open invoice and
+      bill, and lets the line that pays one clear its receivable or payable. The basis is a
+      read-time choice over one log, so the same books read either way and switch with no rewrite.
+      -since sets the effective date of that switch: on -basis accrual only invoices and bills
+      dated on or after it are booked, so you can turn on accrual mid-year without retroactively
+      accruing everything. An accrual before the date reads as cash (its payment books as income
+      or expense when it lands). The caveat is a receivable open across the date: it is not shown
+      until it is paid, when it books as cash.
 
 INVOICES AND BILLS  (value recognized before its cash; only shown on -basis accrual)
   invoice raise -party <name> -amount <amt> -category <Income:...> [-account <a>] [-date <d>] [-currency <c>]
@@ -1149,12 +1154,23 @@ func renderBooks(args []string) error {
 	fs := flag.NewFlagSet("books", flag.ExitOnError)
 	format := fs.String("format", "table", "output format: table or ledger")
 	basis := fs.String("basis", "cash", "accounting basis: cash or accrual")
+	since := fs.String("since", "", "on -basis accrual, book only invoices/bills dated on or after this (YYYY-MM-DD)")
 	stdout := fs.Bool("stdout", false, "write the ledger to stdout instead of the store")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *basis != string(books.CashBasis) && *basis != string(books.AccrualBasis) {
 		return fmt.Errorf("unknown basis %q: want cash or accrual", *basis)
+	}
+	var effective time.Time
+	if *since != "" {
+		if *basis != string(books.AccrualBasis) {
+			return fmt.Errorf("-since only applies to -basis accrual")
+		}
+		var err error
+		if effective, err = time.Parse("2006-01-02", *since); err != nil {
+			return fmt.Errorf("-since %q is not YYYY-MM-DD", *since)
+		}
 	}
 
 	s, err := store.Open(".")
@@ -1163,7 +1179,7 @@ func renderBooks(args []string) error {
 	}
 	defer s.Close()
 
-	txs, entries, err := books.LedgerBasis(s.Log, books.Basis(*basis))
+	txs, entries, err := books.LedgerBasisSince(s.Log, books.Basis(*basis), effective)
 	if err != nil {
 		return err
 	}

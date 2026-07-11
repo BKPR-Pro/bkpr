@@ -91,10 +91,24 @@ func accrualLines(log *eventlog.Log) ([]accrualLine, error) {
 // expense to the parked account, so the cash clears the receivable or payable instead of
 // double-booking the value the accrual already recognized. The combined lines are re-sorted so
 // accruals interleave in date order.
-func overlayAccruals(log *eventlog.Log, txs []model.Transaction, entries []model.Entry) ([]model.Transaction, []model.Entry, error) {
+func overlayAccruals(log *eventlog.Log, txs []model.Transaction, entries []model.Entry, since time.Time) ([]model.Transaction, []model.Entry, error) {
 	lines, err := accrualLines(log)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// An effective date bounds the switch to accrual: only accruals dated on or after it are booked,
+	// and an earlier one is dropped whole — no synthetic line, and no redirect of a settling payment,
+	// so a receivable that predates the switch reads exactly as cash (its payment books as income when
+	// it lands). Dropping it from lines here handles both, since nothing downstream sees it.
+	if !since.IsZero() {
+		kept := make([]accrualLine, 0, len(lines))
+		for _, ln := range lines {
+			if !ln.date.Before(since) {
+				kept = append(kept, ln)
+			}
+		}
+		lines = kept
 	}
 
 	pos := make(map[string]int, len(txs))

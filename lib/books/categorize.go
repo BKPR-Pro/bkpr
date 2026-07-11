@@ -3,6 +3,7 @@ package books
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/dallasread/bookkeeper/lib/eventlog"
 	"github.com/dallasread/bookkeeper/lib/model"
@@ -74,12 +75,22 @@ const (
 // one log, so the same books can be read either way, and a set of books can switch between them
 // without any rewrite: the accrual lines simply appear or fall away.
 func LedgerBasis(log *eventlog.Log, basis Basis) ([]model.Transaction, []model.Entry, error) {
+	return LedgerBasisSince(log, basis, time.Time{})
+}
+
+// LedgerBasisSince is LedgerBasis with an effective date for the switch to accrual: on the accrual
+// basis only invoices and bills dated on or after since are booked, so a book can turn on accrual
+// mid-year without retroactively accruing everything before it. A zero since books all of them. The
+// date is a read-time argument, never stored, so the seam it creates is a fact about how you are
+// reading the log, not a change to the log. An accrual dated before since is treated exactly as cash:
+// its payment books as ordinary income or expense when it lands.
+func LedgerBasisSince(log *eventlog.Log, basis Basis, since time.Time) ([]model.Transaction, []model.Entry, error) {
 	txs, entries, err := cashLedger(log)
 	if err != nil {
 		return nil, nil, err
 	}
 	if basis == AccrualBasis {
-		return overlayAccruals(log, txs, entries)
+		return overlayAccruals(log, txs, entries, since)
 	}
 	return txs, entries, nil
 }
