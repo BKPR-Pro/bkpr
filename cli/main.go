@@ -35,8 +35,8 @@ func main() {
 	switch os.Args[1] {
 	case "init":
 		err = initStore(os.Args[2:])
-	case "import":
-		err = importStatement(os.Args[2:])
+	case "pull":
+		err = pull(os.Args[2:])
 	case "sources":
 		err = sourceSet(os.Args[2:])
 	case "rules":
@@ -72,16 +72,15 @@ Run "bookkeeper docs" for the full reference.
 
 usage:
   bookkeeper init         [dir]
-  bookkeeper rules   add  -match <re> -category <account> [-payee <name>] [-meta <k=v> ...] [-before <re>]
-  bookkeeper rules   set  -match <re> [-category <account>] [-payee <name>] [-why <reason>]
+  bookkeeper rules   set  -match <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>]
   bookkeeper rules   rm   -match <re>
   bookkeeper rules   mv   -match <re> [-before <re>]
   bookkeeper rules   list
   bookkeeper sources add  <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
   bookkeeper sources rm   <name>
   bookkeeper sources list
-  bookkeeper import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
-  bookkeeper import       <file.ledger>
+  bookkeeper pull         <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
+  bookkeeper pull         <file.ledger>
   bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>]
   bookkeeper discard      -tx <fingerprint> [-why <reason>]
   bookkeeper push         <destination> [-confirm]
@@ -104,47 +103,45 @@ SETUP
 
   sources add <name> -kind <kind> -url <url> -token-env <ENV> -account <a> [-currency <c>]
       Register a live connector. The bearer token is never stored: -token-env names the
-      environment variable that holds it, read when the connector is used. This is the
-      registry the push command draws on; bookkeeper does not import from a connector,
-      since the bank statement is the source of truth for money.
+      environment variable that holds it, read when the connector is used. A connector is
+      bidirectional in principle: push writes to it today, and pulling from it by name is
+      the same registry, built later. Registering one does not itself move any data.
   sources rm <name>               Forget a connector.
   sources list                    Show the registered connectors.
 
 RULES  (deterministic categorization; first matching rule wins per field)
-  rules add -match <re> -category <account> [-payee <name>] [-meta <k=v> ...] [-before <re>]
-      Add a rule. Order decides which of two matching rules wins; a new rule lands last
-      unless -before places it ahead of another. Account paths are free-form and may stop
-      at Uncategorized wherever knowledge runs out. -meta attaches opaque key=value pairs
-      (repeatable) that a destination reads by name, e.g. -meta rentapp.lease=31 tells the
-      push which lease a matching rent deposit belongs to.
-  rules set -match <re> [-category <account>] [-payee <name>] [-why <reason>]
-      Change an existing rule; only the fields you name change. This reclassifies every
-      past line the rule matched, so it takes a reason.
+  rules set -match <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>]
+      Add a rule, or change one already matching this pattern. On an existing rule only the
+      fields you name change, and since that reclassifies every past line it matched, it
+      takes a -why. A new rule lands last unless -before places it ahead of another. Account
+      paths are free-form and may stop at Uncategorized wherever knowledge runs out. -meta
+      attaches opaque key=value pairs (repeatable) that a connector reads by name, e.g.
+      -meta rentapp.lease=31 tells the push which lease a matching rent deposit belongs to.
   rules rm  -match <re>           Remove a rule.
   rules mv  -match <re> [-before <re>]   Reorder a rule (-before omitted moves it last).
   rules list                      Show the rules in order.
 
 BOOKKEEPING
-  import <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>)
-                    [-date <col>] [-description <col>] [-date-format <layout>]
-  import <file.ledger>
-      Import transactions from a statement file. A file is a one-time input: a CSV does not
-      name its own account, currency, or columns, so you supply them inline; a ledger file
-      names all of that itself. Bookkeeper imports only from files; the bank statement is
-      the source of truth for money, so nothing is ever pulled from a live app.
+  pull <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>)
+                  [-date <col>] [-description <col>] [-date-format <layout>]
+  pull <file.ledger>
+      Read transactions in. A file is a one-time input: a CSV does not name its own account,
+      currency, or columns, so you supply them inline; a ledger file names all of that
+      itself. Pulling from a registered connector by name is the same verb, built later; the
+      bank statement is where the money is read from first.
   categorize -tx <fingerprint> (-category <account> | -post <account>=<amount> ...)
              [-payee <name>] [-why <reason>]
       Assert the postings for one line, overriding the rule for that line only. Use -post
       more than once to split one charge across accounts.
   discard -tx <fingerprint> [-why <reason>]
-      Drop a bad import from the books. The imported fact stays in the log; a later fact
+      Drop a bad line from the books. The pulled fact stays in the log; a later fact
       supersedes it.
-  push <destination> [-confirm]
-      Record rent the books already booked into a registered destination (see sources add),
+  push <connector> [-confirm]
+      Record rent the books already booked into a registered connector (see sources add),
       so its paid/unpaid state stays current. Each rent deposit that a rule attributed to a
       lease (via -meta rentapp.lease=<id>) is recorded against that lease, keyed by the
       deposit's fingerprint so a repeat is a no-op. Without -confirm it is a dry run that
-      prints what it would send. Nothing is ever imported from the destination.
+      prints what it would send.
   books [-format table|ledger] [-stdout]
       Fold the log into a table (default), or regenerate .bookkeeper/books.ledger. -stdout
       writes the ledger to standard output instead of the store.
@@ -184,11 +181,12 @@ func firstArg(args []string, desc string) (string, []string, error) {
 	return args[0], args[1:], nil
 }
 
-// importStatement reads a statement file into the log. A file is a one-time input whose details
-// are supplied inline (a CSV does not name its own account, currency, or columns). The bank
-// statement is the source of truth for money; bookkeeper never imports from a live app.
-func importStatement(args []string) error {
-	arg, rest, err := firstArg(args, "a file to import")
+// pull reads transactions into the log. Today its argument is a statement file whose details are
+// supplied inline (a CSV does not name its own account, currency, or columns). Pulling from a
+// registered connector by name is the same verb and will land here too; for now a bank statement
+// is where the money is read from, since that is the direction built first.
+func pull(args []string) error {
+	arg, rest, err := firstArg(args, "a file to pull")
 	if err != nil {
 		return err
 	}
@@ -201,14 +199,14 @@ func importStatement(args []string) error {
 
 	switch ext := strings.ToLower(filepath.Ext(arg)); ext {
 	case ".csv":
-		return importCSV(s.Log, arg, rest)
+		return pullCSV(s.Log, arg, rest)
 	default:
-		return fmt.Errorf("import: I do not know how to read %q; .csv is supported, ledger files are coming", arg)
+		return fmt.Errorf("pull: I do not know how to read %q; .csv is supported, ledger files and connectors are coming", arg)
 	}
 }
 
-func importCSV(log *eventlog.Log, path string, args []string) error {
-	fs := flag.NewFlagSet("import (csv)", flag.ExitOnError)
+func pullCSV(log *eventlog.Log, path string, args []string) error {
+	fs := flag.NewFlagSet("pull (csv)", flag.ExitOnError)
 	var m source.CSV
 	fs.StringVar(&m.Account, "account", "", "the ledger account this statement belongs to")
 	fs.StringVar(&m.Currency, "currency", "", "the account's currency, e.g. CAD")
@@ -336,15 +334,13 @@ func sourceList(args []string) error {
 	return w.Flush()
 }
 
-// ruleSet dispatches `rules add|set|rm|mv|list`.
+// ruleSet dispatches `rules set|rm|mv|list`.
 func ruleSet(args []string) error {
 	if len(args) == 0 {
 		usage()
-		return fmt.Errorf("rules needs add, set, rm, mv, or list")
+		return fmt.Errorf("rules needs set, rm, mv, or list")
 	}
 	switch args[0] {
-	case "add":
-		return ruleAdd(args[1:])
 	case "set":
 		return ruleSetOne(args[1:])
 	case "rm":
@@ -381,21 +377,29 @@ func (m *metaFlag) Set(s string) error {
 	return nil
 }
 
-func ruleAdd(args []string) error {
-	fs := flag.NewFlagSet("rules add", flag.ExitOnError)
+// ruleSetOne is the one verb for authoring a rule: it adds a pattern not yet known, or changes the
+// one already matching it. There is no separate add, because a pattern is a rule's identity and
+// "make this pattern say X" is the same intent whether or not it existed.
+func ruleSetOne(args []string) error {
+	fs := flag.NewFlagSet("rules set", flag.ExitOnError)
 	var r rules.Rule
 	var meta metaFlag
 	fs.StringVar(&r.Match, "match", "", "case-insensitive pattern to match the description")
 	fs.StringVar(&r.Category, "category", "", "account to post the line to")
 	fs.StringVar(&r.Payee, "payee", "", "payee to record on the entry")
 	fs.Var(&meta, "meta", "key=value carried onto the entry, repeatable, e.g. rentapp.lease=31")
-	before := fs.String("before", "", "place this rule ahead of the one matching this pattern")
+	before := fs.String("before", "", "on a new rule, place it ahead of the one matching this pattern")
+	why := fs.String("why", "", "why the rule changed; changing one reclassifies every line it matched")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if r.Match == "" {
 		return fmt.Errorf("-match is required")
 	}
+
+	// Only the fields you name change, so setting a category does not silently blank the payee.
+	provided := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { provided[f.Name] = true })
 	if len(meta) > 0 {
 		r.Metadata = meta
 	}
@@ -406,63 +410,53 @@ func ruleAdd(args []string) error {
 	}
 	defer closeLog()
 
-	if err := books.AddRule(log, "human", r, *before); err != nil {
+	if err := upsertRule(log, r, provided, *before, *why); err != nil {
 		return err
 	}
 	fmt.Printf("rule %q\n", r.Match)
 	return nil
 }
 
-func ruleSetOne(args []string) error {
-	fs := flag.NewFlagSet("rules set", flag.ExitOnError)
-	match := fs.String("match", "", "the rule to change")
-	category := fs.String("category", "", "the new account to post to")
-	payee := fs.String("payee", "", "the new payee")
-	why := fs.String("why", "", "why the rule changed; it reclassifies every line it matched")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *match == "" {
-		return fmt.Errorf("-match is required")
-	}
-
-	// Only the fields you name change; the rest of the rule is left as it was, so setting a category
-	// does not silently blank the payee.
-	provided := map[string]bool{}
-	fs.Visit(func(f *flag.Flag) { provided[f.Name] = true })
-
-	log, closeLog, err := open()
-	if err != nil {
-		return err
-	}
-	defer closeLog()
-
+// upsertRule adds r, or changes the rule already matching its pattern. On a change only the named
+// fields move, and metadata merges per key rather than replacing the bag, so naming one key leaves
+// the others. On a new rule the given fields stand and before places it.
+func upsertRule(log *eventlog.Log, r rules.Rule, provided map[string]bool, before, why string) error {
 	current, err := books.Rules(log)
 	if err != nil {
 		return err
 	}
-	merged, found := rules.Rule{}, false
-	for _, r := range current {
-		if r.Match == *match {
-			merged, found = r, true
-			break
+	for _, existing := range current {
+		if existing.Match != r.Match {
+			continue
 		}
+		merged := existing
+		if provided["category"] {
+			merged.Category = r.Category
+		}
+		if provided["payee"] {
+			merged.Payee = r.Payee
+		}
+		if provided["meta"] {
+			merged.Metadata = mergeMeta(merged.Metadata, r.Metadata)
+		}
+		return books.SetRule(log, "human", why, merged)
 	}
-	if !found {
-		return fmt.Errorf("no rule matches %q; add it first", *match)
-	}
-	if provided["category"] {
-		merged.Category = *category
-	}
-	if provided["payee"] {
-		merged.Payee = *payee
-	}
+	return books.AddRule(log, "human", r, before)
+}
 
-	if err := books.SetRule(log, "human", *why, merged); err != nil {
-		return err
+// mergeMeta overlays new keys onto the existing bag without dropping the untouched ones.
+func mergeMeta(base, overlay map[string]string) map[string]string {
+	if len(overlay) == 0 {
+		return base
 	}
-	fmt.Printf("rule %q\n", *match)
-	return nil
+	out := make(map[string]string, len(base)+len(overlay))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range overlay {
+		out[k] = v
+	}
+	return out
 }
 
 func ruleRemove(args []string) error {
