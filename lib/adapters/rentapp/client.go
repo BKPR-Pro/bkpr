@@ -1,9 +1,9 @@
 // Package rentapp is the connector to the rent app, the one place that knows its endpoints.
 //
-// The rent app is a spoke, and a destination only: bookkeeper pushes recorded rent payments to it
-// so its paid/unpaid state stays current, and never imports from it (the bank statement is the
-// source of truth for money). The core of bookkeeper never imports this package; only the CLI's
-// push command does, which keeps the books standalone.
+// The rent app is a spoke and the first connector: bookkeeper exports recorded rent payments to it
+// so its paid/unpaid state stays current. Importing from it is a later direction, not a
+// prohibition. The core of bookkeeper never imports this package; only the CLI's export command
+// does, which keeps the books standalone.
 package rentapp
 
 import (

@@ -14,13 +14,13 @@ import (
 	"github.com/dallasread/bookkeeper/lib/store"
 )
 
-// rentappLeaseKey is the metadata key the rentapp destination reads off a categorized line. A
+// rentappLeaseKey is the metadata key the rentapp connector reads off a categorized line. A
 // connector owns the metadata namespace equal to its kind, so the lease a rent deposit belongs to
 // travels as rentapp.lease, set on the tenant's rule where the description already identifies them.
 const rentappLeaseKey = "rentapp.lease"
 
-// pushPlan is one rent deposit ready to record: which lease, how much, when.
-type pushPlan struct {
+// exportPlan is one rent deposit ready to record: which lease, how much, when.
+type exportPlan struct {
 	txID   string
 	lease  string
 	amount int64 // cents
@@ -28,43 +28,43 @@ type pushPlan struct {
 	payee  string
 }
 
-// pushResult reports what a push did, or would do on a dry run.
-type pushResult struct {
-	Planned  []pushPlan // what a dry run would send
-	Recorded []pushPlan // what was recorded this run
-	Failed   []pushFailure
+// exportResult reports what an export did, or would do on a dry run.
+type exportResult struct {
+	Planned  []exportPlan // what a dry run would send
+	Recorded []exportPlan // what was recorded this run
+	Failed   []exportFailure
 }
 
-type pushFailure struct {
-	plan pushPlan
+type exportFailure struct {
+	plan exportPlan
 	err  error
 }
 
-// pushPlans folds the books and selects the rent deposits that carry a lease and have not been
-// pushed yet. It has no side effect, so a dry run and the real push agree on what to send. A
+// exportPlans folds the books and selects the rent deposits that carry a lease and have not been
+// exported yet. It has no side effect, so a dry run and the real export agree on what to send. A
 // deposit no rule attributed to a lease is left alone: there is nothing to record it against, and
 // it is never guessed.
-func pushPlans(log *eventlog.Log) ([]pushPlan, error) {
+func exportPlans(log *eventlog.Log) ([]exportPlan, error) {
 	txs, entries, err := books.Ledger(log)
 	if err != nil {
 		return nil, err
 	}
-	pushed, err := books.Pushed(log)
+	exported, err := books.Exported(log)
 	if err != nil {
 		return nil, err
 	}
 
-	var plans []pushPlan
+	var plans []exportPlan
 	for i, tx := range txs {
 		lease := entries[i].Metadata[rentappLeaseKey]
-		if lease == "" || pushed[tx.ID] {
+		if lease == "" || exported[tx.ID] {
 			continue
 		}
 		cents, err := amountCents(tx.Amount)
 		if err != nil {
-			return nil, fmt.Errorf("push: %s: %w", tx.ID, err)
+			return nil, fmt.Errorf("export: %s: %w", tx.ID, err)
 		}
-		plans = append(plans, pushPlan{
+		plans = append(plans, exportPlan{
 			txID: tx.ID, lease: lease, amount: cents,
 			date: tx.Date.Format("2006-01-02"), payee: entries[i].Payee,
 		})
@@ -72,36 +72,36 @@ func pushPlans(log *eventlog.Log) ([]pushPlan, error) {
 	return plans, nil
 }
 
-// pushRent records each planned rent deposit against its lease in the rent app, then marks it
-// pushed. The deposit's fingerprint is the idempotency key, so a repeat is safe on both sides: the
-// rent app records at most once per key, and a pushed deposit is skipped here next time. Without
-// confirm it is a dry run: the plan is returned and nothing is sent. A lease the rent app rejects
-// is reported rather than swallowed, and is not marked pushed, so a fixed lease id retries.
-func pushRent(log *eventlog.Log, client *rentapp.Client, destination string, confirm bool) (pushResult, error) {
-	plans, err := pushPlans(log)
+// exportRent records each planned rent deposit against its lease in the rent app, then marks it
+// exported. The deposit's fingerprint is the idempotency key, so a repeat is safe on both sides:
+// the rent app records at most once per key, and an exported deposit is skipped here next time.
+// Without confirm it is a dry run: the plan is returned and nothing is sent. A lease the rent app
+// rejects is reported rather than swallowed, and is not marked exported, so a fixed lease id retries.
+func exportRent(log *eventlog.Log, client *rentapp.Client, connector string, confirm bool) (exportResult, error) {
+	plans, err := exportPlans(log)
 	if err != nil {
-		return pushResult{}, err
+		return exportResult{}, err
 	}
 	if !confirm {
-		return pushResult{Planned: plans}, nil
+		return exportResult{Planned: plans}, nil
 	}
 
-	var res pushResult
+	var res exportResult
 	for _, p := range plans {
 		rec, err := client.RecordRent(rentapp.Payment{
 			LeaseID: p.lease, AmountCents: p.amount, PaidOn: p.date, IdempotencyKey: p.txID,
 		})
 		if err != nil {
-			res.Failed = append(res.Failed, pushFailure{plan: p, err: err})
+			res.Failed = append(res.Failed, exportFailure{plan: p, err: err})
 			continue
 		}
-		if err := books.RecordPush(log, "push:"+destination, p.txID, destination, p.lease, rec.ID, p.amount); err != nil {
+		if err := books.RecordExport(log, "export:"+connector, p.txID, connector, p.lease, rec.ID, p.amount); err != nil {
 			return res, err
 		}
 		res.Recorded = append(res.Recorded, p)
 	}
 	if len(res.Failed) > 0 {
-		return res, fmt.Errorf("push: %d of %d deposits failed to record", len(res.Failed), len(plans))
+		return res, fmt.Errorf("export: %d of %d deposits failed to record", len(res.Failed), len(plans))
 	}
 	return res, nil
 }
@@ -130,14 +130,14 @@ func amountCents(a model.Amount) (int64, error) {
 	}
 }
 
-// push records rent the books already booked into a destination, so its paid/unpaid state stays
+// exportCmd writes rent the books already booked out to a connector, so its paid/unpaid state stays
 // current. It is a dry run unless -confirm is given, since it writes to a live system.
-func push(args []string) error {
-	name, rest, err := firstArg(args, "the destination to push to, e.g. rent")
+func exportCmd(args []string) error {
+	name, rest, err := firstArg(args, "the connector to export to, e.g. rent")
 	if err != nil {
 		return err
 	}
-	fs := flag.NewFlagSet("push", flag.ExitOnError)
+	fs := flag.NewFlagSet("export", flag.ExitOnError)
 	confirm := fs.Bool("confirm", false, "record the payments; without it, a dry run")
 	if err := fs.Parse(rest); err != nil {
 		return err
@@ -154,27 +154,27 @@ func push(args []string) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("push: no connector named %q; register it with `connectors add`", name)
+		return fmt.Errorf("export: no connector named %q; register it with `connectors add`", name)
 	}
 	if dest.Kind != "rentapp" {
-		return fmt.Errorf("push: connector %q has kind %q, which cannot be pushed to", name, dest.Kind)
+		return fmt.Errorf("export: connector %q has kind %q, which cannot be exported to", name, dest.Kind)
 	}
 	token := os.Getenv(dest.TokenEnv)
 	if token == "" {
-		return fmt.Errorf("push: %s is empty; set it to the rent app's token", dest.TokenEnv)
+		return fmt.Errorf("export: %s is empty; set it to the rent app's token", dest.TokenEnv)
 	}
 
-	res, err := pushRent(s.Log, rentapp.New(dest.URL, token), name, *confirm)
-	reportPush(os.Stdout, res, *confirm)
+	res, err := exportRent(s.Log, rentapp.New(dest.URL, token), name, *confirm)
+	reportExport(os.Stdout, res, *confirm)
 	return err
 }
 
-// reportPush prints what the push did or would do, so a dry run reads the same as the real thing
+// reportExport prints what the export did or would do, so a dry run reads the same as the real thing
 // with the verb changed.
-func reportPush(out io.Writer, res pushResult, confirm bool) {
+func reportExport(out io.Writer, res exportResult, confirm bool) {
 	if !confirm {
 		if len(res.Planned) == 0 {
-			fmt.Fprintln(out, "nothing to push: no unrecorded rent deposits carry a lease")
+			fmt.Fprintln(out, "nothing to export: no unrecorded rent deposits carry a lease")
 			return
 		}
 		fmt.Fprintf(out, "would record %d rent payment(s) (dry run; add -confirm to send):\n", len(res.Planned))
@@ -189,7 +189,7 @@ func reportPush(out io.Writer, res pushResult, confirm bool) {
 	}
 }
 
-func writePlans(out io.Writer, plans []pushPlan) {
+func writePlans(out io.Writer, plans []exportPlan) {
 	if len(plans) == 0 {
 		return
 	}

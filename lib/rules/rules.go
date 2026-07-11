@@ -26,7 +26,7 @@ type Rule struct {
 	Category string `json:"category,omitempty"`
 
 	// Metadata is an opaque bag the engine neither reads nor validates. Apply carries it onto the
-	// entry, first-wins per key, so a destination can read its own namespaced keys (e.g.
+	// entry, first-wins per key, so a connector can read its own namespaced keys (e.g.
 	// rentapp.lease) off a categorized line without the core knowing what they mean.
 	Metadata map[string]string `json:"metadata,omitempty"`
 

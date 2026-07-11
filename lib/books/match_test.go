@@ -72,7 +72,7 @@ func TestOppositeAmountsThatAreNotMutualTransfersBookBoth(t *testing.T) {
 	}
 }
 
-// Only one leg imported (the other account's statement has not been pulled) books normally; there
+// Only one leg imported (the other account's statement has not been imported) books normally; there
 // is nothing to double.
 func TestAnUnpairedTransferBooksNormally(t *testing.T) {
 	log := transferBooks(t)

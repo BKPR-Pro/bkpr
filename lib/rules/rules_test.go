@@ -146,8 +146,8 @@ func TestInvalidRegexIsRejected(t *testing.T) {
 }
 
 // A rule carries an opaque metadata bag the engine neither reads nor validates, and Apply lands it
-// on the entry. It is the seam a destination (e.g. the rent app) reads its own keys from, so a
-// deposit categorized to a property can also name the lease it should be pushed against.
+// on the entry. It is the seam a connector (e.g. the rent app) reads its own keys from, so a
+// deposit categorized to a property can also name the lease it should be exported against.
 func TestARuleCarriesItsMetadataOntoTheEntry(t *testing.T) {
 	e := engine(t, rules.Rule{
 		Match: `hyungjin`, Category: "Income:Real Estate:Rent:22 Lisgar Street",

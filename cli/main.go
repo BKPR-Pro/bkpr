@@ -35,8 +35,8 @@ func main() {
 	switch os.Args[1] {
 	case "init":
 		err = initStore(os.Args[2:])
-	case "pull":
-		err = pull(os.Args[2:])
+	case "import":
+		err = importCmd(os.Args[2:])
 	case "connectors":
 		err = connectorSet(os.Args[2:])
 	case "rules":
@@ -45,8 +45,8 @@ func main() {
 		err = categorize(os.Args[2:])
 	case "discard":
 		err = discard(os.Args[2:])
-	case "push":
-		err = push(os.Args[2:])
+	case "export":
+		err = exportCmd(os.Args[2:])
 	case "books":
 		err = renderBooks(os.Args[2:])
 	case "docs":
@@ -79,11 +79,11 @@ usage:
   bookkeeper connectors add  <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
   bookkeeper connectors rm   <name>
   bookkeeper connectors list
-  bookkeeper pull         <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
-  bookkeeper pull         <file.ledger>
+  bookkeeper import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
+  bookkeeper import       <file.ledger>
   bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>]
   bookkeeper discard      -tx <fingerprint> [-why <reason>]
-  bookkeeper push         <destination> [-confirm]
+  bookkeeper export       <connector> [-confirm]
   bookkeeper books        [-format table|ledger] [-stdout]
   bookkeeper docs
 `)
@@ -104,8 +104,8 @@ SETUP
   connectors add <name> -kind <kind> -url <url> -token-env <ENV> -account <a> [-currency <c>]
       Register a live connector. The bearer token is never stored: -token-env names the
       environment variable that holds it, read when the connector is used. A connector is
-      bidirectional in principle: push writes to it today, and pulling from it by name is
-      the same registry, built later. Registering one does not itself move any data.
+      bidirectional in principle: export writes to it today, and importing from it by name
+      is the same registry, built later. Registering one does not itself move any data.
   connectors rm <name>            Forget a connector.
   connectors list                 Show the registered connectors.
 
@@ -116,28 +116,28 @@ RULES  (deterministic categorization; first matching rule wins per field)
       takes a -why. A new rule lands last unless -before places it ahead of another. Account
       paths are free-form and may stop at Uncategorized wherever knowledge runs out. -meta
       attaches opaque key=value pairs (repeatable) that a connector reads by name, e.g.
-      -meta rentapp.lease=31 tells the push which lease a matching rent deposit belongs to.
+      -meta rentapp.lease=31 tells the export which lease a matching rent deposit belongs to.
   rules rm  -match <re>           Remove a rule.
   rules mv  -match <re> [-before <re>]   Reorder a rule (-before omitted moves it last).
   rules list                      Show the rules in order.
 
 BOOKKEEPING
-  pull <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>)
-                  [-date <col>] [-description <col>] [-date-format <layout>]
-  pull <file.ledger>
+  import <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>)
+                    [-date <col>] [-description <col>] [-date-format <layout>]
+  import <file.ledger>
       Read transactions in. A file is a one-time input: a CSV does not name its own account,
       currency, or columns, so you supply them inline; a ledger file names all of that
-      itself. Pulling from a registered connector by name is the same verb, built later; the
-      bank statement is where the money is read from first.
+      itself. Importing from a registered connector by name is the same verb, built later;
+      the bank statement is where the money is read from first.
   categorize -tx <fingerprint> (-category <account> | -post <account>=<amount> ...)
              [-payee <name>] [-why <reason>]
       Assert the postings for one line, overriding the rule for that line only. Use -post
       more than once to split one charge across accounts.
   discard -tx <fingerprint> [-why <reason>]
-      Drop a bad line from the books. The pulled fact stays in the log; a later fact
+      Drop a bad line from the books. The imported fact stays in the log; a later fact
       supersedes it.
-  push <connector> [-confirm]
-      Record rent the books already booked into a registered connector (see connectors add),
+  export <connector> [-confirm]
+      Write rent the books already booked out to a registered connector (see connectors add),
       so its paid/unpaid state stays current. Each rent deposit that a rule attributed to a
       lease (via -meta rentapp.lease=<id>) is recorded against that lease, keyed by the
       deposit's fingerprint so a repeat is a no-op. Without -confirm it is a dry run that
@@ -181,12 +181,12 @@ func firstArg(args []string, desc string) (string, []string, error) {
 	return args[0], args[1:], nil
 }
 
-// pull reads transactions into the log. Today its argument is a statement file whose details are
-// supplied inline (a CSV does not name its own account, currency, or columns). Pulling from a
-// registered connector by name is the same verb and will land here too; for now a bank statement
-// is where the money is read from, since that is the direction built first.
-func pull(args []string) error {
-	arg, rest, err := firstArg(args, "a file to pull")
+// importCmd reads transactions into the log. Today its argument is a statement file whose details
+// are supplied inline (a CSV does not name its own account, currency, or columns). Importing from a
+// registered connector by name is the same verb and will land here too; for now a bank statement is
+// where the money is read from, since that is the direction built first.
+func importCmd(args []string) error {
+	arg, rest, err := firstArg(args, "a file to import")
 	if err != nil {
 		return err
 	}
@@ -199,14 +199,14 @@ func pull(args []string) error {
 
 	switch ext := strings.ToLower(filepath.Ext(arg)); ext {
 	case ".csv":
-		return pullCSV(s.Log, arg, rest)
+		return importCSV(s.Log, arg, rest)
 	default:
-		return fmt.Errorf("pull: I do not know how to read %q; .csv is supported, ledger files and connectors are coming", arg)
+		return fmt.Errorf("import: I do not know how to read %q; .csv is supported, ledger files and connectors are coming", arg)
 	}
 }
 
-func pullCSV(log *eventlog.Log, path string, args []string) error {
-	fs := flag.NewFlagSet("pull (csv)", flag.ExitOnError)
+func importCSV(log *eventlog.Log, path string, args []string) error {
+	fs := flag.NewFlagSet("import (csv)", flag.ExitOnError)
 	var m source.CSV
 	fs.StringVar(&m.Account, "account", "", "the ledger account this statement belongs to")
 	fs.StringVar(&m.Currency, "currency", "", "the account's currency, e.g. CAD")
@@ -356,7 +356,7 @@ func ruleSet(args []string) error {
 }
 
 // metaFlag collects repeated -meta key=value pairs into a rule's opaque metadata bag. The key is a
-// namespaced identifier a destination reads (e.g. rentapp.lease); the value is kept verbatim.
+// namespaced identifier a connector reads (e.g. rentapp.lease); the value is kept verbatim.
 type metaFlag map[string]string
 
 func (m metaFlag) String() string { return "" }

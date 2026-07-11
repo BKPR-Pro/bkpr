@@ -66,7 +66,7 @@ func TestARulesMetadataSurvivesTheLog(t *testing.T) {
 	}
 }
 
-// End to end: a rule's metadata rides the fold onto the entry the push reads, so a categorized rent
+// End to end: a rule's metadata rides the fold onto the entry the export reads, so a categorized rent
 // deposit names the lease it should be recorded against.
 func TestLedgerCarriesRuleMetadataOntoTheEntry(t *testing.T) {
 	log := newLog()

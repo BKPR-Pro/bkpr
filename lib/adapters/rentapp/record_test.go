@@ -9,7 +9,7 @@ import (
 	"github.com/dallasread/bookkeeper/lib/adapters/rentapp"
 )
 
-// A recorded rent payment is pushed to the lease's rent-roll endpoint, carrying the real cleared
+// A recorded rent payment is exported to the lease's rent-roll endpoint, carrying the real cleared
 // amount and date and an Idempotency-Key, so the rent app knows the rent is paid.
 func TestRecordRentPostsThePaymentWithAnIdempotencyKey(t *testing.T) {
 	var gotPath, gotMethod, gotKey, gotAuth string
@@ -54,7 +54,7 @@ func TestRecordRentPostsThePaymentWithAnIdempotencyKey(t *testing.T) {
 	}
 }
 
-// A replay returns 200 with the same transaction. The push must read that as already-done, not a
+// A replay returns 200 with the same transaction. The export must read that as already-done, not a
 // failure, so re-running never double-records and never errors.
 func TestRecordRentTreatsAReplayAsSuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -10,7 +10,7 @@ import (
 
 // CollectionConnector is keyed by a connector's name. A connector is a live system bookkeeper
 // reaches over the network, registered once and then used by name, unlike a file which is a
-// one-time input supplied inline. It is bidirectional in principle: push writes to it today.
+// one-time input supplied inline. It is bidirectional in principle: export writes to it today.
 const CollectionConnector = "connector"
 
 // Connector is how to reach one live system. The token itself is never stored, because the log is

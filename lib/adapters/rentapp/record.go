@@ -11,8 +11,8 @@ import (
 
 // Payment is a cleared rent payment to record against a lease. Method and PaidOn are optional; an
 // empty one is not sent, so the endpoint falls back to its own default. IdempotencyKey makes the
-// push safe to repeat: the rent app records the payment at most once per key, so re-running the
-// push never double-records.
+// export safe to repeat: the rent app records the payment at most once per key, so re-running the
+// export never double-records.
 type Payment struct {
 	LeaseID        string
 	AmountCents    int64

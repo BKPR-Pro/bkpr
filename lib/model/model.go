@@ -48,8 +48,8 @@ type Entry struct {
 	Postings []Posting
 
 	// Metadata is an opaque bag carried from the rule that categorized the line. The core neither
-	// reads nor validates it; a destination reads its own namespaced keys (e.g. rentapp.lease) to
-	// learn where to push. Empty when no rule supplied any.
+	// reads nor validates it; a connector reads its own namespaced keys (e.g. rentapp.lease) to
+	// learn where to export. Empty when no rule supplied any.
 	Metadata map[string]string
 }
 

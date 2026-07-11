@@ -2,7 +2,7 @@ package main
 
 import "testing"
 
-// metaFlag parses repeated -meta key=value pairs into a bag. A destination reads its own namespaced
+// metaFlag parses repeated -meta key=value pairs into a bag. A connector reads its own namespaced
 // keys off the rule this builds, so the parsing has to keep the key and value exactly as given.
 func TestMetaFlagParsesKeyValuePairs(t *testing.T) {
 	var m metaFlag

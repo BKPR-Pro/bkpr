@@ -13,7 +13,7 @@ import (
 	"github.com/dallasread/bookkeeper/lib/rules"
 )
 
-// capture records what the mock rent app was asked to do, so a test can assert the push sent the
+// capture records what the mock rent app was asked to do, so a test can assert the export sent the
 // right lease, amount, and idempotency key without a live call.
 type capture struct{ path, auth, idem, amount string }
 
@@ -33,7 +33,7 @@ func mockRent(t *testing.T, cap *capture) *httptest.Server {
 }
 
 // rentDepositLog is a book with one rent deposit whose rule attributes it to a property and names
-// the lease it should be pushed against.
+// the lease it should be exported against.
 func rentDepositLog(t *testing.T) *eventlog.Log {
 	t.Helper()
 	log := eventlog.New(eventlog.NewMemory())
@@ -54,15 +54,15 @@ func rentDepositLog(t *testing.T) *eventlog.Log {
 }
 
 // The heart of the output direction: a categorized rent deposit is recorded against its lease, with
-// the deposit's fingerprint as the idempotency key, and marked pushed so it is not sent again.
-func TestPushRecordsARentDepositAgainstItsLease(t *testing.T) {
+// the deposit's fingerprint as the idempotency key, and marked exported so it is not sent again.
+func TestExportRecordsARentDepositAgainstItsLease(t *testing.T) {
 	cap := &capture{}
 	srv := mockRent(t, cap)
 	log := rentDepositLog(t)
 
-	res, err := pushRent(log, rentapp.New(srv.URL, "tok"), "rent", true)
+	res, err := exportRent(log, rentapp.New(srv.URL, "tok"), "rent", true)
 	if err != nil {
-		t.Fatalf("pushRent: %v", err)
+		t.Fatalf("exportRent: %v", err)
 	}
 
 	if len(res.Recorded) != 1 || res.Recorded[0].lease != "31" {
@@ -80,43 +80,43 @@ func TestPushRecordsARentDepositAgainstItsLease(t *testing.T) {
 	if cap.auth != "Bearer tok" {
 		t.Errorf("auth = %q, want the bearer token", cap.auth)
 	}
-	if pushed, _ := books.Pushed(log); !pushed["dep1"] {
-		t.Error("dep1 was not marked pushed")
+	if exported, _ := books.Exported(log); !exported["dep1"] {
+		t.Error("dep1 was not marked exported")
 	}
 }
 
-// Re-running the push sends nothing: the deposit is already recorded, so no second POST is made.
-func TestPushSkipsADepositAlreadySent(t *testing.T) {
+// Re-running the export sends nothing: the deposit is already recorded, so no second POST is made.
+func TestExportSkipsADepositAlreadySent(t *testing.T) {
 	cap := &capture{}
 	srv := mockRent(t, cap)
 	log := rentDepositLog(t)
 	client := rentapp.New(srv.URL, "tok")
 
-	pushRent(log, client, "rent", true)
+	exportRent(log, client, "rent", true)
 
 	cap.path = ""
-	res, err := pushRent(log, client, "rent", true)
+	res, err := exportRent(log, client, "rent", true)
 	if err != nil {
-		t.Fatalf("second pushRent: %v", err)
+		t.Fatalf("second exportRent: %v", err)
 	}
 	if len(res.Recorded) != 0 {
 		t.Errorf("recorded %d on the second run, want 0", len(res.Recorded))
 	}
 	if cap.path != "" {
-		t.Errorf("a second POST was made to %q; the push is not idempotent", cap.path)
+		t.Errorf("a second POST was made to %q; the export is not idempotent", cap.path)
 	}
 }
 
-// A dry run plans the push but sends nothing and records nothing, so a person can read what will
+// A dry run plans the export but sends nothing and records nothing, so a person can read what will
 // happen before it does.
-func TestPushDryRunSendsNothing(t *testing.T) {
+func TestExportDryRunSendsNothing(t *testing.T) {
 	cap := &capture{}
 	srv := mockRent(t, cap)
 	log := rentDepositLog(t)
 
-	res, err := pushRent(log, rentapp.New(srv.URL, "tok"), "rent", false)
+	res, err := exportRent(log, rentapp.New(srv.URL, "tok"), "rent", false)
 	if err != nil {
-		t.Fatalf("pushRent: %v", err)
+		t.Fatalf("exportRent: %v", err)
 	}
 	if len(res.Planned) != 1 {
 		t.Errorf("planned %d, want 1", len(res.Planned))
@@ -124,14 +124,14 @@ func TestPushDryRunSendsNothing(t *testing.T) {
 	if cap.path != "" {
 		t.Errorf("a dry run made a POST to %q", cap.path)
 	}
-	if pushed, _ := books.Pushed(log); pushed["dep1"] {
-		t.Error("a dry run marked dep1 pushed")
+	if exported, _ := books.Exported(log); exported["dep1"] {
+		t.Error("a dry run marked dep1 exported")
 	}
 }
 
 // A deposit no rule attributed to a lease is left alone: without a lease there is nothing to record
-// it against, so it is never pushed and never guessed.
-func TestPushLeavesADepositWithoutALease(t *testing.T) {
+// it against, so it is never exported and never guessed.
+func TestExportLeavesADepositWithoutALease(t *testing.T) {
 	cap := &capture{}
 	srv := mockRent(t, cap)
 	log := eventlog.New(eventlog.NewMemory())
@@ -142,11 +142,11 @@ func TestPushLeavesADepositWithoutALease(t *testing.T) {
 		t.Fatalf("Import: %v", err)
 	}
 
-	res, err := pushRent(log, rentapp.New(srv.URL, "tok"), "rent", true)
+	res, err := exportRent(log, rentapp.New(srv.URL, "tok"), "rent", true)
 	if err != nil {
-		t.Fatalf("pushRent: %v", err)
+		t.Fatalf("exportRent: %v", err)
 	}
 	if len(res.Recorded) != 0 || cap.path != "" {
-		t.Errorf("pushed a deposit with no lease: recorded=%+v path=%q", res.Recorded, cap.path)
+		t.Errorf("exported a deposit with no lease: recorded=%+v path=%q", res.Recorded, cap.path)
 	}
 }

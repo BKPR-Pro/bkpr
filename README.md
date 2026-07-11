@@ -103,7 +103,7 @@ Events are immutable, past-tense facts.
 | `transaction.categorized` | a person or a model asserted the postings for this line |
 | `transaction.matched` | force or break a transfer pairing the automatic fold got wrong (planned) |
 | `transaction.discarded` | that line was garbage; keep it out of the books |
-| `transaction.pushed` | this deposit was recorded to a destination (e.g. rent booked against a lease) |
+| `transaction.exported` | this deposit was written to a connector (e.g. rent booked against a lease) |
 | `rule.added` | a pattern should be handled |
 | `rule.changed` | a rule's answer is wrong |
 | `rule.removed` | a rule should stop firing |
@@ -142,27 +142,27 @@ pattern.
 Each edit is its own command and its own event: `rules set`, `rm`, `mv`. That is the intent
 recorded directly, with no file to diff. `rules list` prints what the log currently folds to.
 
-### Pulling a file is a one-time door
+### Importing a file is a one-time door
 
 Reading a file in is not part of any fold. `transaction.imported` stores the transaction already
 **normalized**, so re-reading the log never re-parses a CSV, and how you read a file (which columns,
 which date format) is a one-time input rather than a fact the books depend on.
 
-This is why the details are supplied inline at the pull (`-account`, `-currency`, the columns)
+This is why the details are supplied inline at the import (`-account`, `-currency`, the columns)
 rather than registered: a file is read once. It also could have stored the raw row and normalized
 on read, which would make the reader a fold input and let re-reading with different flags repair
 history. It does not, because the fingerprint is built from the normalized fields: re-normalizing
 would move every fingerprint and silently orphan every correction keyed to one.
 
-So a bad line is not fixed by re-parsing. You pull again with the right flags (the corrected line
+So a bad line is not fixed by re-parsing. You import again with the right flags (the corrected line
 lands under a new fingerprint) and `discard` the garbage one.
 
-A connector is the other kind of input, and it is bidirectional in principle: `push` writes to it
-today, and pulling from it by name is the same `pull` verb, built later. It is registered once
+A connector is the other kind of input, and it is bidirectional in principle: `export` writes to it
+today, and importing from it by name is the same `import` verb, built later. It is registered once
 (`connectors add`) and logged, unlike a file's inline flags, because it persists; its bearer token is
 never stored, the registration keeping the name of the environment variable that holds it, read
 when the connector is used, so the log stays committable. Rent goes out before it comes in only
-because the bank statement is where the money is read from first, not because pulling a rent roll
+because the bank statement is where the money is read from first, not because importing a rent roll
 later is ruled out.
 
 ### Nothing has to be acknowledged
@@ -258,27 +258,27 @@ bk init
 # Initialized a book of record in /your/project/.bookkeeper
 ```
 
-`pull` records what a file said, and it is safe to run twice. A file is a one-time input, so its
+`import` records what a file said, and it is safe to run twice. A file is a one-time input, so its
 details are supplied inline. A CSV does not name its own account, currency, or columns, so you give
 them; a ledger file names all of that itself and takes no options.
 
 ```sh
-bk pull statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
+bk import statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
 # 9 lines read: 9 imported, 0 already in the log
 
-bk pull statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
+bk import statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
 # 9 lines read: 0 imported, 9 already in the log
 
 # a debit/credit pair instead of one signed column:
-bk pull visa.csv -account "Liabilities:Card:Visa" -currency CAD -debit Charge -credit Payment -date Posted
+bk import visa.csv -account "Liabilities:Card:Visa" -currency CAD -debit Charge -credit Payment -date Posted
 ```
 
-A connector is bidirectional in principle; `push` is the direction built first. The rent app is the
-first connector: `push` records rent the books already booked back to it, so its paid/unpaid state
-stays current. The token is kept in an environment variable, never in the books.
+A connector is bidirectional in principle; `export` is the direction built first. The rent app is
+the first connector: `export` records rent the books already booked back to it, so its paid/unpaid
+state stays current. The token is kept in an environment variable, never in the books.
 
 Which lease a deposit belongs to is not in the bank memo, so the tenant's rule carries it as
-metadata: `-meta rentapp.lease=<id>` rides onto the categorized deposit, and `push` records that
+metadata: `-meta rentapp.lease=<id>` rides onto the categorized deposit, and `export` records that
 deposit against that lease, keyed by the deposit's fingerprint so a repeat is a no-op. Without
 `-confirm` it is a dry run.
 
@@ -288,8 +288,8 @@ bk connectors add rent -kind rentapp -url https://rent.stcroixproperties.ca \
   -token-env BK_RENT_TOKEN -account "Assets:Bank:Chequing" -currency CAD
 bk rules set -match "hyungjin" -category "Income:Real Estate:Rent:22 Lisgar Street" \
   -meta rentapp.lease=31
-bk push rent            # dry run: what it would record
-bk push rent -confirm   # records each rent deposit against its lease
+bk export rent            # dry run: what it would record
+bk export rent -confirm   # records each rent deposit against its lease
 ```
 
 `rules set` authors a rule: it adds a pattern not yet known, or changes the one already matching it.
@@ -429,7 +429,7 @@ ledger -f books.ledger print --uncleared  # empty, and correctly so
 ## Configuration
 
 There are no config files. Rules are recorded straight into the log by command, and the log is what
-`books` reads. Pull details are given inline, since a file is read once (see Usage).
+`books` reads. Import details are given inline, since a file is read once (see Usage).
 
 A **rule** matches a description and supplies a payee, an account to post to, or both. Rules are
 ordered, and for each field the first rule that supplies it wins; `match` is the rule's identity, so
@@ -475,16 +475,16 @@ through a price, which is refused until that slice exists.
 
 Internal transfers seen in both accounts' statements are recognised and booked once, as a
 deterministic fold over the lines and their categorization, so the money is not double-counted. A
-bad line is undone with `discard`, which supersedes the pulled line without deleting it.
+bad line is undone with `discard`, which supersedes the imported line without deleting it.
 
-Inputs are files (CSV today, ledger coming), read once inline with `pull`, and connectors. A
-connector is bidirectional in principle; `push` is the direction built first, because the bank
-statement is where the money is read from. The rent app is the first connector: `push` records rent
-the books already booked back to it so its paid/unpaid state stays current, with its token kept in
-the environment rather than the books. The lease a deposit belongs to rides on the tenant's rule as
-metadata (`rentapp.lease`), and the push is keyed by the deposit's fingerprint, so re-running it
-records nothing twice. Pulling a rent roll later, as context rather than as a second copy of the
-money, is a natural next step and is not precluded.
+Inputs are files (CSV today, ledger coming), read once inline with `import`, and connectors. A
+connector is bidirectional in principle; `export` is the direction built first, because the bank
+statement is where the money is read from. The rent app is the first connector: `export` records
+rent the books already booked back to it so its paid/unpaid state stays current, with its token kept
+in the environment rather than the books. The lease a deposit belongs to rides on the tenant's rule
+as metadata (`rentapp.lease`), and the export is keyed by the deposit's fingerprint, so re-running
+it records nothing twice. Importing a rent roll later, as context rather than as a second copy of
+the money, is a natural next step and is not precluded.
 
 Next, in order: the model tier (a model proposes categorizations for the `Uncategorized` lines),
 then the ledger-import parser and the manual transfer override (`transaction.matched`). Prices and
@@ -503,7 +503,7 @@ lib/eventlog/         the append-only log and its storage
 lib/store/            locating and opening a .bookkeeper book of record
 lib/adapters/source/  reads statements from the outside world (CSV today)
 lib/adapters/ledger/  renders the books as a plain-text double-entry artifact
-lib/adapters/rentapp/ the rent app connector (a destination): pushes recorded rent payments
+lib/adapters/rentapp/ the rent app connector: exports recorded rent payments
 cli/                  the command-line wrapper (the driving adapter)
 ```
 
