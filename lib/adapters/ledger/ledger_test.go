@@ -184,6 +184,29 @@ func TestEachEntryIsWrittenInItsOwnAccountsCurrency(t *testing.T) {
 	}
 }
 
+// Buying shares with cash is two commodities in one entry. The share posting carries its total
+// price in the "@@" form ledger reads, so ledger can value the position and compute basis later.
+func TestAPricedPostingIsWrittenWithItsTotalCost(t *testing.T) {
+	usd := func(cents int64) model.Amount { return model.Amount{Units: cents, Scale: 2, Commodity: "USD"} }
+	tx := model.Transaction{
+		Date: on(1), Amount: usd(-100000), Description: "BOUGHT 10 AAPL",
+		Account: "Assets:Brokerage:Cash",
+	}
+	cost := usd(100000)
+	e := model.Entry{
+		Payee:    "Bought Apple",
+		Postings: []model.Posting{{Account: "Assets:Brokerage:AAPL", Amount: model.Amount{Units: 10, Commodity: "AAPL"}, Cost: &cost}},
+	}
+
+	want := "2026/03/01  * Bought Apple\n" +
+		"  Assets:Brokerage:AAPL  10 AAPL @@ 1000.00 USD\n" +
+		"  Assets:Brokerage:Cash\n"
+
+	if got := write(t, tx, e); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // A commodity-less transaction would write "84.20 " with a trailing space, which is not a ledger.
 func TestATransactionWithoutACommodityIsRefused(t *testing.T) {
 	tx := chequing(1, -100, "A")

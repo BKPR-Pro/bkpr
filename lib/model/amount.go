@@ -15,8 +15,9 @@ import (
 // symbol, which need not be money: "CAD", "USD", "AAPL". This is ledger-cli's model of an amount,
 // which is why the books it emits can hold anything ledger can.
 //
-// Entries are single-commodity for now. Mixing commodities in one entry (buying a stock for cash)
-// balances only through a price, which is its own slice; until then such an entry is refused.
+// An entry may mix commodities: buying a stock for cash holds shares and dollars in one entry. They
+// balance through a price on the posting (see Posting.Cost), which resolves the foreign commodity
+// back to the line's own. An amount itself is still one commodity; the price lives a level up.
 type Amount struct {
 	Units     int64
 	Scale     uint8
@@ -30,6 +31,50 @@ func ParseAmount(s string) (Amount, error) {
 		return Amount{}, fmt.Errorf("amount %q must be %q", s, "<quantity> <commodity>")
 	}
 	return NewAmount(parts[0], parts[1])
+}
+
+// ParsePosting reads a -post value: a quantity, with an optional commodity, and an optional total
+// price introduced by "@@".
+//
+//	"40.00"                   40.00 in the fallback commodity, no price
+//	"10 AAPL"                 10 AAPL, no price (a share posting still needs one to balance a line)
+//	"10 AAPL @@ 1000.00 USD"  10 AAPL priced at a 1000.00 USD total
+//
+// A per-unit "@" is refused: dividing a total by a quantity reintroduces the rounding that a total
+// avoids, and the cost basis is meant to be the exact cash paid. The returned cost is a magnitude;
+// the quantity's sign is what a posting reads to know a buy from a sell.
+func ParsePosting(s, fallbackCommodity string) (Amount, *Amount, error) {
+	quantity, price, priced := strings.Cut(s, "@@")
+	if strings.Contains(quantity, "@") {
+		return Amount{}, nil, fmt.Errorf("price %q must be a total with %q, not a per-unit %q", s, "@@", "@")
+	}
+
+	amount, err := parseQuantity(quantity, fallbackCommodity)
+	if err != nil {
+		return Amount{}, nil, err
+	}
+	if !priced {
+		return amount, nil, nil
+	}
+
+	cost, err := ParseAmount(strings.TrimSpace(price))
+	if err != nil {
+		return Amount{}, nil, err
+	}
+	if cost.Units < 0 {
+		cost = cost.Negate()
+	}
+	return amount, &cost, nil
+}
+
+// parseQuantity reads the quantity half of a posting: "10 AAPL" carries its own commodity, while a
+// bare "40.00" takes the fallback the caller supplies (the line's own commodity).
+func parseQuantity(s, fallbackCommodity string) (Amount, error) {
+	s = strings.TrimSpace(s)
+	if len(strings.Fields(s)) >= 2 {
+		return ParseAmount(s)
+	}
+	return NewAmount(s, fallbackCommodity)
 }
 
 // NewAmount builds an amount from a quantity and a commodity given separately, which is what the
@@ -100,8 +145,9 @@ func (a Amount) Negate() Amount {
 // IsZero reports whether the quantity is zero.
 func (a Amount) IsZero() bool { return a.Units == 0 }
 
-// Add sums two amounts of the same commodity. Different commodities cannot be added without a
-// price, which is deliberately not built yet, so that is an error rather than a guess.
+// Add sums two amounts of the same commodity. Different commodities cannot be added directly; a
+// price resolves one to the other first (see Posting.value), so at this level a mismatch is an
+// error rather than a guess.
 func (a Amount) Add(b Amount) (Amount, error) {
 	if a.Commodity != b.Commodity {
 		return Amount{}, fmt.Errorf("cannot add %s and %s in one entry without a price", a.Commodity, b.Commodity)

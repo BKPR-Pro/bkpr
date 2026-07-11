@@ -150,8 +150,9 @@ func TestAnUnbalancedAssertionIsRefused(t *testing.T) {
 	}
 }
 
-// One entry, one commodity, until prices exist. A posting in another commodity cannot be summed
-// against the line without a price, so it is refused rather than written as a silently broken entry.
+// A posting in another commodity needs a price to be summed against the line. Without one it cannot
+// balance, so an unpriced cross-commodity assertion is still refused rather than written broken; the
+// priced form (a share bought with cash) is what opens this, and is covered above.
 func TestAMixedCommodityAssertionIsRefused(t *testing.T) {
 	log := newLog()
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE")) // CAD
@@ -161,6 +162,144 @@ func TestAMixedCommodityAssertionIsRefused(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("recorded an entry that mixes CAD and AAPL without a price")
+	}
+}
+
+// A cross-commodity assertion is now accepted when it carries a price, and the price survives the
+// round trip through the log: the folded entry still balances the cash the shares cost.
+func TestAPricedAssertionBuysSharesAgainstCash(t *testing.T) {
+	log := newLog()
+	buy := model.Transaction{
+		ID: "buy", Account: "Assets:Brokerage:Cash", Date: on(2),
+		Amount:      model.Amount{Units: -100000, Scale: 2, Commodity: "USD"},
+		Description: "BOUGHT 10 AAPL",
+	}
+	importOne(t, log, buy)
+
+	cost := model.Amount{Units: 100000, Scale: 2, Commodity: "USD"}
+	err := books.Categorize(log, "human", "opened the position", "buy", "Bought Apple",
+		[]model.Posting{{Account: "Assets:Brokerage:AAPL", Amount: model.Amount{Units: 10, Commodity: "AAPL"}, Cost: &cost}})
+	if err != nil {
+		t.Fatalf("Categorize: %v", err)
+	}
+
+	got := entryFor(t, log, "buy")
+	if len(got.Postings) != 1 || got.Postings[0].Cost == nil {
+		t.Fatalf("the price did not survive the log: %+v", got.Postings)
+	}
+	if !got.Balances(buy) {
+		t.Error("the folded priced entry should still account for the cash")
+	}
+}
+
+func brokerage(t *testing.T, log *eventlog.Log, id string, day int, cents int64, description string) model.Transaction {
+	t.Helper()
+	tx := model.Transaction{
+		ID: id, Account: "Assets:Brokerage:Cash", Date: on(day),
+		Amount:      model.Amount{Units: cents, Scale: 2, Commodity: "USD"},
+		Description: description,
+	}
+	importOne(t, log, tx)
+	return tx
+}
+
+func priced(units int64, symbol string, cents int64) model.Posting {
+	cost := model.Amount{Units: cents, Scale: 2, Commodity: "USD"}
+	return model.Posting{Account: "Assets:Brokerage:" + symbol, Amount: model.Amount{Units: units, Commodity: symbol}, Cost: &cost}
+}
+
+// A sale values the shares leaving at their cost base and books the difference from the proceeds as
+// the gain. The base is folded from the purchase, so the sale entry is derived, not asserted: the
+// gain posting is written by the fold, not by the human.
+func TestASaleBooksTheGainAgainstTheCostBase(t *testing.T) {
+	log := newLog()
+	buy := brokerage(t, log, "buy", 1, -100000, "BOUGHT 10 AAPL")
+	if err := books.Categorize(log, "human", "opened", buy.ID, "Bought Apple", []model.Posting{priced(10, "AAPL", 100000)}); err != nil {
+		t.Fatalf("buy: %v", err)
+	}
+	sell := brokerage(t, log, "sell", 30, 120000, "SOLD 10 AAPL") // $1200 proceeds
+
+	err := books.Sell(log, "human", "closed", sell.ID, "Sold Apple", "Income:Capital Gains",
+		[]model.Posting{{Account: "Assets:Brokerage:AAPL", Amount: model.Amount{Units: 10, Commodity: "AAPL"}}})
+	if err != nil {
+		t.Fatalf("Sell: %v", err)
+	}
+
+	got := entryFor(t, log, "sell")
+	if !got.Balances(sell) {
+		t.Fatalf("the sale should account for the proceeds: %+v", got.Postings)
+	}
+	var shares, gain model.Posting
+	for _, p := range got.Postings {
+		switch p.Account {
+		case "Assets:Brokerage:AAPL":
+			shares = p
+		case "Income:Capital Gains":
+			gain = p
+		}
+	}
+	if shares.Cost == nil || shares.Cost.String() != "1000.00 USD" {
+		t.Errorf("shares should leave at their 1000.00 USD base, got %+v", shares)
+	}
+	if gain.Amount.String() != "-200.00 USD" { // a $200 gain is negative in an income account
+		t.Errorf("gain = %q, want -200.00 USD", gain.Amount.String())
+	}
+}
+
+// The gain is a fold, not a stored number, so correcting an earlier purchase's cost base moves it.
+// This is the whole reason the base is recomputed: change what the shares cost and every later
+// sale's gain follows, with no touch to the sale itself.
+func TestCorrectingAPurchaseMovesTheGain(t *testing.T) {
+	log := newLog()
+	buy := brokerage(t, log, "buy", 1, -100000, "BOUGHT 10 AAPL") // $1000 left the cash account
+	books.Categorize(log, "human", "", buy.ID, "Bought Apple", []model.Posting{priced(10, "AAPL", 100000)})
+	sell := brokerage(t, log, "sell", 30, 120000, "SOLD 10 AAPL") // $1200 proceeds
+	books.Sell(log, "human", "", sell.ID, "Sold Apple", "Income:Capital Gains",
+		[]model.Posting{{Account: "Assets:Brokerage:AAPL", Amount: model.Amount{Units: 10, Commodity: "AAPL"}}})
+
+	if got := gainOf(t, log, "sell"); got != "-200.00 USD" {
+		t.Fatalf("gain = %q, want -200.00 USD before the correction", got)
+	}
+
+	// Of that $1000, $50 was a fee, not cost base. Re-split the buy so the shares cost $950. The
+	// base drops, so the sale's gain grows to $250, and the sale line is never touched.
+	fee := model.Amount{Units: 5000, Scale: 2, Commodity: "USD"}
+	err := books.Categorize(log, "human", "$50 of the line was a fee", buy.ID, "Bought Apple", []model.Posting{
+		priced(10, "AAPL", 95000),
+		{Account: "Expenses:Brokerage:Fees", Amount: fee},
+	})
+	if err != nil {
+		t.Fatalf("re-categorize buy: %v", err)
+	}
+
+	if got := gainOf(t, log, "sell"); got != "-250.00 USD" {
+		t.Errorf("gain = %q, want -250.00 USD after the corrected base", got)
+	}
+}
+
+func gainOf(t *testing.T, log *eventlog.Log, id string) string {
+	t.Helper()
+	for _, p := range entryFor(t, log, id).Postings {
+		if p.Account == "Income:Capital Gains" {
+			return p.Amount.String()
+		}
+	}
+	t.Fatalf("no gain posting on %q", id)
+	return ""
+}
+
+// Selling more than the account holds is a broken book, so it is refused when the sale is asserted,
+// not silently rendered.
+func TestSellingMoreThanHeldIsRefused(t *testing.T) {
+	log := newLog()
+	buy := brokerage(t, log, "buy", 1, -100000, "BOUGHT 10 AAPL")
+	books.Categorize(log, "human", "", buy.ID, "Bought Apple", []model.Posting{priced(10, "AAPL", 100000)})
+	sell := brokerage(t, log, "sell", 30, 120000, "SOLD 11 AAPL")
+
+	err := books.Sell(log, "human", "", sell.ID, "Sold Apple", "Income:Capital Gains",
+		[]model.Posting{{Account: "Assets:Brokerage:AAPL", Amount: model.Amount{Units: 11, Commodity: "AAPL"}}})
+	if err == nil {
+		t.Fatal("sold more shares than were held")
 	}
 }
 

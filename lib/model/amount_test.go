@@ -67,6 +67,67 @@ func TestParseRejectsGarbage(t *testing.T) {
 	}
 }
 
+// A -post value is a quantity with an optional commodity and an optional total price. A bare
+// number takes the line's commodity, so the ordinary correction is unchanged.
+func TestParsePostingWithoutAPriceTakesTheFallbackCommodity(t *testing.T) {
+	amount, cost, err := model.ParsePosting("40.00", "CAD")
+	if err != nil {
+		t.Fatalf("ParsePosting: %v", err)
+	}
+	if cost != nil {
+		t.Errorf("a bare number has no price, got %v", cost)
+	}
+	if amount.String() != "40.00 CAD" {
+		t.Errorf("amount = %q", amount.String())
+	}
+}
+
+// A quantity may name its own commodity even with no price: that is a share posting waiting for a
+// price to balance it.
+func TestParsePostingCarriesItsOwnCommodity(t *testing.T) {
+	amount, cost, err := model.ParsePosting("10 AAPL", "CAD")
+	if err != nil {
+		t.Fatalf("ParsePosting: %v", err)
+	}
+	if cost != nil {
+		t.Errorf("no @@ means no price, got %v", cost)
+	}
+	if amount.String() != "10 AAPL" {
+		t.Errorf("amount = %q", amount.String())
+	}
+}
+
+// The "@@" form gives the total price, in its own commodity, which need not be the fallback.
+func TestParsePostingReadsATotalPrice(t *testing.T) {
+	amount, cost, err := model.ParsePosting("10 AAPL @@ 1000.00 USD", "CAD")
+	if err != nil {
+		t.Fatalf("ParsePosting: %v", err)
+	}
+	if amount.String() != "10 AAPL" {
+		t.Errorf("amount = %q", amount.String())
+	}
+	if cost == nil || cost.String() != "1000.00 USD" {
+		t.Errorf("cost = %v, want 1000.00 USD", cost)
+	}
+}
+
+// A per-unit "@" is deliberately not accepted: a divided price reintroduces the rounding a total
+// avoids, so the error points at the total form rather than guessing.
+func TestParsePostingRejectsAPerUnitPrice(t *testing.T) {
+	if _, _, err := model.ParsePosting("10 AAPL @ 100.00 USD", "CAD"); err == nil {
+		t.Fatal("a per-unit @ price should be refused in favour of @@")
+	}
+}
+
+// A price with no quantity, or a quantity that is not a number, is garbage rather than a guess.
+func TestParsePostingRejectsGarbage(t *testing.T) {
+	for _, s := range []string{"", "@@ 1000.00 USD", "10 AAPL @@", "10 AAPL @@ nope"} {
+		if _, _, err := model.ParsePosting(s, "CAD"); err == nil {
+			t.Errorf("ParsePosting(%q) should have failed", s)
+		}
+	}
+}
+
 func TestNegateAndZero(t *testing.T) {
 	a, _ := model.ParseAmount("84.20 CAD")
 	if n := a.Negate(); n.Units != -8420 || n.String() != "-84.20 CAD" {

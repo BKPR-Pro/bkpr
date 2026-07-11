@@ -18,6 +18,7 @@ const ActionCategorized = "categorized"
 type categorizedData struct {
 	Payee    string          `json:"payee"`
 	Postings []model.Posting `json:"postings"`
+	Gain     string          `json:"gain,omitempty"` // set on a sale: the account its capital gain lands in
 	Why      string          `json:"why,omitempty"`
 }
 
@@ -52,6 +53,37 @@ func Categorize(log *eventlog.Log, actor, why, txID, payee string, postings []mo
 // is categorized by the rules, then overridden by the latest human or model assertion for that
 // specific line. This is the pipeline the table and the ledger artifact both render.
 func Ledger(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) {
+	txs, entries, err := categorized(log)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// A sale asserts only which shares left; the cost base they carry, and so the gain, is folded
+	// from the account's history here rather than stored on the assertion.
+	if err := resolveDisposals(txs, entries); err != nil {
+		return nil, nil, err
+	}
+
+	// The duplicate sighting of an internal transfer must not book a second entry, so it is dropped
+	// from the books entirely rather than rendered.
+	dup := suppressed(txs, entries)
+	keptTxs := make([]model.Transaction, 0, len(txs))
+	keptEntries := make([]model.Entry, 0, len(entries))
+	for i, tx := range txs {
+		if dup[tx.ID] {
+			continue
+		}
+		keptTxs = append(keptTxs, tx)
+		keptEntries = append(keptEntries, entries[i])
+	}
+	return keptTxs, keptEntries, nil
+}
+
+// categorized folds the log into every transaction and the entry it currently carries, in date
+// order, before disposals are priced and transfers suppressed. Each line is categorized by the
+// rules, then overridden by the latest human or model assertion for that specific line. It is the
+// shared front half of Ledger, reused to validate a sale before it is recorded.
+func categorized(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) {
 	set, err := Rules(log)
 	if err != nil {
 		return nil, nil, err
@@ -79,20 +111,7 @@ func Ledger(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) {
 		}
 		entries[i] = engine.Apply(tx)
 	}
-
-	// The duplicate sighting of an internal transfer must not book a second entry, so it is dropped
-	// from the books entirely rather than rendered.
-	dup := suppressed(txs, entries)
-	keptTxs := make([]model.Transaction, 0, len(txs))
-	keptEntries := make([]model.Entry, 0, len(entries))
-	for i, tx := range txs {
-		if dup[tx.ID] {
-			continue
-		}
-		keptTxs = append(keptTxs, tx)
-		keptEntries = append(keptEntries, entries[i])
-	}
-	return keptTxs, keptEntries, nil
+	return txs, entries, nil
 }
 
 // assertions folds the categorized events into the current entry per transaction. A later event
@@ -112,7 +131,7 @@ func assertions(log *eventlog.Log) (map[string]model.Entry, error) {
 		if err := e.Decode(&data); err != nil {
 			return nil, fmt.Errorf("books: event %s: %w", e.ID, err)
 		}
-		out[e.RecordID] = model.Entry{Payee: data.Payee, Postings: data.Postings}
+		out[e.RecordID] = model.Entry{Payee: data.Payee, Postings: data.Postings, Gain: data.Gain}
 	}
 	return out, nil
 }

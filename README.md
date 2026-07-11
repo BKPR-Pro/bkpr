@@ -470,8 +470,19 @@ directory is refused rather than turned into a new empty book of record.
 
 Amounts are an integer `Amount` (quantity, scale, commodity), serialized in the log as a
 ledger-style string like `84.20 CAD` or `10 AAPL`. No float touches money at any boundary; the CSV
-reader's old float is gone. An entry is single-commodity for now: mixing commodities balances only
-through a price, which is refused until that slice exists.
+reader's old float is gone. An entry may hold two commodities: a share posting carries the total
+cash it cost as a price (the ledger `@@` form), and the entry balances by resolving that price back
+to the line's own commodity. A cross-commodity posting with no price, or a price in a third
+commodity, still cannot be summed and so is refused.
+
+A brokerage account holds shares against cash. A purchase is a priced posting
+(`-post "Assets:Brokerage:AAPL=10 AAPL @@ 1000.00 USD"`), and a sale names the shares it disposed of
+and where the gain lands (`-sell "Assets:Brokerage:AAPL=10 AAPL" -gain "Income:Capital Gains"`). The
+cost base the shares leave at is folded from the account's purchases under the average cost base
+(ACB), so the gain is derived rather than stored: correct an earlier purchase's base and every later
+sale's gain moves with it. A sale that disposes of more than the account holds is refused when it is
+asserted. The base is a total, never a divided per-unit price, so a full disposal returns the exact
+cost and a partial one rounds to the cent without leaking.
 
 Internal transfers seen in both accounts' statements are recognised and booked once, as a
 deterministic fold over the lines and their categorization, so the money is not double-counted. A
@@ -487,9 +498,10 @@ it records nothing twice. Importing a rent roll later, as context rather than as
 the money, is a natural next step and is not precluded.
 
 Next, in order: the model tier (a model proposes categorizations for the `Uncategorized` lines),
-then the ledger-import parser and the manual transfer override (`transaction.matched`). Prices and
-cost basis (so a brokerage account can hold shares against cash) are a later slice; the `Amount`
-type is ready.
+then the ledger-import parser and the manual transfer override (`transaction.matched`). The cost
+basis policy is ACB and pluggable at the seam; making the policy a logged, per-account setting (so a
+US account can run FIFO in the same book) and reading the share quantity straight off a brokerage
+statement (so a trade need not be typed) are the follow-on slices.
 
 ## Layout
 

@@ -52,6 +52,18 @@ func writeEntry(w io.Writer, tx model.Transaction, e model.Entry) error {
 		return err
 	}
 	for _, p := range e.Postings {
+		// A posting in another commodity (shares bought with cash) carries its total price in the
+		// "@@" form, which is what lets ledger value the position and match cost basis on a sale.
+		if p.Cost != nil {
+			cost := *p.Cost
+			if cost.Units < 0 {
+				cost = cost.Negate()
+			}
+			if _, err := fmt.Fprintf(w, "  %s  %s @@ %s\n", p.Account, p.Amount, cost); err != nil {
+				return err
+			}
+			continue
+		}
 		if _, err := fmt.Fprintf(w, "  %s  %s\n", p.Account, p.Amount); err != nil {
 			return err
 		}

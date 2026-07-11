@@ -129,10 +129,14 @@ BOOKKEEPING
       currency, or columns, so you supply them inline; a ledger file names all of that
       itself. Importing from a registered connector by name is the same verb, built later;
       the bank statement is where the money is read from first.
-  categorize -tx <fingerprint> (-category <account> | -post <account>=<amount> ...)
-             [-payee <name>] [-why <reason>]
+  categorize -tx <fingerprint> (-category <account> | -post <account>=<amount> ... |
+             -sell <account>=<qty> ... -gain <account>) [-payee <name>] [-why <reason>]
       Assert the postings for one line, overriding the rule for that line only. Use -post
-      more than once to split one charge across accounts.
+      more than once to split one charge across accounts. A -post amount may name its own
+      commodity and an @@ total price, so a share bought with cash is
+      -post "Assets:Brokerage:AAPL=10 AAPL @@ 1000.00 USD". A sale instead names the shares
+      it disposed of with -sell and where the gain lands with -gain; the cost base, and so the
+      gain, is folded from your purchases: -sell "Assets:Brokerage:AAPL=10 AAPL" -gain "Income:Capital Gains".
   discard -tx <fingerprint> [-why <reason>]
       Drop a bad line from the books. The imported fact stays in the log; a later fact
       supersedes it.
@@ -543,23 +547,73 @@ func (p *splitFlag) Set(s string) error {
 	return nil
 }
 
-// categorize records a human's answer for one line: its category, or a split across several.
+// postingsFor turns the flags into the postings to assert. A -category names one account and takes
+// the whole line in its own commodity; -post entries are spelled out, each a quantity with an
+// optional commodity and an optional "@@" total price, so a share bought with cash reads
+// "Assets:Brokerage:AAPL=10 AAPL @@ 1000.00 USD". A bare number keeps the line's commodity, so an
+// ordinary split is unchanged. The line's amount supplies that fallback commodity.
+func postingsFor(category string, split splitFlag, line model.Amount) ([]model.Posting, error) {
+	if category != "" {
+		// The common case: the whole line to one account, in the line's amount with the opposite sign.
+		return []model.Posting{{Account: category, Amount: line.Negate()}}, nil
+	}
+
+	var post []model.Posting
+	for _, rp := range split {
+		amount, cost, err := model.ParsePosting(rp.quantity, line.Commodity)
+		if err != nil {
+			return nil, err
+		}
+		post = append(post, model.Posting{Account: rp.account, Amount: amount, Cost: cost})
+	}
+	return post, nil
+}
+
+// disposalsFor turns the -sell flags into the holdings a sale disposes of. Each names an account
+// and a positive share quantity with its commodity, e.g. "Assets:Brokerage:AAPL=10 AAPL". A sale
+// carries no price: the cost base is folded from the account's purchases, not restated here.
+func disposalsFor(sell splitFlag) ([]model.Posting, error) {
+	var post []model.Posting
+	for _, rp := range sell {
+		amount, cost, err := model.ParsePosting(rp.quantity, "")
+		if err != nil {
+			return nil, err
+		}
+		if cost != nil {
+			return nil, fmt.Errorf("sell %q: a sale takes no price; its cost base is folded from your purchases", rp.account)
+		}
+		post = append(post, model.Posting{Account: rp.account, Amount: amount})
+	}
+	return post, nil
+}
+
+// categorize records a human's answer for one line: its category, a split across several, or a sale
+// that disposes of shares and books the gain.
 func categorize(args []string) error {
-	var split splitFlag
+	var split, sell splitFlag
 	fs := flag.NewFlagSet("categorize", flag.ExitOnError)
 	txID := fs.String("tx", "", "the transaction fingerprint to categorize")
 	category := fs.String("category", "", "post the whole line to this one account")
 	payee := fs.String("payee", "", "the payee to record on the entry")
 	why := fs.String("why", "", "why this line is categorized so; recorded with the assertion")
-	fs.Var(&split, "post", "account=amount, repeatable, for a line that splits across accounts")
+	gain := fs.String("gain", "", "on a sale, the account its capital gain or loss lands in, e.g. Income:Capital Gains")
+	fs.Var(&split, "post", "account=amount, repeatable; amount may carry a commodity and an @@ total price, e.g. \"Assets:Brokerage:AAPL=10 AAPL @@ 1000.00 USD\"")
+	fs.Var(&sell, "sell", "account=quantity, repeatable; the shares this line sold, e.g. \"Assets:Brokerage:AAPL=10 AAPL\", paired with -gain")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *txID == "" || (*category == "" && len(split) == 0) {
+
+	isSale := len(sell) > 0 || *gain != ""
+	switch {
+	case *txID == "":
 		fs.Usage()
-		return fmt.Errorf("tx and one of -category or -post are required")
-	}
-	if *category != "" && len(split) > 0 {
+		return fmt.Errorf("tx is required")
+	case isSale && (*category != "" || len(split) > 0):
+		return fmt.Errorf("a sale is -sell with -gain, not mixed with -category or -post")
+	case !isSale && *category == "" && len(split) == 0:
+		fs.Usage()
+		return fmt.Errorf("one of -category, -post, or -sell is required")
+	case *category != "" && len(split) > 0:
 		return fmt.Errorf("give -category or -post, not both")
 	}
 
@@ -569,6 +623,18 @@ func categorize(args []string) error {
 	}
 	defer s.Close()
 
+	if isSale {
+		disposals, err := disposalsFor(sell)
+		if err != nil {
+			return err
+		}
+		if err := books.Sell(s.Log, "human", *why, *txID, *payee, *gain, disposals); err != nil {
+			return err
+		}
+		fmt.Printf("categorized %s\n", *txID)
+		return nil
+	}
+
 	// The line's own commodity is what a posting is denominated in, so it is fetched before the
 	// postings are built and the caller never restates it.
 	tx, err := books.Transaction(s.Log, *txID)
@@ -576,18 +642,9 @@ func categorize(args []string) error {
 		return err
 	}
 
-	var post []model.Posting
-	if *category != "" {
-		// The common case: the whole line to one account, in the line's amount with the opposite sign.
-		post = []model.Posting{{Account: *category, Amount: tx.Amount.Negate()}}
-	} else {
-		for _, rp := range split {
-			amount, err := model.NewAmount(rp.quantity, tx.Amount.Commodity)
-			if err != nil {
-				return err
-			}
-			post = append(post, model.Posting{Account: rp.account, Amount: amount})
-		}
+	post, err := postingsFor(*category, split, tx.Amount)
+	if err != nil {
+		return err
 	}
 
 	if err := books.Categorize(s.Log, "human", *why, *txID, *payee, post); err != nil {
