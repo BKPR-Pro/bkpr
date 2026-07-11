@@ -8,6 +8,9 @@
 package main
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
@@ -96,6 +99,7 @@ usage:
   bk connectors list
   bk import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
   bk import       <file.ledger>
+  bk import       <book.jsonl>
   bk categorize   <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
   bk void         <fingerprint> [-why <reason>] [-actor <name>]
   bk match        <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
@@ -187,6 +191,14 @@ var reference = []docGroup{
       later; the bank statement is where the money is read from first.
       -date-format is a Go layout: the reference date Jan 2, 2006 written the way the column
       writes dates, so MM/DD/YYYY is -date-format 01/02/2006 (the default is 2006-01-02).
+  import <book.jsonl>
+      Merge another book: the log is its own interchange format, so its events replay here in
+      their order. Statement lines, invoices, bills, and exports dedupe by fingerprint, so a
+      line both books saw lands once. Rules and corrections are recorded again here, later
+      than everything this book holds, so where both books answered the same question the
+      imported answer wins, and a rule pattern both books authored folds to one rule. A
+      transfer each book saw from its own side pairs up once merged. Re-importing the same
+      file is a no-op, keyed by a fingerprint of its content.
 `},
 		{[]string{"categorize"}, `  categorize <fingerprint> (-category <account> | -post <account>=<amount> ... |
              -sell <account>=<qty> ... -gain <account>) [-payee <name>] [-why <reason>] [-actor <name>]
@@ -407,9 +419,39 @@ func importCmd(args []string) error {
 		return importCSV(s.Log, arg, rest)
 	case ".ledger":
 		return importLedger(s.Log, arg)
+	case ".jsonl":
+		return importLog(s.Log, arg)
 	default:
-		return fmt.Errorf("import: I do not know how to read %q; .csv and .ledger are supported, connectors are coming", arg)
+		return fmt.Errorf("import: I do not know how to read %q; .csv, .ledger, and .jsonl are supported, connectors are coming", arg)
 	}
+}
+
+// importLog merges another book: the log is its own interchange format, so combining two books is
+// an import, not a new serialization. The other book's events replay here in their order; lines,
+// invoices, and bills dedupe by fingerprint, recurring facts land later and win, and re-importing
+// the same file is a no-op keyed by a fingerprint of its content.
+func importLog(log *eventlog.Log, path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	events, err := eventlog.ReadEvents(bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(raw)
+
+	res, err := books.MergeLog(log, "human", hex.EncodeToString(digest[:])[:16], events)
+	if err != nil {
+		return err
+	}
+	if res.Repeat {
+		fmt.Printf("%d events read: this file was merged before, nothing recorded\n", len(events))
+		return nil
+	}
+	fmt.Printf("%d events read: %d recorded, %d already known\n", len(events), res.Recorded, res.Skipped)
+	uncategorizedHint(log)
+	return nil
 }
 
 // importLedger reads a plain-text ledger file: each entry's amountless posting is the account its

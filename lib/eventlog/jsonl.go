@@ -139,3 +139,27 @@ func (j *JSONL) All() ([]Event, error) {
 }
 
 func (j *JSONL) Close() error { return j.file.Close() }
+
+// ReadEvents parses a log read from elsewhere — another book's log.jsonl — into its events. It
+// reads without locking or healing: the file belongs to another book, so a torn or corrupt line
+// is refused rather than repaired in place.
+func ReadEvents(r io.Reader) ([]Event, error) {
+	var events []Event
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for n := 1; scanner.Scan(); n++ {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var e Event
+		if err := json.Unmarshal(line, &e); err != nil {
+			return nil, fmt.Errorf("eventlog: line %d is not an event: %w", n, err)
+		}
+		events = append(events, e)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("eventlog: read: %w", err)
+	}
+	return events, nil
+}

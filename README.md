@@ -334,6 +334,22 @@ backup — one committable file holding everything the books cannot recompute �
 copying it back (or `git checkout`). Encoding facts into artifact comments would be a second copy
 that could drift from the first, which is the one thing the design refuses.
 
+#### Another book's log
+
+The log is its own interchange format, so combining two books is an import, not a new adapter:
+
+```sh
+bk import ../business/.bookkeeper/log.jsonl
+```
+
+The other book's events replay here in their order. Statement lines, invoices, bills, and exports
+dedupe by fingerprint, so a line both books saw lands once; rules and corrections are recorded
+again here, later than everything this book holds, so where both books answered the same question
+the imported answer wins, and a rule pattern both books authored folds to one rule rather than
+two. A transfer each book saw from its own side — chequing out, savings in — pairs up once the
+books merge, and the movement counts once. Re-importing the same file is a no-op, keyed by a
+fingerprint of its content, exactly as re-importing a statement is.
+
 #### Connectors: register, list, rm
 
 A connector is bidirectional in principle: `export` writes to it today, and importing from it by
