@@ -83,7 +83,7 @@ usage:
   bookkeeper rules   rm   -match <re>
   bookkeeper rules   mv   -match <re> [-before <re>]
   bookkeeper rules   list
-  bookkeeper connectors add  <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
+  bookkeeper connectors register <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
   bookkeeper connectors rm   <name>
   bookkeeper connectors list
   bookkeeper import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
@@ -114,7 +114,7 @@ SETUP
   init [dir]
       Create a set of books in dir (default: here).
 
-  connectors add <name> -kind <kind> -url <url> -token-env <ENV> -account <a> [-currency <c>]
+  connectors register <name> -kind <kind> -url <url> -token-env <ENV> -account <a> [-currency <c>]
       Register a live connector. The bearer token is never stored: -token-env names the
       environment variable that holds it, read when the connector is used. A connector is
       bidirectional in principle: export writes to it today, and importing from it by name
@@ -167,7 +167,7 @@ BOOKKEEPING
       surface an external model reads to know what needs categorizing; it never writes, and
       the model answers back through categorize and rules set.
   export <connector> [-confirm]
-      Write rent the books already booked out to a registered connector (see connectors add),
+      Write rent the books already booked out to a registered connector (see connectors register),
       so its paid/unpaid state stays current. Each rent deposit that a rule attributed to a
       lease (via -meta rentapp.lease=<id>) is recorded against that lease, keyed by the
       deposit's fingerprint so a repeat is a no-op. Without -confirm it is a dry run that
@@ -325,15 +325,15 @@ func importCSV(log *eventlog.Log, path string, args []string) error {
 	return nil
 }
 
-// connectorSet dispatches `connectors add|rm|list`.
+// connectorSet dispatches `connectors register|rm|list`.
 func connectorSet(args []string) error {
 	if len(args) == 0 {
 		usage()
-		return fmt.Errorf("connectors needs add, rm, or list")
+		return fmt.Errorf("connectors needs register, rm, or list")
 	}
 	switch args[0] {
-	case "add":
-		return connectorAdd(args[1:])
+	case "register":
+		return connectorRegister(args[1:])
 	case "rm":
 		return connectorRemove(args[1:])
 	case "list":
@@ -344,12 +344,12 @@ func connectorSet(args []string) error {
 	}
 }
 
-func connectorAdd(args []string) error {
+func connectorRegister(args []string) error {
 	name, rest, err := firstArg(args, "a name for the connector, e.g. rent")
 	if err != nil {
 		return err
 	}
-	fs := flag.NewFlagSet("connectors add", flag.ExitOnError)
+	fs := flag.NewFlagSet("connectors register", flag.ExitOnError)
 	var c books.Connector
 	fs.StringVar(&c.Kind, "kind", "rentapp", "which connector this is")
 	fs.StringVar(&c.URL, "url", "", "the connector's base URL")
@@ -367,7 +367,7 @@ func connectorAdd(args []string) error {
 	}
 	defer closeLog()
 
-	if err := books.AddConnector(log, "human", c); err != nil {
+	if err := books.RegisterConnector(log, "human", c); err != nil {
 		return err
 	}
 	fmt.Printf("connector %s\n", c.Name)

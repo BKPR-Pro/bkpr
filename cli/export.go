@@ -154,7 +154,7 @@ func exportCmd(args []string) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("export: no connector named %q; register it with `connectors add`", name)
+		return fmt.Errorf("export: no connector named %q; register it with `connectors register`", name)
 	}
 	if dest.Kind != "rentapp" {
 		return fmt.Errorf("export: connector %q has kind %q, which cannot be exported to", name, dest.Kind)

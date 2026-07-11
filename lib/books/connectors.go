@@ -8,10 +8,17 @@ import (
 	"github.com/dallasread/bookkeeper/lib/eventlog"
 )
 
-// CollectionConnector is keyed by a connector's name. A connector is a live system bookkeeper
-// reaches over the network, registered once and then used by name, unlike a file which is a
-// one-time input supplied inline. It is bidirectional in principle: export writes to it today.
-const CollectionConnector = "connector"
+const (
+	// CollectionConnector is keyed by a connector's name. A connector is a live system bookkeeper
+	// reaches over the network, registered once and then used by name, unlike a file which is a
+	// one-time input supplied inline. It is bidirectional in principle: export writes to it today.
+	CollectionConnector = "connector"
+
+	// ActionRegistered records that a connector was registered under its name. "register" is the word
+	// the domain uses for standing up a live connection, distinct from adding a row to a set: a
+	// connector is a named endpoint you register, not an entry in an ordered list like a rule.
+	ActionRegistered = "registered"
+)
 
 // Connector is how to reach one live system. The token itself is never stored, because the log is
 // committed to git: TokenEnv names the environment variable that holds it, read when it is used.
@@ -24,9 +31,10 @@ type Connector struct {
 	Currency string `json:"currency"`  // their currency
 }
 
-// AddConnector registers a connector, or updates one under the same name. The token is deliberately
-// not among its fields: only the name of the environment variable that carries it is stored.
-func AddConnector(log *eventlog.Log, actor string, c Connector) error {
+// RegisterConnector registers a connector, or updates one under the same name. The token is
+// deliberately not among its fields: only the name of the environment variable that carries it is
+// stored.
+func RegisterConnector(log *eventlog.Log, actor string, c Connector) error {
 	switch {
 	case c.Name == "":
 		return fmt.Errorf("books: a connector needs a name")
@@ -47,7 +55,7 @@ func AddConnector(log *eventlog.Log, actor string, c Connector) error {
 		return err
 	}
 	_, err = log.Track(eventlog.Event{
-		Collection: CollectionConnector, RecordID: c.Name, Action: ActionAdded,
+		Collection: CollectionConnector, RecordID: c.Name, Action: ActionRegistered,
 		Version: version, Actor: actor, Data: data,
 	})
 	return err
@@ -80,7 +88,7 @@ func Connectors(log *eventlog.Log) ([]Connector, error) {
 			continue
 		}
 		switch e.Action {
-		case ActionAdded:
+		case ActionRegistered:
 			var c Connector
 			if err := e.Decode(&c); err != nil {
 				return nil, fmt.Errorf("books: event %s: %w", e.ID, err)

@@ -14,10 +14,10 @@ func rentConnector() books.Connector {
 	}
 }
 
-func TestAddAndFindAConnector(t *testing.T) {
+func TestRegisterAndFindAConnector(t *testing.T) {
 	log := newLog()
-	if err := books.AddConnector(log, "human", rentConnector()); err != nil {
-		t.Fatalf("AddConnector: %v", err)
+	if err := books.RegisterConnector(log, "human", rentConnector()); err != nil {
+		t.Fatalf("RegisterConnector: %v", err)
 	}
 
 	got, ok, err := books.ConnectorByName(log, "rent")
@@ -33,7 +33,7 @@ func TestAddAndFindAConnector(t *testing.T) {
 // variable that holds it does.
 func TestAConnectorStoresTheTokenEnvNotTheToken(t *testing.T) {
 	log := newLog()
-	books.AddConnector(log, "human", rentConnector())
+	books.RegisterConnector(log, "human", rentConnector())
 
 	events, _ := log.All()
 	for _, e := range events {
@@ -46,15 +46,15 @@ func TestAConnectorStoresTheTokenEnvNotTheToken(t *testing.T) {
 	}
 }
 
-// Add is an upsert under the name, so re-registering changes the connector.
-func TestReAddingAConnectorUpdatesIt(t *testing.T) {
+// Register is an upsert under the name, so re-registering changes the connector.
+func TestReRegisteringAConnectorUpdatesIt(t *testing.T) {
 	log := newLog()
-	books.AddConnector(log, "human", rentConnector())
+	books.RegisterConnector(log, "human", rentConnector())
 
 	changed := rentConnector()
 	changed.Account = "Assets:Bank:Savings"
-	if err := books.AddConnector(log, "human", changed); err != nil {
-		t.Fatalf("AddConnector: %v", err)
+	if err := books.RegisterConnector(log, "human", changed); err != nil {
+		t.Fatalf("RegisterConnector: %v", err)
 	}
 
 	got, _, _ := books.ConnectorByName(log, "rent")
@@ -68,7 +68,7 @@ func TestReAddingAConnectorUpdatesIt(t *testing.T) {
 
 func TestRemoveAConnector(t *testing.T) {
 	log := newLog()
-	books.AddConnector(log, "human", rentConnector())
+	books.RegisterConnector(log, "human", rentConnector())
 
 	if err := books.RemoveConnector(log, "human", "rent"); err != nil {
 		t.Fatalf("RemoveConnector: %v", err)
@@ -100,7 +100,7 @@ func TestAConnectorMissingAFieldIsRefused(t *testing.T) {
 	} {
 		c := rentConnector()
 		break_(&c)
-		if err := books.AddConnector(log, "human", c); err == nil {
+		if err := books.RegisterConnector(log, "human", c); err == nil {
 			t.Errorf("added an incomplete connector: %+v", c)
 		}
 	}
