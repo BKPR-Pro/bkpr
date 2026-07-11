@@ -129,9 +129,11 @@ BOOKKEEPING
                     [-date <col>] [-description <col>] [-date-format <layout>]
   import <file.ledger>
       Read transactions in. A file is a one-time input: a CSV does not name its own account,
-      currency, or columns, so you supply them inline; a ledger file names all of that
-      itself. Importing from a registered connector by name is the same verb, built later;
-      the bank statement is where the money is read from first.
+      currency, or columns, so you supply them inline; a ledger file names all of that itself
+      (each entry's single amountless posting is the account it came from). The line is
+      imported raw and the rules place it, so a ledger file's own categorization is not
+      carried in. Importing from a registered connector by name is the same verb, built
+      later; the bank statement is where the money is read from first.
   categorize -tx <fingerprint> (-category <account> | -post <account>=<amount> ... |
              -sell <account>=<qty> ... -gain <account>) [-payee <name>] [-why <reason>] [-actor <name>]
       Assert the postings for one line, overriding the rule for that line only. Use -post
@@ -214,9 +216,34 @@ func importCmd(args []string) error {
 	switch ext := strings.ToLower(filepath.Ext(arg)); ext {
 	case ".csv":
 		return importCSV(s.Log, arg, rest)
+	case ".ledger":
+		return importLedger(s.Log, arg)
 	default:
-		return fmt.Errorf("import: I do not know how to read %q; .csv is supported, ledger files and connectors are coming", arg)
+		return fmt.Errorf("import: I do not know how to read %q; .csv and .ledger are supported, connectors are coming", arg)
 	}
+}
+
+// importLedger reads a plain-text ledger file: each entry's amountless posting is the account its
+// statement line came from, and the line's amount is the negation of the priced postings. The
+// categorization in the file is not carried in; the line is imported raw and the rules place it, so
+// the books stay a fold rather than a set of frozen assertions.
+func importLedger(log *eventlog.Log, path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	txs, err := source.ReadLedger(f)
+	if err != nil {
+		return err
+	}
+	result, err := books.Import(log, "statement:"+filepath.Base(path), txs)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%d entries read: %d imported, %d already in the log\n", len(txs), result.Imported, result.Skipped)
+	return nil
 }
 
 func importCSV(log *eventlog.Log, path string, args []string) error {

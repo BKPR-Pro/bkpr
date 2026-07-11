@@ -490,7 +490,7 @@ Internal transfers seen in both accounts' statements are recognised and booked o
 deterministic fold over the lines and their categorization, so the money is not double-counted. A
 bad line is undone with `discard`, which supersedes the imported line without deleting it.
 
-Inputs are files (CSV today, ledger coming), read once inline with `import`, and connectors. A
+Inputs are files (CSV, and the ledger form it writes), read once inline with `import`, and connectors. A
 connector is bidirectional in principle; `export` is the direction built first, because the bank
 statement is where the money is read from. The rent app is the first connector: `export` records
 rent the books already booked back to it so its paid/unpaid state stays current, with its token kept
@@ -504,10 +504,10 @@ The surface an external model drives is in place: `review` prints the open decis
 `-actor`, so a model proposes through the same path a person uses and the log records who answered.
 bookkeeper never calls a model itself.
 
-Next: the manual transfer override (`transaction.matched`) and the ledger-import parser. The cost
-basis policy is ACB and pluggable at the seam; making the policy a logged, per-account setting (so a
-US account can run FIFO in the same book) and reading the share quantity straight off a brokerage
-statement (so a trade need not be typed) are the follow-on slices.
+Next: the manual transfer override (`transaction.matched`). The cost basis policy is ACB and
+pluggable at the seam; making the policy a logged, per-account setting (so a US account can run FIFO
+in the same book) and reading the share quantity straight off a brokerage statement (so a trade need
+not be typed) are the follow-on slices.
 
 ## Layout
 
@@ -519,7 +519,7 @@ lib/books/            the commands and folds: Import, AddRule, Categorize, Disca
 lib/rules/            the deterministic categorization engine
 lib/eventlog/         the append-only log and its storage
 lib/store/            locating and opening a .bookkeeper book of record
-lib/adapters/source/  reads statements from the outside world (CSV today)
+lib/adapters/source/  reads statements from the outside world (CSV and ledger files)
 lib/adapters/ledger/  renders the books as a plain-text double-entry artifact
 lib/adapters/rentapp/ the rent app connector: exports recorded rent payments
 cli/                  the command-line wrapper (the driving adapter)
