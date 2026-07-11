@@ -124,6 +124,59 @@ func overlayAccruals(log *eventlog.Log, txs []model.Transaction, entries []model
 	return txs, entries, nil
 }
 
+// settlementWindow is how far from an accrual's date a bank line may fall and still be offered as
+// the one that settled it. It is generous, because an invoice can sit unpaid for months; the offer
+// is only a suggestion, so a wide net costs nothing.
+const settlementWindow = 180
+
+// SettlementCandidates returns, for each open accrual, the bank lines that plausibly settled it: a
+// real imported line whose amount equals the parked amount (so a deposit clears a receivable and a
+// payment clears a payable), dated within the window, and not already settling another accrual. It
+// is keyed by the accrual's fingerprint, the same id `invoice list` and `bill list` print.
+//
+// This is the transfer-pairing heuristic surfaced rather than applied. A deposit's memo does not
+// prove which invoice it clears, so the pairing stays an offer the person confirms with `settle`,
+// never a guess the fold makes. The point is only to spare the fingerprint-hunting: pick from a
+// short list instead of grepping the log.
+func SettlementCandidates(log *eventlog.Log) (map[string][]string, error) {
+	lines, err := accrualLines(log)
+	if err != nil {
+		return nil, err
+	}
+	txs, err := Transactions(log)
+	if err != nil {
+		return nil, err
+	}
+
+	// A line already settling some accrual is spoken for, so it is never offered for another.
+	used := map[string]bool{}
+	for _, ln := range lines {
+		if ln.settledBy != "" {
+			used[ln.settledBy] = true
+		}
+	}
+
+	out := map[string][]string{}
+	for _, ln := range lines {
+		if ln.settledBy != "" {
+			continue // already settled; nothing to offer
+		}
+		for _, tx := range txs {
+			if used[tx.ID] {
+				continue
+			}
+			if !tx.Amount.Equal(ln.parkedAmount) {
+				continue // a deposit clears a receivable, a payment clears a payable, sign and all
+			}
+			if daysApart(tx.Date, ln.date) > settlementWindow {
+				continue
+			}
+			out[ln.id] = append(out[ln.id], tx.ID)
+		}
+	}
+	return out, nil
+}
+
 // trackSettlement records that a bank line paid an accrual, or reopens it when txID is empty.
 func trackSettlement(log *eventlog.Log, actor, collection, recordID, txID string) error {
 	data, err := json.Marshal(settledData{Tx: txID})

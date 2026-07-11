@@ -208,8 +208,11 @@ INVOICES AND BILLS  (value recognized before its cash; only shown on -basis accr
       the raised fact stays in the log; a later fact supersedes it.
   invoice list
   bill list
-      List the open invoices or bills with their fingerprints, date, party, amount, category,
-      parked account, and the line that settled each, if any.
+      List the invoices or bills with their fingerprints, date, party, amount, category, parked
+      account, and the line that settled each. An open one also lists CANDIDATES: the bank lines
+      that plausibly settle it (same amount, within a few months, not already used elsewhere), so
+      settling is picking a fingerprint from a short list rather than grepping the log. The offer
+      is never applied on its own, because a memo does not prove which accrual a line clears.
 
 Fingerprints come from the log; find an uncategorized line's fingerprint there to
 categorize it. See the README for the design.
@@ -960,12 +963,17 @@ func invoiceList(args []string) error {
 	if err != nil {
 		return err
 	}
+	candidates, err := books.SettlementCandidates(log)
+	if err != nil {
+		return err
+	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tDATE\tPARTY\tAMOUNT\tCATEGORY\tACCOUNT\tSETTLED BY")
+	fmt.Fprintln(w, "ID\tDATE\tPARTY\tAMOUNT\tCATEGORY\tACCOUNT\tSETTLED BY\tCANDIDATES")
 	for _, inv := range invs {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			inv.ID, inv.Date.Format("2006-01-02"), inv.Party, inv.Amount, inv.Category, inv.Account, settled[inv.ID])
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			inv.ID, inv.Date.Format("2006-01-02"), inv.Party, inv.Amount, inv.Category, inv.Account,
+			settled[inv.ID], strings.Join(candidates[inv.ID], " "))
 	}
 	return w.Flush()
 }
@@ -1122,12 +1130,17 @@ func billList(args []string) error {
 	if err != nil {
 		return err
 	}
+	candidates, err := books.SettlementCandidates(log)
+	if err != nil {
+		return err
+	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tDATE\tPARTY\tAMOUNT\tCATEGORY\tACCOUNT\tSETTLED BY")
+	fmt.Fprintln(w, "ID\tDATE\tPARTY\tAMOUNT\tCATEGORY\tACCOUNT\tSETTLED BY\tCANDIDATES")
 	for _, b := range bills {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			b.ID, b.Date.Format("2006-01-02"), b.Party, b.Amount, b.Category, b.Account, settled[b.ID])
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			b.ID, b.Date.Format("2006-01-02"), b.Party, b.Amount, b.Category, b.Account,
+			settled[b.ID], strings.Join(candidates[b.ID], " "))
 	}
 	return w.Flush()
 }

@@ -388,7 +388,20 @@ The pairing is **recorded, not guessed**. An internal transfer pairs automatical
 sighting names the other's account with certainty; a deposit's memo does not reliably name which
 invoice it clears, so settling is an asserted fact rather than a fold, in keeping with *say only what
 is known*. A wrong invoice is dropped with `invoice void` — the same verb as voiding a bad import,
-one operation on a different noun; `bk invoice list` shows the open ones and what settled each.
+one operation on a different noun.
+
+You do not have to hunt the fingerprint, though. `bk invoice list` (and `bk bill list`) prints, for
+each open accrual, the bank lines that plausibly settle it under a **CANDIDATES** column — the same
+transfer-pairing heuristic (same amount, within a few months, not already used), surfaced instead of
+applied. Settling is then copying a suggested fingerprint, not grepping the log:
+
+```text
+ID                DATE        PARTY     AMOUNT       ... SETTLED BY  CANDIDATES
+9617607456a06619  2026-03-01  J. Smith  1600.00 CAD  ...             6afa3719db1eb739-1
+```
+
+The offer is never taken on its own — the fold still will not decide which line clears which invoice
+— but the choice is now a glance, not a search.
 
 Because the basis is a lens and invoices are additive facts, you can **start on cash and turn on
 accrual later** with no migration: raise invoices from whatever day you begin, and every period
