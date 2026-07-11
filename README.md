@@ -538,6 +538,21 @@ $500 expense and a coincidental $500 deposit are not a transfer, because neither
 account, so both are booked. Suppression only ever happens when two accounts you own each point at
 the other.
 
+A **cross-currency** move — $1000 CAD out of chequing, $740 USD into a US account — is the same one
+movement, but the two sightings are not equal and opposite, so the amount check cannot pair them.
+Here the price does the work the mutual naming does above. Categorize the leg that left, naming the
+account the money reached and the rate it cleared at:
+
+```sh
+bk categorize -tx <cad-leg> -payee "Transfer to USD" -post "Assets:USD=740 USD @@ 1000.00 CAD"
+```
+
+That posting ties the two real amounts together — the 740 USD that landed, priced at the 1000 CAD
+that left — which is the cross-currency stand-in for mutual naming, so the USD sighting is recognised
+as the duplicate and dropped. The kept entry books both accounts, and because the received currency
+is acquired at a stated cost, the USD holding picks up a cost base in CAD for free (the same fold
+that prices a stock purchase), so a later conversion back realizes the exchange gain or loss.
+
 ## Books
 
 `-format ledger` regenerates `.bookkeeper/books.ledger`, the plain-text double-entry artifact.
@@ -627,8 +642,9 @@ in the same book a Canadian default keeps on ACB. Because the method is folded, 
 sale, changing it reclassifies every affected gain on the next regeneration.
 
 Internal transfers seen in both accounts' statements are recognised and booked once, as a
-deterministic fold over the lines and their categorization, so the money is not double-counted. A
-bad line is undone with `void`, which supersedes the imported line without deleting it.
+deterministic fold over the lines and their categorization, so the money is not double-counted —
+across a currency boundary too, where the rate on the categorized leg ties the two amounts together.
+A bad line is undone with `void`, which supersedes the imported line without deleting it.
 
 Cash and accrual are the same log read through two lenses, chosen with `bk books -basis`. Cash is the
 default and every statement example is already it. Accrual also books the value recognized before its
@@ -700,11 +716,7 @@ follows the same shape (see below), so it is the same convention, not a special 
 
 In order:
 
-1. **Cross-currency transfer.** A conversion between your own accounts (USD out, CAD in) is one
-   movement in two commodities, so the transfer fold — which pairs only equal-and-opposite amounts of
-   a single currency — does not catch it. Recognize it as a priced pairing that carries the rate, so
-   the money is not double-counted and the exchange lands on the books.
-2. **The RBC bank import.** Fill in `scripts/rbc.js`: drive the login and read the account into the
+1. **The RBC bank import.** Fill in `scripts/rbc.js`: drive the login and read the account into the
    JSON the importer already expects (`BK_IMPORT_*` in, `[{date, description, amount}]` out). The
    login itself lives in the web layer (below) or, standalone, in an encrypted `.env`, and reaches
    the script as `BK_IMPORT_SECRET` at run time, so the engine never stores a plaintext credential —

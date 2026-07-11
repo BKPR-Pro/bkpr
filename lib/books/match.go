@@ -73,7 +73,8 @@ func suppressed(txs []model.Transaction, entries []model.Entry, overrides map[st
 			if consumed[j] {
 				continue
 			}
-			if isTransferPair(txs[i], entries[i], txs[j], entries[j]) {
+			if isTransferPair(txs[i], entries[i], txs[j], entries[j]) ||
+				isCrossTransferPair(txs[i], entries[i], txs[j], entries[j]) {
 				dup[txs[j].ID] = true // txs are date-ordered, so j is the later sighting
 				consumed[i], consumed[j] = true, true
 				break
@@ -148,6 +149,47 @@ func isTransferPair(a model.Transaction, ea model.Entry, b model.Transaction, eb
 		return false
 	}
 	return postsTo(ea, b.Account) && postsTo(eb, a.Account)
+}
+
+// isCrossTransferPair reports whether two sightings in different commodities are the same movement.
+// A move between two of your own accounts across a currency boundary shows a thousand dollars leaving
+// one and seven hundred forty landing in the other: not equal and opposite, so isTransferPair cannot
+// see it. The evidence is instead the price. One leg, categorized, names the other's account, the
+// quantity that landed there, and the cost it took, which is exactly this leg's own amount. That cost
+// tie stands in for the mutual naming a same-commodity pair relies on: it ties the two real amounts
+// to each other, so a coincidental foreign deposit is not mistaken for the far side of a transfer.
+func isCrossTransferPair(a model.Transaction, ea model.Entry, b model.Transaction, eb model.Entry) bool {
+	if a.Account == b.Account || a.Amount.Commodity == b.Amount.Commodity {
+		return false
+	}
+	if daysApart(a.Date, b.Date) > transferDays {
+		return false
+	}
+	return crossTies(ea, a, b) || crossTies(eb, b, a)
+}
+
+// crossTies reports whether self's entry books the far leg of a transfer to other: a posting into
+// other's account for the amount that landed there, priced at the magnitude that left self. The price
+// is what proves the two lines are one movement rather than two of the same size.
+func crossTies(selfEntry model.Entry, self, other model.Transaction) bool {
+	for _, p := range selfEntry.Postings {
+		if p.Account != other.Account || p.Cost == nil {
+			continue
+		}
+		if p.Amount.Equal(other.Amount) && magnitude(*p.Cost).Equal(magnitude(self.Amount)) {
+			return true
+		}
+	}
+	return false
+}
+
+// magnitude drops an amount's sign, so a cost stored as a positive total compares equal to the
+// negative amount that left an account.
+func magnitude(a model.Amount) model.Amount {
+	if a.Units < 0 {
+		return a.Negate()
+	}
+	return a
 }
 
 func postsTo(e model.Entry, account string) bool {

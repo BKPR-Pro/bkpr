@@ -148,6 +148,61 @@ func TestBreakingAMatchKeepsBothSightings(t *testing.T) {
 	}
 }
 
+func usd(cents int64) model.Amount { return model.Amount{Units: cents, Scale: 2, Commodity: "USD"} }
+
+// crossLeg is one side of a cross-currency transfer: an account, a day, and an amount in its own
+// commodity, so a USD leg is a real USD amount rather than the CAD the plain line helper assumes.
+func crossLeg(id, account string, day int, amount model.Amount, description string) model.Transaction {
+	tx := lineIn(id, account, day, 0, description)
+	tx.Amount = amount
+	return tx
+}
+
+// A cross-currency transfer: a thousand Canadian dollars leaves chequing and seven hundred forty US
+// dollars land in a USD account, seen once in each statement. The amounts are not equal and
+// opposite, so the plain transfer fold cannot pair them. It is still one movement and must book
+// once: the CAD leg, categorized to the USD account at the rate it cleared, carries the whole thing,
+// and the USD sighting is the duplicate.
+func TestACrossCurrencyTransferBooksOnce(t *testing.T) {
+	log := newLog()
+	importOne(t, log, crossLeg("c", "Assets:Chequing:CAD", 1, cad(-100000), "FX TO USD"))
+	importOne(t, log, crossLeg("u", "Assets:USD", 2, usd(74000), "FX FROM CAD"))
+
+	price := cad(100000)
+	if err := books.Categorize(log, "human", "", "c", "Transfer to USD",
+		[]model.Posting{{Account: "Assets:USD", Amount: usd(74000), Cost: &price}}); err != nil {
+		t.Fatalf("Categorize: %v", err)
+	}
+
+	txs, entries := ledger(t, log)
+	if len(txs) != 1 {
+		t.Fatalf("got %d entries, want 1: the FX move was booked twice", len(txs))
+	}
+	if txs[0].ID != "c" {
+		t.Fatalf("kept %q, want the earlier CAD leg", txs[0].ID)
+	}
+	if !entries[0].Balances(txs[0]) {
+		t.Errorf("the kept entry does not balance: %+v", entries[0])
+	}
+}
+
+// The cost tie is load-bearing. A USD deposit and an unrelated CAD withdrawal are not a transfer
+// just because they are foreign to each other: only a posting that names the other account and ties
+// the two real amounts together — the quantity received at the price paid — marks one movement.
+func TestACrossCurrencyPairWithoutTheCostTieBooksBoth(t *testing.T) {
+	log := newLog()
+	importOne(t, log, crossLeg("c", "Assets:Chequing:CAD", 1, cad(-100000), "DINNER"))
+	importOne(t, log, crossLeg("u", "Assets:USD", 2, usd(74000), "REFUND"))
+
+	if err := books.Categorize(log, "human", "", "c", "Dinner", whole("Expenses:Food", -100000)); err != nil {
+		t.Fatalf("Categorize: %v", err)
+	}
+
+	if txs, _ := ledger(t, log); len(txs) != 2 {
+		t.Fatalf("got %d entries, want 2: without a cost tie these are two events", len(txs))
+	}
+}
+
 // A match is a correction, so a later one supersedes: breaking a forced pair undoes it.
 func TestALaterMatchSupersedesAnEarlierOne(t *testing.T) {
 	log := newLog()
