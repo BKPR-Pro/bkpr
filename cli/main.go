@@ -85,30 +85,31 @@ func usage() {
 
 Every command finds the nearest .bookkeeper directory by walking up, as git does.
 Run "bk help <command>" for one command, "bk docs" for the full reference.
-Wherever a command takes a fingerprint, a unique prefix is enough, as with a git hash.
+The thing a command acts on is its first argument; flags assert facts about it.
+Wherever a fingerprint is taken, a unique prefix is enough, as with a git hash.
 
 usage:
   bk init         [dir]
-  bk rules   set  -match <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]
-  bk rules   rm   -match <re>
-  bk rules   mv   -match <re> [-before <re>]
+  bk rules   set  <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]
+  bk rules   rm   <re>
+  bk rules   mv   <re> [-before <re>]
   bk rules   list
   bk connectors register <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
   bk connectors rm   <name>
   bk connectors list
   bk import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
   bk import       <file.ledger>
-  bk categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
-  bk void         -tx <fingerprint> [-why <reason>] [-actor <name>]
-  bk match        -tx <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
+  bk categorize   <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
+  bk void         <fingerprint> [-why <reason>] [-actor <name>]
+  bk match        <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
   bk invoice raise   -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
-  bk invoice settle  -id <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
-  bk invoice void    -id <fingerprint> [-why <reason>] [-actor <name>]
+  bk invoice settle  <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
+  bk invoice void    <fingerprint> [-why <reason>] [-actor <name>]
   bk invoice list
   bk invoice aging   [-as-of <YYYY-MM-DD>]
   bk bill    receive -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
-  bk bill    settle  -id <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
-  bk bill    void    -id <fingerprint> [-why <reason>] [-actor <name>]
+  bk bill    settle  <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
+  bk bill    void    <fingerprint> [-why <reason>] [-actor <name>]
   bk bill    list
   bk bill    aging   [-as-of <YYYY-MM-DD>]
   bk review       [-format table|json]
@@ -139,11 +140,14 @@ A set of books lives in a .bookkeeper directory, found by walking up from the cu
 directory the way git finds .git. The log inside it (log.jsonl) is the book of record;
 everything else, including the ledger artifact, is a fold over it and is regenerated.
 
+One grammar throughout: the thing a command acts on is its first argument (a file, a
+connector, a rule's pattern, a fingerprint); flags assert facts about it.
+
 `
 
-const docsFooter = `Wherever a command takes a fingerprint (-tx, -id, -with), a unique prefix of at least
-four characters is enough, as with a git hash; review and the list commands print the
-fingerprints to quote. See the README for the design.
+const docsFooter = `Wherever a fingerprint is taken - as a command's first argument, or as -with or -tx -
+a unique prefix of at least four characters is enough, as with a git hash; review and
+the list commands print the fingerprints to quote. See the README for the design.
 `
 
 var reference = []docGroup{
@@ -161,7 +165,7 @@ var reference = []docGroup{
 `},
 	}},
 	{"RULES  (deterministic categorization; first matching rule wins per field)", []docTopic{
-		{[]string{"rules"}, `  rules set -match <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>]
+		{[]string{"rules"}, `  rules set <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>]
       Add a rule, or change one already matching this pattern. On an existing rule only the
       fields you name change, and since that reclassifies every past line it matched, it
       takes a -why. A new rule lands last unless -before places it ahead of another. Account
@@ -170,8 +174,8 @@ var reference = []docGroup{
       -meta rentapp.lease=31 tells the export which lease a matching rent deposit belongs to.
       Either way it reports how many lines the books reclassified, so a pattern that catches
       nothing (or too much) is visible the moment it is written.
-  rules rm  -match <re>           Remove a rule.
-  rules mv  -match <re> [-before <re>]   Reorder a rule (-before omitted moves it last).
+  rules rm  <re>                  Remove a rule.
+  rules mv  <re> [-before <re>]   Reorder a rule (-before omitted moves it last).
   rules list                      Show the rules in order.
 `},
 	}},
@@ -188,7 +192,7 @@ var reference = []docGroup{
       -date-format is a Go layout: the reference date Jan 2, 2006 written the way the column
       writes dates, so MM/DD/YYYY is -date-format 01/02/2006 (the default is 2006-01-02).
 `},
-		{[]string{"categorize"}, `  categorize -tx <fingerprint> (-category <account> | -post <account>=<amount> ... |
+		{[]string{"categorize"}, `  categorize <fingerprint> (-category <account> | -post <account>=<amount> ... |
              -sell <account>=<qty> ... -gain <account>) [-payee <name>] [-why <reason>] [-actor <name>]
       Assert the postings for one line, overriding the rule for that line only. Use -post
       more than once to split one charge across accounts. A -post amount may name its own
@@ -199,11 +203,11 @@ var reference = []docGroup{
       -actor records who decided (default human), so a model driving this command is told
       apart from a person in the log; rules set and void take it too.
 `},
-		{[]string{"void"}, `  void -tx <fingerprint> [-why <reason>] [-actor <name>]
+		{[]string{"void"}, `  void <fingerprint> [-why <reason>] [-actor <name>]
       Annul a bad imported line. The imported fact stays in the log; a later fact supersedes
       it. Voiding an invoice is the same verb on a different noun: invoice void.
 `},
-		{[]string{"match"}, `  match -tx <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
+		{[]string{"match"}, `  match <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
       Override the automatic transfer fold, which pairs the two sightings of one movement
       only when each names the other's account. -with forces a pair it missed, dropping the
       later sighting; -break keeps a line the fold wrongly paired. A later match supersedes.
@@ -247,16 +251,16 @@ var reference = []docGroup{
       Receive a bill: money you owe, the mirror of an invoice. It debits an expense and credits
       a payable, defaulting to Liabilities:Payable. Everything else matches invoice raise.
 `},
-		{[]string{"invoice", "bill"}, `  invoice settle -id <fingerprint> (-tx <fingerprint> | -reopen)
-  bill settle    -id <fingerprint> (-tx <fingerprint> | -reopen)
+		{[]string{"invoice", "bill"}, `  invoice settle <fingerprint> (-tx <fingerprint> | -reopen)
+  bill settle    <fingerprint> (-tx <fingerprint> | -reopen)
       Record that a bank line paid an invoice or bill, so on the accrual basis the cash clears
       the receivable or payable instead of booking the income or expense a second time (that
       was booked when the accrual was raised). A memo does not reliably name which accrual a
       line clears, so this pairing is recorded rather than guessed. -reopen unlinks it; a later
       settle supersedes.
 `},
-		{[]string{"invoice", "bill"}, `  invoice void -id <fingerprint> [-why <reason>]
-  bill void    -id <fingerprint> [-why <reason>]
+		{[]string{"invoice", "bill"}, `  invoice void <fingerprint> [-why <reason>]
+  bill void    <fingerprint> [-why <reason>]
       Drop an accrual that should not have been raised. The same verb as voiding a bad import:
       the raised fact stays in the log; a later fact supersedes it.
 `},
@@ -624,21 +628,22 @@ func (m *metaFlag) Set(s string) error {
 // one already matching it. There is no separate add, because a pattern is a rule's identity and
 // "make this pattern say X" is the same intent whether or not it existed.
 func ruleSetOne(args []string) error {
+	pattern, rest, err := firstArg(args, "the rule's match pattern, e.g. \"acme hardware\"")
+	if err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("rules set", flag.ExitOnError)
 	var r rules.Rule
 	var meta metaFlag
-	fs.StringVar(&r.Match, "match", "", "case-insensitive pattern to match the description")
+	r.Match = pattern
 	fs.StringVar(&r.Category, "category", "", "account to post the line to")
 	fs.StringVar(&r.Payee, "payee", "", "payee to record on the entry")
 	fs.Var(&meta, "meta", "key=value carried onto the entry, repeatable, e.g. rentapp.lease=31")
 	before := fs.String("before", "", "on a new rule, place it ahead of the one matching this pattern")
 	why := fs.String("why", "", "why the rule changed; changing one reclassifies every line it matched")
 	actor := fs.String("actor", "human", "who is authoring this rule; the log records who decided")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(rest); err != nil {
 		return err
-	}
-	if r.Match == "" {
-		return fmt.Errorf("-match is required")
 	}
 
 	// Only the fields you name change, so setting a category does not silently blank the payee.
@@ -747,13 +752,9 @@ func mergeMeta(base, overlay map[string]string) map[string]string {
 }
 
 func ruleRemove(args []string) error {
-	fs := flag.NewFlagSet("rules rm", flag.ExitOnError)
-	match := fs.String("match", "", "the rule to remove")
-	if err := fs.Parse(args); err != nil {
+	match, _, err := firstArg(args, "the rule to remove, by its match pattern")
+	if err != nil {
 		return err
-	}
-	if *match == "" {
-		return fmt.Errorf("-match is required")
 	}
 
 	log, closeLog, err := open()
@@ -766,26 +767,26 @@ func ruleRemove(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := books.RemoveRule(log, "human", *match); err != nil {
+	if err := books.RemoveRule(log, "human", match); err != nil {
 		return err
 	}
 	now, err := entriesByTx(log)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("removed rule %q: %d lines reclassified\n", *match, reclassified(was, now))
+	fmt.Printf("removed rule %q: %d lines reclassified\n", match, reclassified(was, now))
 	return nil
 }
 
 func ruleMove(args []string) error {
-	fs := flag.NewFlagSet("rules mv", flag.ExitOnError)
-	match := fs.String("match", "", "the rule to move")
-	before := fs.String("before", "", "move it ahead of this rule; omit to move it to the end")
-	if err := fs.Parse(args); err != nil {
+	match, rest, err := firstArg(args, "the rule to move, by its match pattern")
+	if err != nil {
 		return err
 	}
-	if *match == "" {
-		return fmt.Errorf("-match is required")
+	fs := flag.NewFlagSet("rules mv", flag.ExitOnError)
+	before := fs.String("before", "", "move it ahead of this rule; omit to move it to the end")
+	if err := fs.Parse(rest); err != nil {
+		return err
 	}
 
 	log, closeLog, err := open()
@@ -798,14 +799,14 @@ func ruleMove(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := books.MoveRule(log, "human", *match, *before); err != nil {
+	if err := books.MoveRule(log, "human", match, *before); err != nil {
 		return err
 	}
 	now, err := entriesByTx(log)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("moved rule %q: %d lines reclassified\n", *match, reclassified(was, now))
+	fmt.Printf("moved rule %q: %d lines reclassified\n", match, reclassified(was, now))
 	return nil
 }
 
@@ -889,9 +890,12 @@ func disposalsFor(sell splitFlag) ([]model.Posting, error) {
 // categorize records a human's answer for one line: its category, a split across several, or a sale
 // that disposes of shares and books the gain.
 func categorize(args []string) error {
+	txID, rest, err := firstArg(args, "the transaction fingerprint to categorize")
+	if err != nil {
+		return err
+	}
 	var split, sell splitFlag
 	fs := flag.NewFlagSet("categorize", flag.ExitOnError)
-	txID := fs.String("tx", "", "the transaction fingerprint to categorize")
 	category := fs.String("category", "", "post the whole line to this one account")
 	payee := fs.String("payee", "", "the payee to record on the entry")
 	why := fs.String("why", "", "why this line is categorized so; recorded with the assertion")
@@ -899,15 +903,12 @@ func categorize(args []string) error {
 	actor := fs.String("actor", "human", "who is categorizing; the log records who decided")
 	fs.Var(&split, "post", "account=amount, repeatable; amount may carry a commodity and an @@ total price, e.g. \"Assets:Brokerage:AAPL=10 AAPL @@ 1000.00 USD\"")
 	fs.Var(&sell, "sell", "account=quantity, repeatable; the shares this line sold, e.g. \"Assets:Brokerage:AAPL=10 AAPL\", paired with -gain")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(rest); err != nil {
 		return err
 	}
 
 	isSale := len(sell) > 0 || *gain != ""
 	switch {
-	case *txID == "":
-		fs.Usage()
-		return fmt.Errorf("tx is required")
 	case isSale && (*category != "" || len(split) > 0):
 		return fmt.Errorf("a sale is -sell with -gain, not mixed with -category or -post")
 	case !isSale && *category == "" && len(split) == 0:
@@ -928,16 +929,16 @@ func categorize(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := books.Sell(s.Log, *actor, *why, *txID, *payee, *gain, disposals); err != nil {
+		if err := books.Sell(s.Log, *actor, *why, txID, *payee, *gain, disposals); err != nil {
 			return err
 		}
-		fmt.Printf("categorized %s\n", *txID)
+		fmt.Printf("categorized %s\n", txID)
 		return nil
 	}
 
 	// The line's own commodity is what a posting is denominated in, so it is fetched before the
 	// postings are built and the caller never restates it.
-	tx, err := books.Transaction(s.Log, *txID)
+	tx, err := books.Transaction(s.Log, txID)
 	if err != nil {
 		return err
 	}
@@ -947,7 +948,7 @@ func categorize(args []string) error {
 		return err
 	}
 
-	if err := books.Categorize(s.Log, *actor, *why, *txID, *payee, post); err != nil {
+	if err := books.Categorize(s.Log, *actor, *why, txID, *payee, post); err != nil {
 		return err
 	}
 	// tx.ID rather than the argument: a quoted prefix echoes back as the whole fingerprint.
@@ -957,16 +958,15 @@ func categorize(args []string) error {
 
 // voidCmd annuls a bad imported line, the way to undo a bad import.
 func voidCmd(args []string) error {
-	fs := flag.NewFlagSet("void", flag.ExitOnError)
-	txID := fs.String("tx", "", "the transaction fingerprint to void")
-	why := fs.String("why", "", "why the line is annulled; recorded with the void")
-	actor := fs.String("actor", "human", "who is voiding; the log records who decided")
-	if err := fs.Parse(args); err != nil {
+	txID, rest, err := firstArg(args, "the transaction fingerprint to void")
+	if err != nil {
 		return err
 	}
-	if *txID == "" {
-		fs.Usage()
-		return fmt.Errorf("tx is required")
+	fs := flag.NewFlagSet("void", flag.ExitOnError)
+	why := fs.String("why", "", "why the line is annulled; recorded with the void")
+	actor := fs.String("actor", "human", "who is voiding; the log records who decided")
+	if err := fs.Parse(rest); err != nil {
+		return err
 	}
 
 	s, err := store.Open(".")
@@ -975,26 +975,26 @@ func voidCmd(args []string) error {
 	}
 	defer s.Close()
 
-	if err := books.VoidTransaction(s.Log, *actor, *why, *txID); err != nil {
+	if err := books.VoidTransaction(s.Log, *actor, *why, txID); err != nil {
 		return err
 	}
-	fmt.Printf("voided %s\n", *txID)
+	fmt.Printf("voided %s\n", txID)
 	return nil
 }
 
 // match overrides the automatic transfer fold for one line: force a pairing it missed (mutual naming
 // is the only thing it recognises), or break one it wrongly made.
 func match(args []string) error {
+	txID, rest, err := firstArg(args, "the transaction fingerprint to match")
+	if err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("match", flag.ExitOnError)
-	txID := fs.String("tx", "", "the transaction to match")
 	with := fs.String("with", "", "the other sighting; the two are one movement and the later is dropped")
 	brk := fs.Bool("break", false, "this line is not a duplicate; keep it")
 	actor := fs.String("actor", "human", "who is matching; the log records who decided")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(rest); err != nil {
 		return err
-	}
-	if *txID == "" {
-		return fmt.Errorf("-tx is required")
 	}
 	if *brk == (*with != "") {
 		return fmt.Errorf("give -with <tx> to force a pair, or -break to keep a line, not both or neither")
@@ -1006,13 +1006,13 @@ func match(args []string) error {
 	}
 	defer closeLog()
 
-	if err := books.Match(log, *actor, *txID, *with, !*brk); err != nil {
+	if err := books.Match(log, *actor, txID, *with, !*brk); err != nil {
 		return err
 	}
 	if *brk {
-		fmt.Printf("broke the match on %s\n", *txID)
+		fmt.Printf("broke the match on %s\n", txID)
 	} else {
-		fmt.Printf("matched %s with %s\n", *txID, *with)
+		fmt.Printf("matched %s with %s\n", txID, *with)
 	}
 	return nil
 }
@@ -1100,16 +1100,16 @@ func invoiceRaise(args []string) error {
 // recorded rather than guessed, because a deposit's memo does not reliably name which invoice it
 // clears.
 func invoiceSettle(args []string) error {
+	id, rest, err := firstArg(args, "the invoice fingerprint to settle")
+	if err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("invoice settle", flag.ExitOnError)
-	id := fs.String("id", "", "the invoice fingerprint to settle")
 	txID := fs.String("tx", "", "the bank line that paid it")
 	reopen := fs.Bool("reopen", false, "unlink the invoice from its paying line")
 	actor := fs.String("actor", "human", "who is settling; the log records who decided")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(rest); err != nil {
 		return err
-	}
-	if *id == "" {
-		return fmt.Errorf("-id is required")
 	}
 	if *reopen == (*txID != "") {
 		return fmt.Errorf("give -tx <fingerprint> to settle, or -reopen to unlink, not both or neither")
@@ -1121,28 +1121,28 @@ func invoiceSettle(args []string) error {
 	}
 	defer closeLog()
 
-	if err := books.SettleInvoice(log, *actor, *id, *txID); err != nil {
+	if err := books.SettleInvoice(log, *actor, id, *txID); err != nil {
 		return err
 	}
 	if *reopen {
-		fmt.Printf("reopened %s\n", *id)
+		fmt.Printf("reopened %s\n", id)
 	} else {
-		fmt.Printf("settled %s with %s\n", *id, *txID)
+		fmt.Printf("settled %s with %s\n", id, *txID)
 	}
 	return nil
 }
 
 // invoiceVoid drops an invoice that should not have been raised.
 func invoiceVoid(args []string) error {
-	fs := flag.NewFlagSet("invoice void", flag.ExitOnError)
-	id := fs.String("id", "", "the invoice fingerprint to void")
-	why := fs.String("why", "", "why it is voided; recorded with the void")
-	actor := fs.String("actor", "human", "who is voiding; the log records who decided")
-	if err := fs.Parse(args); err != nil {
+	id, rest, err := firstArg(args, "the invoice fingerprint to void")
+	if err != nil {
 		return err
 	}
-	if *id == "" {
-		return fmt.Errorf("-id is required")
+	fs := flag.NewFlagSet("invoice void", flag.ExitOnError)
+	why := fs.String("why", "", "why it is voided; recorded with the void")
+	actor := fs.String("actor", "human", "who is voiding; the log records who decided")
+	if err := fs.Parse(rest); err != nil {
+		return err
 	}
 
 	log, closeLog, err := open()
@@ -1151,10 +1151,10 @@ func invoiceVoid(args []string) error {
 	}
 	defer closeLog()
 
-	if err := books.VoidInvoice(log, *actor, *why, *id); err != nil {
+	if err := books.VoidInvoice(log, *actor, *why, id); err != nil {
 		return err
 	}
-	fmt.Printf("voided %s\n", *id)
+	fmt.Printf("voided %s\n", id)
 	return nil
 }
 
@@ -1269,16 +1269,16 @@ func billReceive(args []string) error {
 
 // billSettle links a bill to the bank line that paid it, or reopens it.
 func billSettle(args []string) error {
+	id, rest, err := firstArg(args, "the bill fingerprint to settle")
+	if err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("bill settle", flag.ExitOnError)
-	id := fs.String("id", "", "the bill fingerprint to settle")
 	txID := fs.String("tx", "", "the bank line that paid it")
 	reopen := fs.Bool("reopen", false, "unlink the bill from its paying line")
 	actor := fs.String("actor", "human", "who is settling; the log records who decided")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(rest); err != nil {
 		return err
-	}
-	if *id == "" {
-		return fmt.Errorf("-id is required")
 	}
 	if *reopen == (*txID != "") {
 		return fmt.Errorf("give -tx <fingerprint> to settle, or -reopen to unlink, not both or neither")
@@ -1290,28 +1290,28 @@ func billSettle(args []string) error {
 	}
 	defer closeLog()
 
-	if err := books.SettleBill(log, *actor, *id, *txID); err != nil {
+	if err := books.SettleBill(log, *actor, id, *txID); err != nil {
 		return err
 	}
 	if *reopen {
-		fmt.Printf("reopened %s\n", *id)
+		fmt.Printf("reopened %s\n", id)
 	} else {
-		fmt.Printf("settled %s with %s\n", *id, *txID)
+		fmt.Printf("settled %s with %s\n", id, *txID)
 	}
 	return nil
 }
 
 // billVoid drops a bill that should not have been received.
 func billVoid(args []string) error {
-	fs := flag.NewFlagSet("bill void", flag.ExitOnError)
-	id := fs.String("id", "", "the bill fingerprint to void")
-	why := fs.String("why", "", "why it is voided; recorded with the void")
-	actor := fs.String("actor", "human", "who is voiding; the log records who decided")
-	if err := fs.Parse(args); err != nil {
+	id, rest, err := firstArg(args, "the bill fingerprint to void")
+	if err != nil {
 		return err
 	}
-	if *id == "" {
-		return fmt.Errorf("-id is required")
+	fs := flag.NewFlagSet("bill void", flag.ExitOnError)
+	why := fs.String("why", "", "why it is voided; recorded with the void")
+	actor := fs.String("actor", "human", "who is voiding; the log records who decided")
+	if err := fs.Parse(rest); err != nil {
+		return err
 	}
 
 	log, closeLog, err := open()
@@ -1320,10 +1320,10 @@ func billVoid(args []string) error {
 	}
 	defer closeLog()
 
-	if err := books.VoidBill(log, *actor, *why, *id); err != nil {
+	if err := books.VoidBill(log, *actor, *why, id); err != nil {
 		return err
 	}
-	fmt.Printf("voided %s\n", *id)
+	fmt.Printf("voided %s\n", id)
 	return nil
 }
 

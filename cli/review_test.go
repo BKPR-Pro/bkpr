@@ -91,7 +91,7 @@ func TestReviewTableListsTheFingerprints(t *testing.T) {
 	if !strings.Contains(out, "FINGERPRINT") || !strings.Contains(out, "mystery") {
 		t.Errorf("table should carry the fingerprint column:\n%s", out)
 	}
-	if !strings.Contains(out, "categorize -tx") {
+	if !strings.Contains(out, "categorize <fingerprint>") {
 		t.Errorf("table should close by naming the next step:\n%s", out)
 	}
 }

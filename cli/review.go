@@ -120,7 +120,7 @@ func reviewTable(out io.Writer, rep reviewReport) error {
 		return err
 	}
 
-	fmt.Fprintf(out, "\n%d lines to place: categorize -tx <fingerprint> answers one, rules set answers every line like it\n",
+	fmt.Fprintf(out, "\n%d lines to place: categorize <fingerprint> answers one, rules set answers every line like it\n",
 		len(rep.Uncategorized))
 	return nil
 }

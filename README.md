@@ -14,13 +14,14 @@ bk init
 bk import statement.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
 bk books                  # every line and where it posted
 bk review                 # the lines the rules could not place, with their fingerprints
-bk rules set -match "shell|petro" -category "Expenses:Travel:Fuel" -payee "Fuel Stop"
+bk rules set "shell|petro" -category "Expenses:Travel:Fuel" -payee "Fuel Stop"
 bk books                  # the whole history, reclassified by the rule you just wrote
 ```
 
-`bk help <command>` explains one command; `bk docs` prints the whole reference. Wherever a
-command takes a fingerprint, a unique prefix is enough, as with a git hash. The rest of this
-README is the design and the why.
+`bk help <command>` explains one command; `bk docs` prints the whole reference. One grammar
+throughout: the thing a command acts on — a file, a connector, a rule's pattern, a fingerprint —
+is its first argument, and flags assert facts about it. Wherever a fingerprint is taken, a unique
+prefix is enough, as with a git hash. The rest of this README is the design and the why.
 
 ## Every line posts, and nothing is guessed
 
@@ -312,7 +313,7 @@ deposit against that lease, keyed by the deposit's fingerprint so a repeat is a 
 export BK_RENT_TOKEN=...   # the rent app's bearer token
 bk connectors register rent -kind rentapp -url https://rent.stcroixproperties.ca \
   -token-env BK_RENT_TOKEN -account "Assets:Bank:Chequing" -currency CAD
-bk rules set -match "hyungjin" -category "Income:Real Estate:Rent:22 Lisgar Street" \
+bk rules set "hyungjin" -category "Income:Real Estate:Rent:22 Lisgar Street" \
   -meta rentapp.lease=31
 bk export rent            # dry run: what it would record
 bk export rent -confirm   # records each rent deposit against its lease
@@ -323,8 +324,8 @@ Each is one event. Order decides which of two matching rules wins, so a new rule
 unless `-before` places it ahead of another. `rules rm` and `mv` drop and reorder.
 
 ```sh
-bk rules set -match "shell|petro" -category "Expenses:Travel:Fuel" -payee "Fuel Stop"
-bk rules set -match "city water"  -category "Expenses:Utilities:Water" -before "water"
+bk rules set "shell|petro" -category "Expenses:Travel:Fuel" -payee "Fuel Stop"
+bk rules set "city water"  -category "Expenses:Utilities:Water" -before "water"
 bk rules list
 ```
 
@@ -389,7 +390,7 @@ was booked when the invoice was raised):
 
 ```sh
 bk import march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
-bk invoice settle -id 9617607456a06619 -tx 6afa3719db1eb739-1
+bk invoice settle 9617607456a06619 -tx 6afa3719db1eb739-1
 ```
 
 ```text
@@ -470,7 +471,7 @@ Learn that every hardware receipt was Unit 1, and say so once. `set` changes onl
 name, so the payee is left as it was:
 
 ```sh
-bk rules set -match "acme hardware" -category "Expenses:...:Unit 1" -why "the receipts were all Unit 1"
+bk rules set "acme hardware" -category "Expenses:...:Unit 1" -why "the receipts were all Unit 1"
 bk books -format ledger
 ```
 
@@ -496,14 +497,14 @@ by its fingerprint, and it wins over whatever the rule said. `bk review` lists e
 with its fingerprint, and any unique prefix of one is enough, as with a git hash:
 
 ```sh
-bk categorize -tx 0d76f1f1 -category "Expenses:...:Unit 1" -payee "Acme" -why "receipt was Unit 1"
+bk categorize 0d76f1f1 -category "Expenses:...:Unit 1" -payee "Acme" -why "receipt was Unit 1"
 ```
 
 One charge can serve two properties, so an assertion can be a split, and it is only accepted if the
 postings still account for the whole line:
 
 ```sh
-bk categorize -tx 0d76f1f1 \
+bk categorize 0d76f1f1 \
   -post "Expenses:Materials:Unit 1=40.00" \
   -post "Expenses:Materials:Unit 2=44.20"
 ```
@@ -520,7 +521,7 @@ imports garbage that re-importing cannot repair on its own: the fingerprints are
 and a re-import is a no-op on them. `void` is the way out.
 
 ```sh
-bk void -tx 33247b87 -why "imported to the wrong account"
+bk void 33247b87 -why "imported to the wrong account"
 ```
 
 It does not delete the imported event. It appends a fact that supersedes it, and the fold drops the
@@ -582,7 +583,7 @@ ordered, and for each field the first rule that supplies it wins; `match` is the
 no two may share one.
 
 ```sh
-bk rules set -match "acme hardware" -payee "Acme Hardware" -category "Expenses:Real Estate:Materials:Uncategorized"
+bk rules set "acme hardware" -payee "Acme Hardware" -category "Expenses:Real Estate:Materials:Uncategorized"
 ```
 
 Categories are free-form account paths, so you can go as deep as your books do, down to the
