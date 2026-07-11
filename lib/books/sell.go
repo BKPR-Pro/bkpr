@@ -32,9 +32,11 @@ func Sell(log *eventlog.Log, actor, why, txID, payee, gainAccount string, dispos
 		postings[i] = model.Posting{Account: d.Account, Amount: d.Amount.Negate()}
 	}
 
-	if _, err := Transaction(log, txID); err != nil {
+	tx, err := Transaction(log, txID)
+	if err != nil {
 		return err
 	}
+	txID = tx.ID // the caller may have quoted a prefix; the assertion keys to the line
 
 	// Resolve the sale against the current books to prove it is possible before recording it.
 	if err := validateSale(log, txID, model.Entry{Payee: payee, Postings: postings, Gain: gainAccount}); err != nil {

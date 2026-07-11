@@ -103,6 +103,20 @@ func Match(log *eventlog.Log, actor, txID, withID string, paired bool) error {
 	if paired && withID == "" {
 		return fmt.Errorf("books: forcing a match needs the other transaction")
 	}
+	// Both lines must exist, so a typo is refused rather than recorded against nothing, and a
+	// quoted prefix resolves to the full fingerprint before it is written.
+	tx, err := Transaction(log, txID)
+	if err != nil {
+		return err
+	}
+	txID = tx.ID
+	if withID != "" {
+		with, err := Transaction(log, withID)
+		if err != nil {
+			return err
+		}
+		withID = with.ID
+	}
 	data, err := json.Marshal(matchedData{With: withID, Paired: paired})
 	if err != nil {
 		return err

@@ -132,16 +132,19 @@ func Transactions(log *eventlog.Log) ([]model.Transaction, error) {
 	return txs, nil
 }
 
-// Transaction folds out the one imported line with this fingerprint.
+// Transaction folds out the one imported line whose fingerprint is id or uniquely begins with it,
+// so a fingerprint read off a listing can be quoted by a prefix, as a git hash can.
 func Transaction(log *eventlog.Log, id string) (model.Transaction, error) {
 	txs, err := Transactions(log)
 	if err != nil {
 		return model.Transaction{}, err
 	}
-	for _, tx := range txs {
-		if tx.ID == id {
-			return tx, nil
-		}
+	tx, ok, err := byPrefix(txs, id, func(tx model.Transaction) string { return tx.ID })
+	if err != nil {
+		return model.Transaction{}, err
 	}
-	return model.Transaction{}, fmt.Errorf("books: no transaction %q; import it before categorizing it", id)
+	if !ok {
+		return model.Transaction{}, fmt.Errorf("books: no transaction %q; import it before categorizing it", id)
+	}
+	return tx, nil
 }
