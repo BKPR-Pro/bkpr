@@ -191,6 +191,76 @@ func SettlementCandidates(log *eventlog.Log) (map[string][]string, error) {
 	return out, nil
 }
 
+// AgedAccrual is one open accrual placed in an aging bucket as of a date: how long the money has
+// been owed, and which band that falls in. It is what an AR (invoices) or AP (bills) aging report is
+// built from.
+type AgedAccrual struct {
+	ID     string
+	Date   time.Time
+	Party  string
+	Amount model.Amount // the positive magnitude owed
+	Days   int          // as-of minus the accrual's date
+	Bucket string       // the aging band: current, 31-60, 61-90, or 90+
+}
+
+// InvoiceAging ages the open invoices as of a date: the receivables you are still owed, oldest
+// first, each in its bucket. Settled and voided invoices are already gone from the fold.
+func InvoiceAging(log *eventlog.Log, asOf time.Time) ([]AgedAccrual, error) {
+	lines, err := invoiceLines(log)
+	if err != nil {
+		return nil, err
+	}
+	return aged(lines, asOf), nil
+}
+
+// BillAging ages the open bills as of a date: the payables you still owe, the mirror of InvoiceAging.
+func BillAging(log *eventlog.Log, asOf time.Time) ([]AgedAccrual, error) {
+	lines, err := billLines(log)
+	if err != nil {
+		return nil, err
+	}
+	return aged(lines, asOf), nil
+}
+
+// aged buckets the open lines by how long they have been outstanding, oldest first, so the report is
+// stable and reads top-down from the most overdue.
+func aged(lines []accrualLine, asOf time.Time) []AgedAccrual {
+	var out []AgedAccrual
+	for _, ln := range lines {
+		if ln.settledBy != "" {
+			continue // only what is still owed ages
+		}
+		amount := ln.parkedAmount
+		if amount.Units < 0 {
+			amount = amount.Negate() // a payable is stored negative; aging shows the magnitude owed
+		}
+		days := int(asOf.Sub(ln.date).Hours()) / 24
+		out = append(out, AgedAccrual{ID: ln.id, Date: ln.date, Party: ln.party, Amount: amount, Days: days, Bucket: bucketOf(days)})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].Date.Equal(out[j].Date) {
+			return out[i].Date.Before(out[j].Date)
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+// bucketOf names the aging band a number of days outstanding falls in. The 30/60/90 bands are the
+// ones every aging report uses, so the output reads the way an accountant expects.
+func bucketOf(days int) string {
+	switch {
+	case days <= 30:
+		return "current"
+	case days <= 60:
+		return "31-60"
+	case days <= 90:
+		return "61-90"
+	default:
+		return "90+"
+	}
+}
+
 // trackSettlement records that a bank line paid an accrual, or reopens it when txID is empty.
 func trackSettlement(log *eventlog.Log, actor, collection, recordID, txID string) error {
 	data, err := json.Marshal(settledData{Tx: txID})

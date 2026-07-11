@@ -97,10 +97,12 @@ usage:
   bookkeeper invoice settle  -id <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
   bookkeeper invoice void    -id <fingerprint> [-why <reason>] [-actor <name>]
   bookkeeper invoice list
+  bookkeeper invoice aging   [-as-of <YYYY-MM-DD>]
   bookkeeper bill    receive -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
   bookkeeper bill    settle  -id <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
   bookkeeper bill    void    -id <fingerprint> [-why <reason>] [-actor <name>]
   bookkeeper bill    list
+  bookkeeper bill    aging   [-as-of <YYYY-MM-DD>]
   bookkeeper review
   bookkeeper export       <connector> [-confirm]
   bookkeeper books        [-format table|ledger] [-basis cash|accrual] [-stdout]
@@ -218,6 +220,12 @@ INVOICES AND BILLS  (value recognized before its cash; only shown on -basis accr
       that plausibly settle it (same amount, within a few months, not already used elsewhere), so
       settling is picking a fingerprint from a short list rather than grepping the log. The offer
       is never applied on its own, because a memo does not prove which accrual a line clears.
+  invoice aging [-as-of <YYYY-MM-DD>]
+  bill aging    [-as-of <YYYY-MM-DD>]
+      Age the open receivables (invoices) or payables (bills): what is still owed, oldest first,
+      each bucketed by how long — current, 31-60, 61-90, 90+ — with a subtotal per bucket. -as-of
+      ages against a date other than today. Settled and voided accruals have already left the fold,
+      so only what is genuinely outstanding appears.
 
 Fingerprints come from the log; find an uncategorized line's fingerprint there to
 categorize it. See the README for the design.
@@ -830,6 +838,8 @@ func invoiceCmd(args []string) error {
 		return invoiceVoid(args[1:])
 	case "list":
 		return invoiceList(args[1:])
+	case "aging":
+		return invoiceAging(args[1:])
 	default:
 		usage()
 		return fmt.Errorf("unknown invoice subcommand %q", args[0])
@@ -999,6 +1009,8 @@ func billCmd(args []string) error {
 		return billVoid(args[1:])
 	case "list":
 		return billList(args[1:])
+	case "aging":
+		return billAging(args[1:])
 	default:
 		usage()
 		return fmt.Errorf("unknown bill subcommand %q", args[0])
@@ -1148,6 +1160,105 @@ func billList(args []string) error {
 			settled[b.ID], strings.Join(candidates[b.ID], " "))
 	}
 	return w.Flush()
+}
+
+// agingAsOf parses the -as-of date an aging report is computed against, defaulting to today.
+func agingAsOf(name string, args []string) (time.Time, error) {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	asOf := fs.String("as-of", "", "age as of this date (YYYY-MM-DD); defaults to today")
+	if err := fs.Parse(args); err != nil {
+		return time.Time{}, err
+	}
+	if *asOf == "" {
+		return time.Now(), nil
+	}
+	t, err := time.Parse("2006-01-02", *asOf)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("-as-of %q is not YYYY-MM-DD", *asOf)
+	}
+	return t, nil
+}
+
+// invoiceAging prints the receivables aging: open invoices bucketed by how long they have been owed.
+func invoiceAging(args []string) error {
+	asOf, err := agingAsOf("invoice aging", args)
+	if err != nil {
+		return err
+	}
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	rows, err := books.InvoiceAging(log, asOf)
+	if err != nil {
+		return err
+	}
+	return printAging("receivables", rows)
+}
+
+// billAging prints the payables aging: open bills bucketed by how long you have owed them.
+func billAging(args []string) error {
+	asOf, err := agingAsOf("bill aging", args)
+	if err != nil {
+		return err
+	}
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	rows, err := books.BillAging(log, asOf)
+	if err != nil {
+		return err
+	}
+	return printAging("payables", rows)
+}
+
+// printAging renders an aging report: a line per open accrual, oldest first, then a subtotal per
+// bucket. Subtotals sum within a commodity; a mixed-commodity book keeps its counts honest even if a
+// total cannot be formed, which is the same restraint the ledger applies to amounts it cannot sum.
+func printAging(kind string, rows []books.AgedAccrual) error {
+	if len(rows) == 0 {
+		fmt.Printf("no open %s\n", kind)
+		return nil
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tDATE\tPARTY\tAMOUNT\tDAYS\tBUCKET")
+	for _, r := range rows {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n",
+			r.ID, r.Date.Format("2006-01-02"), r.Party, r.Amount, r.Days, r.Bucket)
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+
+	order := []string{"current", "31-60", "61-90", "90+"}
+	totals := map[string]model.Amount{}
+	counts := map[string]int{}
+	for _, r := range rows {
+		counts[r.Bucket]++
+		if cur, ok := totals[r.Bucket]; ok {
+			if sum, err := cur.Add(r.Amount); err == nil {
+				totals[r.Bucket] = sum
+			}
+		} else {
+			totals[r.Bucket] = r.Amount
+		}
+	}
+
+	fmt.Println()
+	s := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(s, "BUCKET\tTOTAL\tCOUNT")
+	for _, b := range order {
+		if counts[b] > 0 {
+			fmt.Fprintf(s, "%s\t%s\t%d\n", b, totals[b], counts[b])
+		}
+	}
+	return s.Flush()
 }
 
 func renderBooks(args []string) error {

@@ -403,6 +403,32 @@ ID                DATE        PARTY     AMOUNT       ... SETTLED BY  CANDIDATES
 The offer is never taken on its own — the fold still will not decide which line clears which invoice
 — but the choice is now a glance, not a search.
 
+### Aging: what is still owed, and how overdue
+
+`invoice aging` ages the open receivables; `bill aging` the open payables. Each is what is still
+owed, oldest first, bucketed the way every aging report is — current, 31-60, 61-90, 90+ — with a
+subtotal per bucket. Settled and voided accruals have already left the fold, so only genuinely
+outstanding money shows.
+
+```sh
+bk invoice aging -as-of 2026-07-11
+```
+
+```text
+ID                DATE        PARTY     AMOUNT       DAYS  BUCKET
+78d4de825655d2de  2026-01-15  Deadbeat  300.00 CAD   177   90+
+32b0e0f178017f30  2026-05-01  Slow Co   1200.00 CAD  71    61-90
+820513f55bc819c5  2026-06-20  Fresh Co  500.00 CAD   21    current
+
+BUCKET   TOTAL        COUNT
+current  500.00 CAD   1
+61-90    1200.00 CAD  1
+90+      300.00 CAD   1
+```
+
+Like everything else it is a fold over the log as of a date, not a stored report: `-as-of` ages
+against any day, and the answer is recomputed each time.
+
 Because the basis is a lens and invoices are additive facts, you can **start on cash and turn on
 accrual later** with no migration: raise invoices from whatever day you begin, and every period
 before that reads identically under both bases, because there is nothing there to accrue.
