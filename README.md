@@ -220,9 +220,10 @@ fold over an in-memory adapter.
 ## Three tiers, and a model that never writes
 
 1. **Rules.** Deterministic, free, reproducible. Handles almost everything.
-2. **A model.** An external agent, reading only the lines that came out `Uncategorized`. It
-   proposes postings through the same commands a person uses; code writes. bookkeeper never calls
-   a model itself.
+2. **A model.** An external agent that drives the whole tool through its commands, the same surface
+   a person uses: import, rules, categorize, match, export, review. Within this pipeline its job is
+   the lines the rules left `Uncategorized` — it proposes postings, and code writes. bookkeeper
+   never calls a model itself.
 3. **You.** Never blocking. `ledger bal Uncategorized` is the whole review surface: whatever is
    left is a rule you have not written or a line to correct, and nothing stops the books being
    complete in the meantime.
