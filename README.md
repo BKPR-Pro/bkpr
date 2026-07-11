@@ -5,6 +5,23 @@ Turns bank and card statements into a set of books.
 The goal is Mint's touch with a real ledger's resolution: you set it up, it runs, and the only
 recurring work is re-categorizing a couple of things every once in a while.
 
+## Quickstart
+
+```sh
+go build -o bk ./cli      # bk is the short name used throughout
+
+bk init
+bk import statement.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
+bk books                  # every line and where it posted
+bk review                 # the lines the rules could not place, with their fingerprints
+bk rules set -match "shell|petro" -category "Expenses:Travel:Fuel" -payee "Fuel Stop"
+bk books                  # the whole history, reclassified by the rule you just wrote
+```
+
+`bk help <command>` explains one command; `bk docs` prints the whole reference. Wherever a
+command takes a fingerprint, a unique prefix is enough, as with a git hash. The rest of this
+README is the design and the why.
+
 ## Every line posts, and nothing is guessed
 
 **Nothing blocks on a question.** A gate would be exactly the friction this tool exists to remove.
@@ -475,17 +492,18 @@ buys, and committing both files is how the change reviews.
 
 Some attributions are not a rule. A hardware receipt in your truck says Unit 1, and no pattern over
 the description could have known that. So `categorize` asserts the answer for that one line, keyed
-by its fingerprint, and it wins over whatever the rule said:
+by its fingerprint, and it wins over whatever the rule said. `bk review` lists every waiting line
+with its fingerprint, and any unique prefix of one is enough, as with a git hash:
 
 ```sh
-bk categorize -tx 0d76f1f1... -category "Expenses:...:Unit 1" -payee "Acme" -why "receipt was Unit 1"
+bk categorize -tx 0d76f1f1 -category "Expenses:...:Unit 1" -payee "Acme" -why "receipt was Unit 1"
 ```
 
 One charge can serve two properties, so an assertion can be a split, and it is only accepted if the
 postings still account for the whole line:
 
 ```sh
-bk categorize -tx 0d76f1f1... \
+bk categorize -tx 0d76f1f1 \
   -post "Expenses:Materials:Unit 1=40.00" \
   -post "Expenses:Materials:Unit 2=44.20"
 ```
@@ -502,7 +520,7 @@ imports garbage that re-importing cannot repair on its own: the fingerprints are
 and a re-import is a no-op on them. `void` is the way out.
 
 ```sh
-bk void -tx 33247b87... -why "imported to the wrong account"
+bk void -tx 33247b87 -why "imported to the wrong account"
 ```
 
 It does not delete the imported event. It appends a fact that supersedes it, and the fold drops the
@@ -635,10 +653,11 @@ as metadata (`rentapp.lease`), and the export is keyed by the deposit's fingerpr
 it records nothing twice. Importing a rent roll later, as context rather than as a second copy of
 the money, is a natural next step and is not precluded.
 
-The surface an external model drives is in place: `review` prints the open decisions as JSON (the
-`Uncategorized` lines with their fingerprints), and `categorize`, `rules set`, and `void` take an
-`-actor`, so a model proposes through the same path a person uses and the log records who answered.
-bookkeeper never calls a model itself.
+The surface an external model drives is in place: `review` prints the open decisions (the
+`Uncategorized` lines with their fingerprints) as a table for a person and as JSON with
+`-format json` for a model, and `categorize`, `rules set`, and `void` take an `-actor`, so a model
+proposes through the same path a person uses and the log records who answered. bookkeeper never
+calls a model itself.
 
 Next: the cost basis follow-ons. The policy is ACB and pluggable at the seam; making it a logged,
 per-account setting (so a US account can run FIFO in the same book) and reading the share quantity
