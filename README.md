@@ -220,7 +220,9 @@ fold over an in-memory adapter.
 ## Three tiers, and a model that never writes
 
 1. **Rules.** Deterministic, free, reproducible. Handles almost everything.
-2. **A model.** Only the lines that came out `Uncategorized`. It proposes postings; code writes.
+2. **A model.** An external agent, reading only the lines that came out `Uncategorized`. It
+   proposes postings through the same commands a person uses; code writes. bookkeeper never calls
+   a model itself.
 3. **You.** Never blocking. `ledger bal Uncategorized` is the whole review surface: whatever is
    left is a rule you have not written or a line to correct, and nothing stops the books being
    complete in the meantime.
@@ -497,11 +499,13 @@ as metadata (`rentapp.lease`), and the export is keyed by the deposit's fingerpr
 it records nothing twice. Importing a rent roll later, as context rather than as a second copy of
 the money, is a natural next step and is not precluded.
 
-Next, in order: the model tier (a model proposes categorizations for the `Uncategorized` lines),
-then the ledger-import parser and the manual transfer override (`transaction.matched`). The cost
-basis policy is ACB and pluggable at the seam; making the policy a logged, per-account setting (so a
-US account can run FIFO in the same book) and reading the share quantity straight off a brokerage
-statement (so a trade need not be typed) are the follow-on slices.
+Next: the surface an external model drives. bookkeeper never calls a model itself, so what is
+missing is a machine-readable read (the `Uncategorized` lines and their fingerprints) and an actor
+on each write, so a model proposes through the same `categorize` path a person uses and the log
+records who answered. Then the manual transfer override (`transaction.matched`) and the
+ledger-import parser. The cost basis policy is ACB and pluggable at the seam; making the policy a
+logged, per-account setting (so a US account can run FIFO in the same book) and reading the share
+quantity straight off a brokerage statement (so a trade need not be typed) are the follow-on slices.
 
 ## Layout
 
