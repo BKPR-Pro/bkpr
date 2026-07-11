@@ -92,6 +92,9 @@ The whole design follows from one rule:
 | an answer where the rules ran out | no, it is a judgment (the receipt is in your truck) | in the log |
 | a categorization | yes, it is `rules(transaction)` | derived on read |
 | a transfer pairing | yes, from the movement key | derived on read |
+| a capital gain, or a cost base | yes, folded from the purchases before the sale | derived on read |
+| the cash-or-accrual basis | yes, the same log re-dated on read | a read-time choice, no event |
+| an invoice, or a bill | no, the bank never saw it (the money has not moved) | in the log |
 | the ledger file | yes, from the log | a generated artifact |
 
 The last row is the one that changes how you work. **The ledger file is read-only output.** You
@@ -348,6 +351,16 @@ bk books -basis accrual   # also books the invoices and bills that have not been
 Cash basis is what every example above already is: it ignores invoices and bills entirely, so it is
 exactly the books bookkeeper was born on. Accrual basis adds the value you have recognized but not yet
 settled — an invoice raised, a bill received — each as its own line.
+
+**Choosing the basis triggers no event.** `-basis` (and its optional `-since`) are read-time flags,
+parsed fresh on each command and stored nowhere: the books carry no mode. That is the principle above
+at work. The recognition timing is derivable, so it is a fold, and a fold is never written down. The
+only accrual facts in the log are the inputs a statement cannot supply: `invoice.raised`,
+`bill.received`, and `settled` (which line cleared which). So with no invoices and no bills there are
+no accrual facts to re-time, and `-basis cash` and `-basis accrual` return identical books. The same
+lens drives the statements too: `bk report -basis accrual` gives an accrual income statement. Do not
+confuse this with the cost-basis *method* (ACB or FIFO), which is an asserted decision and does live
+in the log as `policy.set`: that changes how a gain is computed, it is not a question asked on read.
 
 An **invoice** is money owed to you; a **bill** is money you owe. They are the one kind of fact a bank
 statement cannot supply, because the money has not moved, so they are recorded rather than folded from
