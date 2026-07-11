@@ -39,6 +39,8 @@ func main() {
 	switch os.Args[1] {
 	case "init":
 		err = initStore(os.Args[2:])
+	case "reset":
+		err = resetCmd(os.Args[2:])
 	case "import":
 		err = importCmd(os.Args[2:])
 	case "connectors":
@@ -90,6 +92,7 @@ Wherever a fingerprint is taken, a unique prefix is enough, as with a git hash.
 
 usage:
   bk init         [dir]
+  bk reset        [-confirm]
   bk rules   set  <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]
   bk rules   rm   <re>
   bk rules   mv   <re> [-before <re>]
@@ -154,6 +157,15 @@ var reference = []docGroup{
 	{"SETUP", []docTopic{
 		{[]string{"init"}, `  init [dir]
       Create a set of books in dir (default: here).
+`},
+		{[]string{"reset"}, `  reset [-confirm]
+      Empty the book of record: every event discarded, the artifact removed, the directory
+      still a book. This is the start-over verb and the only one that destroys history, so
+      without -confirm it is a dry run that says what would be lost. It is not how a mistake
+      is corrected - a wrong line is void, a wrong rule is rules rm, a wrong settle is
+      -reopen, each a later fact that supersedes - and not how a bad batch is unwound: every
+      write is a pure append, so git restore .bookkeeper/log.jsonl rolls the book back to any
+      committed point. After a reset the old log is recoverable only from git.
 `},
 		{[]string{"connectors"}, `  connectors register <name> -kind <kind> -url <url> -token-env <ENV> -account <a> [-currency <c>]
       Register a live connector. The bearer token is never stored: -token-env names the
@@ -378,6 +390,56 @@ func initStore(args []string) error {
 		return err
 	}
 	fmt.Printf("Initialized a book of record in %s\n", path)
+	return nil
+}
+
+// resetCmd empties the book of record: the log truncated to nothing, the artifact removed, the
+// directory still a book. It is the start-over verb, not the correction verb — a wrong fact is
+// superseded (void, rules rm, -reopen) and a wrong batch is unwound by git, since every write is
+// a pure append. This is the one command that destroys history, so it dry-runs without -confirm.
+func resetCmd(args []string) error {
+	fs := flag.NewFlagSet("reset", flag.ExitOnError)
+	confirm := fs.Bool("confirm", false, "actually empty the book; without it, a dry run")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	s, err := store.Open(".")
+	if err != nil {
+		return err
+	}
+	logPath := filepath.Join(s.Path, store.LogFile)
+	ledgerPath := s.Ledger()
+	events, err := s.Log.All()
+	if err != nil {
+		s.Close()
+		return err
+	}
+
+	if len(events) == 0 {
+		s.Close()
+		fmt.Println("the book is already empty")
+		return nil
+	}
+	if !*confirm {
+		s.Close()
+		fmt.Printf("would discard %d events and the ledger artifact (dry run; add -confirm to reset)\n", len(events))
+		fmt.Printf("after a reset, %s is recoverable only from git\n", logPath)
+		return nil
+	}
+
+	// The lock is released before the file is touched, so the truncation is not fighting the
+	// mirror an open log keeps in memory.
+	if err := s.Close(); err != nil {
+		return err
+	}
+	if err := os.Truncate(logPath, 0); err != nil {
+		return err
+	}
+	if err := os.Remove(ledgerPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	fmt.Printf("reset: %d events discarded; the book is empty\n", len(events))
 	return nil
 }
 

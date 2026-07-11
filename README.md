@@ -625,6 +625,19 @@ still there and the import stays a no-op.
 The repair flow the append-only log makes possible: re-import with the right flags (the corrected
 line lands under a new fingerprint, since the amount or date changed), then void the garbage one.
 
+### Undo, restore, start over
+
+Three different itches, three different tools, only one of them new:
+
+- **A wrong fact** is superseded, never erased: a bad line is `void`, a wrong rule is `rules rm`,
+  a wrong settlement is `-reopen`. The mistake and its correction both stay in the log.
+- **A wrong batch** — an import with the wrong flags, a merge you regret — is git's job: every
+  write is a pure append, so `git restore .bookkeeper/log.jsonl` rolls the book back to any
+  committed point, and the diff you are discarding is readable before you discard it.
+- **Starting over** is `bk reset`: the log emptied, the artifact removed, the directory still a
+  book. It is the one verb in the tool that destroys history, so without `-confirm` it is a dry
+  run that says what would be lost — and after a reset the old log is recoverable only from git.
+
 ### Transfers between your own accounts
 
 Move $500 from chequing to savings and it appears in both statements: once leaving chequing, once
