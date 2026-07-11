@@ -499,13 +499,15 @@ as metadata (`rentapp.lease`), and the export is keyed by the deposit's fingerpr
 it records nothing twice. Importing a rent roll later, as context rather than as a second copy of
 the money, is a natural next step and is not precluded.
 
-Next: the surface an external model drives. bookkeeper never calls a model itself, so what is
-missing is a machine-readable read (the `Uncategorized` lines and their fingerprints) and an actor
-on each write, so a model proposes through the same `categorize` path a person uses and the log
-records who answered. Then the manual transfer override (`transaction.matched`) and the
-ledger-import parser. The cost basis policy is ACB and pluggable at the seam; making the policy a
-logged, per-account setting (so a US account can run FIFO in the same book) and reading the share
-quantity straight off a brokerage statement (so a trade need not be typed) are the follow-on slices.
+The surface an external model drives is in place: `review` prints the open decisions as JSON (the
+`Uncategorized` lines with their fingerprints), and `categorize`, `rules set`, and `discard` take an
+`-actor`, so a model proposes through the same path a person uses and the log records who answered.
+bookkeeper never calls a model itself.
+
+Next: the manual transfer override (`transaction.matched`) and the ledger-import parser. The cost
+basis policy is ACB and pluggable at the seam; making the policy a logged, per-account setting (so a
+US account can run FIFO in the same book) and reading the share quantity straight off a brokerage
+statement (so a trade need not be typed) are the follow-on slices.
 
 ## Layout
 

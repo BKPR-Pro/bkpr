@@ -45,6 +45,8 @@ func main() {
 		err = categorize(os.Args[2:])
 	case "discard":
 		err = discard(os.Args[2:])
+	case "review":
+		err = review(os.Args[2:])
 	case "export":
 		err = exportCmd(os.Args[2:])
 	case "books":
@@ -83,6 +85,7 @@ usage:
   bookkeeper import       <file.ledger>
   bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
   bookkeeper discard      -tx <fingerprint> [-why <reason>] [-actor <name>]
+  bookkeeper review
   bookkeeper export       <connector> [-confirm]
   bookkeeper books        [-format table|ledger] [-stdout]
   bookkeeper docs
@@ -139,9 +142,14 @@ BOOKKEEPING
       gain, is folded from your purchases: -sell "Assets:Brokerage:AAPL=10 AAPL" -gain "Income:Capital Gains".
       -actor records who decided (default human), so a model driving this command is told
       apart from a person in the log; rules set and discard take it too.
-  discard -tx <fingerprint> [-why <reason>]
+  discard -tx <fingerprint> [-why <reason>] [-actor <name>]
       Drop a bad line from the books. The imported fact stays in the log; a later fact
       supersedes it.
+  review
+      Print the decision queue as JSON: the lines the rules could not place, each with its
+      fingerprint, date, amount, description, and where it currently posts. This is the
+      surface an external model reads to know what needs categorizing; it never writes, and
+      the model answers back through categorize and rules set.
   export <connector> [-confirm]
       Write rent the books already booked out to a registered connector (see connectors add),
       so its paid/unpaid state stays current. Each rent deposit that a rule attributed to a
