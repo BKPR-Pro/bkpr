@@ -323,6 +323,17 @@ own categorization is deliberately not carried in — the rules place every line
 a fold. `bk books -format ledger` writes the same format back out as the committed artifact,
 read-only and regenerated whole.
 
+When a rule renamed a payee, the artifact keeps the line's raw description as a `; memo:` note (an
+ordinary ledger entry note), and the reader prefers it. That makes the trip honest: importing the
+artifact into an empty book regenerates the same fingerprints, and the same rules fold it to the
+same books — which is exactly what the round-trip test drives, end to end, on every run.
+
+What the artifact deliberately does not carry is the rules, corrections, invoices, and connectors
+themselves. Those are facts, and facts live in the log: `.bookkeeper/log.jsonl` is the complete
+backup — one committable file holding everything the books cannot recompute — and restoring is
+copying it back (or `git checkout`). Encoding facts into artifact comments would be a second copy
+that could drift from the first, which is the one thing the design refuses.
+
 #### Connectors: register, list, rm
 
 A connector is bidirectional in principle: `export` writes to it today, and importing from it by

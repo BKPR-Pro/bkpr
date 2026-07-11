@@ -119,3 +119,23 @@ func TestReadLedgerRefusesTwoElidedAccounts(t *testing.T) {
 		t.Fatal("two amountless postings are ambiguous; want an error")
 	}
 }
+
+// The writer notes the line's raw description as `; memo:` when a rule renamed the payee; reading
+// it back is what makes an exported ledger regenerate the same fingerprints, so rules keyed on
+// the description fire the same on a re-import.
+func TestReadLedgerPrefersTheMemoNoteOverThePayee(t *testing.T) {
+	txs, err := source.ReadLedger(strings.NewReader(`2026/03/02  * Acme Hardware
+  ; memo: ACME HARDWARE #4471
+  Expenses:Repairs:Materials  84.20 CAD
+  Assets:Bank:Chequing
+`))
+	if err != nil {
+		t.Fatalf("ReadLedger: %v", err)
+	}
+	if len(txs) != 1 {
+		t.Fatalf("got %d transactions, want 1", len(txs))
+	}
+	if txs[0].Description != "ACME HARDWARE #4471" {
+		t.Errorf("description = %q, want the memo, not the payee", txs[0].Description)
+	}
+}

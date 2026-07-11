@@ -4,8 +4,10 @@
 // cleared (*), because every line came off a bank statement and so has cleared the bank. Pending
 // (!) means the bank has not reported a transaction yet, and nothing written here is that.
 //
-// Nothing else is annotated. Where the rules ran out of knowledge the account path says so, and
-// `ledger bal Uncategorized` finds every one of them at any depth.
+// The one annotation is a `; memo:` note carrying the line's original description when a rule
+// renamed the payee, so importing the artifact elsewhere regenerates the same fingerprints and
+// the same rules fire. Nothing else is annotated: where the rules ran out of knowledge the
+// account path says so, and `ledger bal Uncategorized` finds every one of them at any depth.
 package ledger
 
 import (
@@ -50,6 +52,14 @@ func writeEntry(w io.Writer, tx model.Transaction, e model.Entry) error {
 
 	if _, err := fmt.Fprintf(w, "%s  * %s\n", tx.Date.Format("2006/01/02"), e.Payee); err != nil {
 		return err
+	}
+	// The entry is titled with the payee, so when a rule renamed one the raw description would be
+	// lost, and with it the fingerprint and every rule keyed on it. The memo note keeps the line's
+	// own fact in the artifact; ledger tools read it as an ordinary entry note.
+	if tx.Description != "" && tx.Description != e.Payee {
+		if _, err := fmt.Fprintf(w, "  ; memo: %s\n", tx.Description); err != nil {
+			return err
+		}
 	}
 	for _, p := range e.Postings {
 		// A posting in another commodity (shares bought with cash) carries its total price in the

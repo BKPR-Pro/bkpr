@@ -24,6 +24,7 @@ func ReadLedger(r io.Reader) ([]model.Transaction, error) {
 		haveEntry bool
 		date      time.Time
 		payee     string
+		memo      string
 		postings  []posting
 		entryLine int
 	)
@@ -32,12 +33,19 @@ func ReadLedger(r io.Reader) ([]model.Transaction, error) {
 		if !haveEntry {
 			return nil
 		}
-		tx, err := reconstruct(date, payee, postings, seen)
+		// The memo note is the line's original description when the writer knew one; the entry
+		// title is the payee a rule chose. The description is what fingerprints and rules key on,
+		// so the memo wins when present.
+		description := payee
+		if memo != "" {
+			description = memo
+		}
+		tx, err := reconstruct(date, description, postings, seen)
 		if err != nil {
 			return fmt.Errorf("ledger entry at line %d (%s): %w", entryLine, payee, err)
 		}
 		txs = append(txs, tx)
-		haveEntry, postings = false, nil
+		haveEntry, memo, postings = false, "", nil
 		return nil
 	}
 
@@ -52,7 +60,12 @@ func ReadLedger(r io.Reader) ([]model.Transaction, error) {
 				return nil, err
 			}
 		case strings.HasPrefix(trimmed, ";") || strings.HasPrefix(trimmed, "#"):
-			// a comment
+			// A comment, except the one note the writer uses to carry a line's raw description.
+			if haveEntry {
+				if m, ok := strings.CutPrefix(trimmed, "; memo:"); ok {
+					memo = strings.TrimSpace(m)
+				}
+			}
 		case line[0] == ' ' || line[0] == '\t':
 			// a posting under the current entry
 			if !haveEntry {
@@ -133,7 +146,7 @@ func twoSpaceGap(s string) int {
 	return -1
 }
 
-func reconstruct(date time.Time, payee string, postings []posting, seen map[string]int) (model.Transaction, error) {
+func reconstruct(date time.Time, description string, postings []posting, seen map[string]int) (model.Transaction, error) {
 	var elided []string
 	sum := model.Amount{}
 	first := true
@@ -162,7 +175,7 @@ func reconstruct(date time.Time, payee string, postings []posting, seen map[stri
 
 	account := elided[0]
 	amount := sum.Negate()
-	fp := fingerprint(account, date, amount, payee)
+	fp := fingerprint(account, date, amount, description)
 	seen[fp]++
 
 	return model.Transaction{
@@ -170,6 +183,6 @@ func reconstruct(date time.Time, payee string, postings []posting, seen map[stri
 		Account:     account,
 		Date:        date,
 		Amount:      amount,
-		Description: payee,
+		Description: description,
 	}, nil
 }
