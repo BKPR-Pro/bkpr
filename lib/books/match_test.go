@@ -3,6 +3,7 @@ package books_test
 import (
 	"testing"
 
+	"github.com/dallasread/bookkeeper/lib/books"
 	"github.com/dallasread/bookkeeper/lib/eventlog"
 	"github.com/dallasread/bookkeeper/lib/model"
 )
@@ -105,5 +106,61 @@ func TestTwoRealTransfersOfTheSameSizeBothSurvive(t *testing.T) {
 
 	if txs, _ := ledger(t, log); len(txs) != 2 {
 		t.Fatalf("got %d entries, want 2: two movements, each seen twice", len(txs))
+	}
+}
+
+// The automatic fold pairs on mutual naming, so a real transfer it cannot recognise books twice.
+// Forcing the match tells it the two sightings are one movement, and the later one is suppressed.
+func TestForcingAMatchSuppressesTheLaterSighting(t *testing.T) {
+	log := newLog()
+	importOne(t, log, line("a", 1, -50000, "MOVED OUT"))
+	importOne(t, log, lineIn("b", "Assets:Bank:Savings", 2, 50000, "MOVED IN"))
+
+	if txs, _ := ledger(t, log); len(txs) != 2 {
+		t.Fatalf("precondition: unmatched lines book twice, got %d", len(txs))
+	}
+
+	if err := books.Match(log, "human", "a", "b", true); err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	txs, _ := ledger(t, log)
+	if len(txs) != 1 || txs[0].ID != "a" {
+		t.Fatalf("want only the earlier sighting a, got %d entries", len(txs))
+	}
+}
+
+// The automatic fold can pair two lines that only look like a transfer. Breaking the match keeps
+// both, telling the fold this sighting is not a duplicate.
+func TestBreakingAMatchKeepsBothSightings(t *testing.T) {
+	log := transferBooks(t)
+	importOne(t, log, line("c", 1, -50000, "TRANSFER TO SAVINGS"))
+	importOne(t, log, lineIn("s", "Assets:Bank:Savings", 3, 50000, "TRANSFER FROM CHEQUING"))
+
+	if txs, _ := ledger(t, log); len(txs) != 1 {
+		t.Fatalf("precondition: the fold pairs these, got %d", len(txs))
+	}
+
+	if err := books.Match(log, "human", "s", "", false); err != nil {
+		t.Fatalf("Match break: %v", err)
+	}
+	if txs, _ := ledger(t, log); len(txs) != 2 {
+		t.Fatalf("a broken match should keep both, got %d", len(txs))
+	}
+}
+
+// A match is a correction, so a later one supersedes: breaking a forced pair undoes it.
+func TestALaterMatchSupersedesAnEarlierOne(t *testing.T) {
+	log := newLog()
+	importOne(t, log, line("a", 1, -50000, "MOVED OUT"))
+	importOne(t, log, lineIn("b", "Assets:Bank:Savings", 2, 50000, "MOVED IN"))
+
+	if err := books.Match(log, "human", "a", "b", true); err != nil {
+		t.Fatalf("force: %v", err)
+	}
+	if err := books.Match(log, "human", "a", "", false); err != nil {
+		t.Fatalf("break: %v", err)
+	}
+	if txs, _ := ledger(t, log); len(txs) != 2 {
+		t.Fatalf("the later break should undo the force, got %d", len(txs))
 	}
 }

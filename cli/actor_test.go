@@ -108,6 +108,32 @@ func TestRulesSetRecordsTheActor(t *testing.T) {
 	}
 }
 
+// The match command forces a pairing and records who decided.
+func TestMatchRecordsTheActor(t *testing.T) {
+	bookHere(t)
+	seedTx(t, "a")
+	seedTx(t, "b")
+
+	if err := match([]string{"-tx", "a", "-with", "b", "-actor", "model:claude"}); err != nil {
+		t.Fatalf("match: %v", err)
+	}
+	if got := actorOf(t, "transaction", "matched"); got != "model:claude" {
+		t.Errorf("actor = %q, want model:claude", got)
+	}
+}
+
+// match refuses an ambiguous request: exactly one of -with or -break.
+func TestMatchRefusesBothOrNeither(t *testing.T) {
+	bookHere(t)
+	seedTx(t, "a")
+	if err := match([]string{"-tx", "a"}); err == nil {
+		t.Error("neither -with nor -break should be an error")
+	}
+	if err := match([]string{"-tx", "a", "-with", "b", "-break"}); err == nil {
+		t.Error("both -with and -break should be an error")
+	}
+}
+
 // upsertRule threads the actor through both the add and change paths.
 func TestUpsertRuleRecordsTheActor(t *testing.T) {
 	log := ruleLog(t)

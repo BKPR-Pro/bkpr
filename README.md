@@ -101,7 +101,7 @@ Events are immutable, past-tense facts.
 | --- | --- |
 | `transaction.imported` | a statement line was read in. Once per fingerprint, ever |
 | `transaction.categorized` | a person or a model asserted the postings for this line |
-| `transaction.matched` | force or break a transfer pairing the automatic fold got wrong (planned) |
+| `transaction.matched` | force or break a transfer pairing the automatic fold got wrong |
 | `transaction.discarded` | that line was garbage; keep it out of the books |
 | `transaction.exported` | this deposit was written to a connector (e.g. rent booked against a lease) |
 | `rule.added` | a pattern should be handled |
@@ -504,10 +504,11 @@ The surface an external model drives is in place: `review` prints the open decis
 `-actor`, so a model proposes through the same path a person uses and the log records who answered.
 bookkeeper never calls a model itself.
 
-Next: the manual transfer override (`transaction.matched`). The cost basis policy is ACB and
-pluggable at the seam; making the policy a logged, per-account setting (so a US account can run FIFO
-in the same book) and reading the share quantity straight off a brokerage statement (so a trade need
-not be typed) are the follow-on slices.
+Next: the cost basis follow-ons. The policy is ACB and pluggable at the seam; making it a logged,
+per-account setting (so a US account can run FIFO in the same book) and reading the share quantity
+straight off a brokerage statement (so a trade need not be typed) are the slices from here. Parked
+until asked: importing from a connector (the rent roll as context), and out-of-tree connectors as
+installable plugins.
 
 ## Layout
 

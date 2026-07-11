@@ -45,6 +45,8 @@ func main() {
 		err = categorize(os.Args[2:])
 	case "discard":
 		err = discard(os.Args[2:])
+	case "match":
+		err = match(os.Args[2:])
 	case "review":
 		err = review(os.Args[2:])
 	case "export":
@@ -85,6 +87,7 @@ usage:
   bookkeeper import       <file.ledger>
   bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
   bookkeeper discard      -tx <fingerprint> [-why <reason>] [-actor <name>]
+  bookkeeper match        -tx <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
   bookkeeper review
   bookkeeper export       <connector> [-confirm]
   bookkeeper books        [-format table|ledger] [-stdout]
@@ -147,6 +150,10 @@ BOOKKEEPING
   discard -tx <fingerprint> [-why <reason>] [-actor <name>]
       Drop a bad line from the books. The imported fact stays in the log; a later fact
       supersedes it.
+  match -tx <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
+      Override the automatic transfer fold, which pairs the two sightings of one movement
+      only when each names the other's account. -with forces a pair it missed, dropping the
+      later sighting; -break keeps a line the fold wrongly paired. A later match supersedes.
   review
       Print the decision queue as JSON: the lines the rules could not place, each with its
       fingerprint, date, amount, description, and where it currently posts. This is the
@@ -718,6 +725,41 @@ func discard(args []string) error {
 		return err
 	}
 	fmt.Printf("discarded %s\n", *txID)
+	return nil
+}
+
+// match overrides the automatic transfer fold for one line: force a pairing it missed (mutual naming
+// is the only thing it recognises), or break one it wrongly made.
+func match(args []string) error {
+	fs := flag.NewFlagSet("match", flag.ExitOnError)
+	txID := fs.String("tx", "", "the transaction to match")
+	with := fs.String("with", "", "the other sighting; the two are one movement and the later is dropped")
+	brk := fs.Bool("break", false, "this line is not a duplicate; keep it")
+	actor := fs.String("actor", "human", "who is matching; the log records who decided")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *txID == "" {
+		return fmt.Errorf("-tx is required")
+	}
+	if *brk == (*with != "") {
+		return fmt.Errorf("give -with <tx> to force a pair, or -break to keep a line, not both or neither")
+	}
+
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	if err := books.Match(log, *actor, *txID, *with, !*brk); err != nil {
+		return err
+	}
+	if *brk {
+		fmt.Printf("broke the match on %s\n", *txID)
+	} else {
+		fmt.Printf("matched %s with %s\n", *txID, *with)
+	}
 	return nil
 }
 

@@ -64,9 +64,15 @@ func Ledger(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) {
 		return nil, nil, err
 	}
 
+	// A manual match overrides the automatic pairing; it is folded here and applied by suppressed.
+	overrides, err := matches(log)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	// The duplicate sighting of an internal transfer must not book a second entry, so it is dropped
 	// from the books entirely rather than rendered.
-	dup := suppressed(txs, entries)
+	dup := suppressed(txs, entries, overrides)
 	keptTxs := make([]model.Transaction, 0, len(txs))
 	keptEntries := make([]model.Entry, 0, len(entries))
 	for i, tx := range txs {

@@ -1,8 +1,11 @@
 package books
 
 import (
+	"encoding/json"
+	"fmt"
 	"time"
 
+	"github.com/dallasread/bookkeeper/lib/eventlog"
 	"github.com/dallasread/bookkeeper/lib/model"
 )
 
@@ -26,9 +29,40 @@ const transferDays = 5
 // Pairing is greedy in date order. When several sightings of the same size sit in one window they
 // are interchangeable, so any valid pairing suppresses the same number, and the count of real
 // movements always survives.
-func suppressed(txs []model.Transaction, entries []model.Entry) map[string]bool {
+func suppressed(txs []model.Transaction, entries []model.Entry, overrides map[string]matchedData) map[string]bool {
 	dup := map[string]bool{}
 	consumed := make([]bool, len(txs))
+	pos := make(map[string]int, len(txs))
+	for i, tx := range txs {
+		pos[tx.ID] = i
+	}
+
+	// A broken match books on its own, so it is pre-consumed: the automatic pairing leaves it alone
+	// and it is never suppressed.
+	for i, tx := range txs {
+		if o, ok := overrides[tx.ID]; ok && !o.Paired {
+			consumed[i] = true
+		}
+	}
+
+	// A forced match asserts two sightings are one movement the automatic fold could not see (it pairs
+	// only on mutual naming). Suppress the later of the pair.
+	for i, tx := range txs {
+		o, ok := overrides[tx.ID]
+		if !ok || !o.Paired || consumed[i] {
+			continue
+		}
+		j, ok := pos[o.With]
+		if !ok || consumed[j] {
+			continue
+		}
+		later := i
+		if j > i { // txs are date-ordered, so the higher index is the later sighting
+			later = j
+		}
+		dup[txs[later].ID] = true
+		consumed[i], consumed[j] = true, true
+	}
 
 	// Internal transfers: one movement seen in two accounts you own. Suppress the later sighting.
 	for i := range txs {
@@ -47,6 +81,57 @@ func suppressed(txs []model.Transaction, entries []model.Entry) map[string]bool 
 		}
 	}
 	return dup
+}
+
+// ActionMatched records a manual override of the automatic transfer fold: a pairing the fold could
+// not see, or a break of one it wrongly made. It is keyed by a transaction's fingerprint, and a
+// later one supersedes, because it is a correction.
+const ActionMatched = "matched"
+
+type matchedData struct {
+	With   string `json:"with,omitempty"` // the other sighting, when forcing a pair
+	Paired bool   `json:"paired"`         // true forces a pairing, false breaks one
+}
+
+// Match records that a transaction is, or is not, the duplicate sighting of a transfer. With paired
+// true and a partner it forces the pair, so the later sighting is suppressed; with paired false it
+// breaks any pairing, so the line books on its own. A later Match on the same line supersedes.
+func Match(log *eventlog.Log, actor, txID, withID string, paired bool) error {
+	if txID == "" {
+		return fmt.Errorf("books: a match needs a transaction")
+	}
+	if paired && withID == "" {
+		return fmt.Errorf("books: forcing a match needs the other transaction")
+	}
+	data, err := json.Marshal(matchedData{With: withID, Paired: paired})
+	if err != nil {
+		return err
+	}
+	_, err = log.Track(eventlog.Event{
+		Collection: CollectionTransaction, RecordID: txID, Action: ActionMatched,
+		Version: version, Actor: actor, Data: data,
+	})
+	return err
+}
+
+// matches folds the log into the current override per transaction; a later event replaces an earlier.
+func matches(log *eventlog.Log) (map[string]matchedData, error) {
+	events, err := log.All()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]matchedData{}
+	for _, e := range events {
+		if e.Collection != CollectionTransaction || e.Action != ActionMatched {
+			continue
+		}
+		var d matchedData
+		if err := e.Decode(&d); err != nil {
+			return nil, fmt.Errorf("books: event %s: %w", e.ID, err)
+		}
+		out[e.RecordID] = d
+	}
+	return out, nil
 }
 
 // isTransferPair reports whether two sightings are the same internal movement. The mutual naming is
