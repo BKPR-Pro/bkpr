@@ -3,6 +3,7 @@ package books_test
 import (
 	"testing"
 
+	"github.com/dallasread/bookkeeper/lib/books"
 	"github.com/dallasread/bookkeeper/lib/eventlog"
 	"github.com/dallasread/bookkeeper/lib/model"
 )
@@ -105,5 +106,65 @@ func TestTwoRealTransfersOfTheSameSizeBothSurvive(t *testing.T) {
 
 	if txs, _ := ledger(t, log); len(txs) != 2 {
 		t.Fatalf("got %d entries, want 2: two movements, each seen twice", len(txs))
+	}
+}
+
+// importAs imports a line under a given actor, so a test can stand in for a live-source pull
+// ("source:rent") versus a bank statement ("statement:march").
+func importAs(t *testing.T, log *eventlog.Log, actor string, tx model.Transaction) {
+	t.Helper()
+	if _, err := books.Import(log, actor, []model.Transaction{tx}); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+}
+
+// The reason this slice exists. The rent app records a payment, and the same money lands in the
+// bank statement; pulling both and booking both would count the rent twice. They are recognised as
+// one deposit and booked once, keeping the pulled record because it knows the lease.
+func TestPulledRentAndItsBankDepositBookOnce(t *testing.T) {
+	log := newLog()
+	importAs(t, log, "source:rent", line("rent:a1", 3, 168000, "Rent for March 2026"))
+	importAs(t, log, "statement:march", line("bankfp", 3, 168000, "E-TRANSFER FROM TENANT"))
+
+	txs, _ := ledger(t, log)
+	if len(txs) != 1 {
+		t.Fatalf("got %d entries, want 1: the rent was booked twice", len(txs))
+	}
+	if txs[0].ID != "rent:a1" {
+		t.Errorf("kept %q, want the pulled rent record (it knows the lease)", txs[0].ID)
+	}
+}
+
+// Only the rent app has it (the bank statement has not been imported yet), so it books on its own.
+func TestPulledRentBooksWithoutABankMatch(t *testing.T) {
+	log := newLog()
+	importAs(t, log, "source:rent", line("rent:a1", 3, 168000, "Rent for March 2026"))
+
+	if txs, _ := ledger(t, log); len(txs) != 1 {
+		t.Fatalf("got %d entries, want 1", len(txs))
+	}
+}
+
+// Suppression needs one live-sourced side. A bank deposit that coincidentally equals a pulled
+// payment but in a different account is not the same deposit, so both book.
+func TestADepositInAnotherAccountIsNotTheSameMoney(t *testing.T) {
+	log := newLog()
+	importAs(t, log, "source:rent", line("rent:a1", 3, 168000, "Rent for March 2026"))
+	importAs(t, log, "statement:savings", lineIn("bankfp", "Assets:Bank:Savings", 3, 168000, "DEPOSIT"))
+
+	if txs, _ := ledger(t, log); len(txs) != 2 {
+		t.Fatalf("got %d entries, want 2: different accounts are different money", len(txs))
+	}
+}
+
+// Two bank lines of the same size, neither pulled, are not deduped against each other: that would
+// be the re-import problem, which is handled by the fingerprint, not by this matching.
+func TestTwoBankLinesAreNotDedupedAgainstEachOther(t *testing.T) {
+	log := newLog()
+	importAs(t, log, "statement:march", line("a", 3, 168000, "DEPOSIT ONE"))
+	importAs(t, log, "statement:march", line("b", 3, 168000, "DEPOSIT TWO"))
+
+	if txs, _ := ledger(t, log); len(txs) != 2 {
+		t.Fatalf("got %d entries, want 2: two real bank deposits", len(txs))
 	}
 }

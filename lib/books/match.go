@@ -30,6 +30,7 @@ func suppressed(txs []model.Transaction, entries []model.Entry) map[string]bool 
 	dup := map[string]bool{}
 	consumed := make([]bool, len(txs))
 
+	// Internal transfers: one movement seen in two accounts you own. Suppress the later sighting.
 	for i := range txs {
 		if consumed[i] {
 			continue
@@ -45,7 +46,46 @@ func suppressed(txs []model.Transaction, entries []model.Entry) map[string]bool 
 			}
 		}
 	}
+
+	// A pulled payment and its bank deposit: the same money into the same account, recorded once by
+	// a live source and once by the bank statement. Keep the live-source record (it knows the lease
+	// and the kind) and suppress the bank duplicate.
+	for i := range txs {
+		if consumed[i] {
+			continue
+		}
+		for j := i + 1; j < len(txs); j++ {
+			if consumed[j] {
+				continue
+			}
+			if bank, ok := bankDuplicate(txs[i], txs[j]); ok {
+				dup[bank] = true
+				consumed[i], consumed[j] = true, true
+				break
+			}
+		}
+	}
 	return dup
+}
+
+// bankDuplicate reports whether two sightings are the same deposit recorded by both a live source
+// and the bank, and if so returns the id of the bank one to suppress. It requires exactly one of
+// the two to be live-sourced, so two bank lines or two pulled lines never match here; the same
+// account and amount and a close date are what make them one deposit.
+func bankDuplicate(a, b model.Transaction) (string, bool) {
+	if (a.Source == "") == (b.Source == "") {
+		return "", false // need exactly one from a live source and one from the bank
+	}
+	if a.Account != b.Account || !a.Amount.Equal(b.Amount) {
+		return "", false
+	}
+	if daysApart(a.Date, b.Date) > transferDays {
+		return "", false
+	}
+	if a.Source == "" {
+		return a.ID, true
+	}
+	return b.ID, true
 }
 
 // isTransferPair reports whether two sightings are the same internal movement. The mutual naming is

@@ -473,13 +473,16 @@ transactions, idempotently, with its token kept in the environment rather than t
 ledger file is still the only *output*; the rentapp connector can also push payments back, but
 that direction is not yet wired to a command.
 
-One caveat with pulling rent: the same rent shows up both here and as a bank deposit, so importing
-both double-counts it until matching (like the transfer fold) recognises them as one movement.
+Pulled rent and its bank deposit are the same money recorded twice, once by the rent app and once
+by the bank statement. They are recognised as one deposit and booked once, keeping the pulled record
+(it knows the lease and the kind) and suppressing the bank duplicate. This is the same fold as the
+transfer case, on a different signal: same account, same amount, close date, and exactly one side
+from a live source.
 
-Next, in order: matching pulled rent to the bank deposit (extending the transfer fold), the model
-tier (a model proposes categorizations for the `Uncategorized` lines), then the ledger-import
-parser and the manual transfer override (`transaction.matched`). Prices and cost basis (so a
-brokerage account can hold shares against cash) are a later slice; the `Amount` type is ready.
+Next, in order: the model tier (a model proposes categorizations for the `Uncategorized` lines),
+then the ledger-import parser and the manual transfer override (`transaction.matched`). Prices and
+cost basis (so a brokerage account can hold shares against cash) are a later slice; the `Amount`
+type is ready.
 
 ## Layout
 
