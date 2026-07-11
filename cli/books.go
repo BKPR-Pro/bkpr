@@ -17,16 +17,28 @@ import (
 	"github.com/dallasread/bookkeeper/lib/store"
 )
 
+// accountsFlag collects repeated -account patterns, so one reading can name several accounts and
+// keep every line posting to any of them.
+type accountsFlag []string
+
+func (a *accountsFlag) String() string { return "" }
+
+func (a *accountsFlag) Set(s string) error {
+	*a = append(*a, s)
+	return nil
+}
+
 // renderBooks folds the log and renders it: a table or JSON to read, or the ledger artifact.
 // -account narrows the reading to the lines posting to a matching account, so there is no separate
 // review command: the decision queue is `books -account Uncategorized`, and any other account
 // question is the same machinery with a different pattern.
 func renderBooks(args []string) error {
 	fs := flag.NewFlagSet("books", flag.ExitOnError)
+	var accounts accountsFlag
 	format := fs.String("format", "table", "output format: table, json, or ledger")
 	basis := fs.String("basis", "cash", "accounting basis: cash or accrual")
 	since := fs.String("since", "", "on -basis accrual, book only invoices/bills dated on or after this (YYYY-MM-DD)")
-	account := fs.String("account", "", "show only lines posting to an account matching this pattern, e.g. Uncategorized")
+	fs.Var(&accounts, "account", "show only lines posting to an account matching this pattern; repeatable, any match keeps the line")
 	stdout := fs.Bool("stdout", false, "write the ledger to stdout instead of the store")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -44,9 +56,6 @@ func renderBooks(args []string) error {
 			return fmt.Errorf("-since %q is not YYYY-MM-DD", *since)
 		}
 	}
-	if *account != "" && *format == "ledger" {
-		return fmt.Errorf("-account narrows a reading; the ledger artifact is always whole")
-	}
 
 	s, err := store.Open(".")
 	if err != nil {
@@ -58,8 +67,8 @@ func renderBooks(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *account != "" {
-		if txs, entries, err = filterByAccount(*account, txs, entries); err != nil {
+	if len(accounts) > 0 {
+		if txs, entries, err = filterByAccount(accounts, txs, entries); err != nil {
 			return err
 		}
 	}
@@ -70,7 +79,9 @@ func renderBooks(args []string) error {
 	case "json":
 		return writeJSON(os.Stdout, txs, entries)
 	case "ledger":
-		if *stdout {
+		// A filtered ledger is a reading and goes to stdout; the artifact in the store is only
+		// ever the whole books, so a partial one can never overwrite it.
+		if *stdout || len(accounts) > 0 {
 			return ledger.WriteAll(os.Stdout, txs, entries)
 		}
 		return writeLedger(s, txs, entries)
@@ -79,27 +90,39 @@ func renderBooks(args []string) error {
 	}
 }
 
-// filterByAccount keeps the lines with a posting whose account matches the pattern,
+// filterByAccount keeps the lines with a posting whose account matches any of the patterns,
 // case-insensitively, anywhere in the path. Ledger matches on the whole account name the same way,
 // which is what lets one pattern find Uncategorized at every depth: bare, or as a truncated leaf.
-func filterByAccount(pattern string, txs []model.Transaction, entries []model.Entry) ([]model.Transaction, []model.Entry, error) {
-	re, err := regexp.Compile("(?i)" + pattern)
-	if err != nil {
-		return nil, nil, fmt.Errorf("-account %q is not a valid pattern: %v", pattern, err)
+func filterByAccount(patterns []string, txs []model.Transaction, entries []model.Entry) ([]model.Transaction, []model.Entry, error) {
+	res := make([]*regexp.Regexp, len(patterns))
+	for i, p := range patterns {
+		re, err := regexp.Compile("(?i)" + p)
+		if err != nil {
+			return nil, nil, fmt.Errorf("-account %q is not a valid pattern: %v", p, err)
+		}
+		res[i] = re
 	}
 
 	var keptTxs []model.Transaction
 	var keptEntries []model.Entry
 	for i, tx := range txs {
-		for _, p := range entries[i].Postings {
-			if re.MatchString(p.Account) {
-				keptTxs = append(keptTxs, tx)
-				keptEntries = append(keptEntries, entries[i])
-				break
-			}
+		if postsToAny(entries[i], res) {
+			keptTxs = append(keptTxs, tx)
+			keptEntries = append(keptEntries, entries[i])
 		}
 	}
 	return keptTxs, keptEntries, nil
+}
+
+func postsToAny(e model.Entry, res []*regexp.Regexp) bool {
+	for _, p := range e.Postings {
+		for _, re := range res {
+			if re.MatchString(p.Account) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // report renders the books for a person: the fingerprint first, because it is the handle every

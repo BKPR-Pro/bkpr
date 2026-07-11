@@ -329,16 +329,17 @@ bk rules set "city water"  -category "Expenses:Utilities:Water" -before "water"
 bk rules list
 ```
 
-`books` folds the log and renders it: a table or JSON to read, or the regenerated ledger artifact.
-`-account` narrows the reading to the lines posting to a matching account, so there is no separate
-review command — the decision queue is just the books, filtered:
+`books` folds the log and renders it: a table or JSON to read, or the ledger artifact. `-account`
+narrows any of the three to the lines posting to a matching account — repeat it to name several —
+so there is no separate review command: the decision queue is just the books, filtered:
 
 ```sh
-bk books                            # a table, to read
-bk books -account Uncategorized     # only the lines the rules could not place
-bk books -account "123 Example"     # any other account question, same machinery
-bk books -format json               # the same reading for a machine
-bk books -format ledger             # regenerates .bookkeeper/books.ledger
+bk books                                  # a table, to read
+bk books -account Uncategorized           # only the lines the rules could not place
+bk books -account Fuel -account Water     # several accounts, one reading
+bk books -format json                     # the same reading for a machine
+bk books -format ledger                   # regenerates .bookkeeper/books.ledger
+bk books -account Fuel -format ledger     # a filtered ledger, to stdout; the artifact stays whole
 ```
 
 ```text

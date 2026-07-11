@@ -46,7 +46,7 @@ func foldBooks(t *testing.T, log *eventlog.Log) ([]model.Transaction, []model.En
 func TestFilterByAccountFindsUncategorizedAtAnyDepth(t *testing.T) {
 	txs, entries := foldBooks(t, booksLog(t))
 
-	kept, _, err := filterByAccount("Uncategorized", txs, entries)
+	kept, _, err := filterByAccount([]string{"Uncategorized"}, txs, entries)
 	if err != nil {
 		t.Fatalf("filterByAccount: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestFilterByAccountFindsUncategorizedAtAnyDepth(t *testing.T) {
 		t.Fatalf("got %d lines, want both the bare and the leaf Uncategorized", len(kept))
 	}
 
-	kept, _, err = filterByAccount("Materials", txs, entries)
+	kept, _, err = filterByAccount([]string{"Materials"}, txs, entries)
 	if err != nil {
 		t.Fatalf("filterByAccount: %v", err)
 	}
@@ -63,9 +63,23 @@ func TestFilterByAccountFindsUncategorizedAtAnyDepth(t *testing.T) {
 	}
 }
 
+// -account repeats, and a line posting to any named account is kept, so one reading can cover
+// several accounts at once.
+func TestFilterByAccountTakesSeveralPatterns(t *testing.T) {
+	txs, entries := foldBooks(t, booksLog(t))
+
+	kept, _, err := filterByAccount([]string{"Materials", "^Uncategorized"}, txs, entries)
+	if err != nil {
+		t.Fatalf("filterByAccount: %v", err)
+	}
+	if len(kept) != 2 {
+		t.Fatalf("got %d lines, want the union of both patterns", len(kept))
+	}
+}
+
 func TestFilterByAccountRefusesABadPattern(t *testing.T) {
 	txs, entries := foldBooks(t, booksLog(t))
-	if _, _, err := filterByAccount("(", txs, entries); err == nil {
+	if _, _, err := filterByAccount([]string{"("}, txs, entries); err == nil {
 		t.Error("an unparsable pattern should be refused, not treated as matching nothing")
 	}
 }
@@ -93,7 +107,7 @@ func TestReportListsFingerprints(t *testing.T) {
 // and rules set.
 func TestWriteJSONRoundTrips(t *testing.T) {
 	txs, entries := foldBooks(t, booksLog(t))
-	kept, keptEntries, err := filterByAccount("^Uncategorized", txs, entries)
+	kept, keptEntries, err := filterByAccount([]string{"^Uncategorized"}, txs, entries)
 	if err != nil {
 		t.Fatalf("filterByAccount: %v", err)
 	}

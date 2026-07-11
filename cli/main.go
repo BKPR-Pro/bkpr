@@ -110,7 +110,7 @@ usage:
   bk bill    list
   bk bill    aging   [-as-of <YYYY-MM-DD>]
   bk export       <connector> [-confirm]
-  bk books        [-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re>] [-stdout]
+  bk books        [-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re> ...] [-stdout]
   bk help         [command]
   bk docs
   bk version
@@ -215,15 +215,16 @@ var reference = []docGroup{
       deposit's fingerprint so a repeat is a no-op. Without -confirm it is a dry run that
       prints what it would send.
 `},
-		{[]string{"books"}, `  books [-format table|json|ledger] [-basis cash|accrual] [-since YYYY-MM-DD] [-account <re>] [-stdout]
+		{[]string{"books"}, `  books [-format table|json|ledger] [-basis cash|accrual] [-since YYYY-MM-DD] [-account <re> ...] [-stdout]
       Fold the log into a table (default), machine-readable JSON, or regenerate
       .bookkeeper/books.ledger (-stdout writes the ledger to standard output instead).
-      -account narrows the table or JSON to the lines posting to a matching account, at any
-      depth, the way ledger matches account names. There is no separate review command: the
-      decision queue is books -account Uncategorized, each line with the fingerprint to answer
-      it by, and -format json is the same queue for an external model, which answers back
-      through categorize and rules set. The ledger artifact is always whole, so -account does
-      not apply to -format ledger.
+      -account narrows any of the three to the lines posting to a matching account, at any
+      depth, the way ledger matches account names; repeat it to name several accounts, and a
+      line posting to any of them is kept. There is no separate review command: the decision
+      queue is books -account Uncategorized, each line with the fingerprint to answer it by,
+      and -format json is the same queue for an external model, which answers back through
+      categorize and rules set. A filtered ledger is a reading and goes to stdout; the artifact
+      in the store is only ever the whole books.
       -basis chooses the lens: cash (the default) books only money that moved; accrual also
       books every open invoice and bill, and lets the line that pays one clear its receivable
       or payable. The basis is a read-time choice over one log, so the same books read either
