@@ -300,14 +300,36 @@ bk import statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -am
 bk import visa.csv -account "Liabilities:Card:Visa" -currency CAD -debit Charge -credit Payment -date Posted
 ```
 
-A connector is bidirectional in principle; `export` is the direction built first. The rent app is
-the first connector: `export` records rent the books already booked back to it, so its paid/unpaid
-state stays current. The token is kept in an environment variable, never in the books.
+### Connectors
 
-Which lease a deposit belongs to is not in the bank memo, so the tenant's rule carries it as
-metadata: `-meta rentapp.lease=<id>` rides onto the categorized deposit, and `export` records that
-deposit against that lease, keyed by the deposit's fingerprint so a repeat is a no-op. Without
-`-confirm` it is a dry run.
+A connector is a named, registered external system — the other kind of input besides a file, and
+bidirectional in principle: `export` writes to it today, and importing from it by name is the same
+registry, built later. Registering one is a logged fact (`connector.registered`) and moves no data
+by itself; `export` is the verb that does.
+
+```sh
+bk connectors register <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
+bk connectors list   # NAME, KIND, URL, ACCOUNT, CURRENCY, TOKEN-ENV
+bk connectors rm <name>
+```
+
+- `<name>` is yours to choose and is how every other command refers to it: `bk export rent`.
+- `-kind` names the adapter that speaks the system's protocol; `rentapp` is the one built so far.
+- `-url` is the system's base URL.
+- `-token-env` names the **environment variable** that holds the bearer token. The token itself is
+  never stored: the log keeps only the variable's name and reads it at the moment the connector is
+  used, so the books stay committable. Set the variable in your shell (or profile) before an
+  export; a missing one is refused with the variable named.
+- `-account` and `-currency` say which ledger account's lines the connector concerns.
+
+`connectors rm` forgets one; like everything else the registration stays in the log and the fold
+drops it, so a re-register is a new fact, not an edit.
+
+The rent app is the first connector: `export` records rent the books already booked back to it, so
+its paid/unpaid state stays current. Which lease a deposit belongs to is not in the bank memo, so
+the tenant's rule carries it as metadata: `-meta rentapp.lease=<id>` rides onto the categorized
+deposit, and `export` records that deposit against that lease, keyed by the deposit's fingerprint
+so a repeat is a no-op. Without `-confirm` it is a dry run:
 
 ```sh
 export BK_RENT_TOKEN=...   # the rent app's bearer token
