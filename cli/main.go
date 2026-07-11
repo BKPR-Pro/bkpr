@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/dallasread/bookkeeper/lib/adapters/ledger"
 	"github.com/dallasread/bookkeeper/lib/adapters/source"
@@ -47,6 +48,14 @@ func main() {
 		err = discard(os.Args[2:])
 	case "match":
 		err = match(os.Args[2:])
+	case "accrue":
+		err = accrue(os.Args[2:])
+	case "settle":
+		err = settle(os.Args[2:])
+	case "void":
+		err = voidAccrual(os.Args[2:])
+	case "accruals":
+		err = accrualList(os.Args[2:])
 	case "review":
 		err = review(os.Args[2:])
 	case "export":
@@ -88,9 +97,13 @@ usage:
   bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
   bookkeeper discard      -tx <fingerprint> [-why <reason>] [-actor <name>]
   bookkeeper match        -tx <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
+  bookkeeper accrue       (invoice|bill) -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
+  bookkeeper settle       -accrual <id> (-tx <fingerprint> | -reopen) [-actor <name>]
+  bookkeeper void         -accrual <id> [-why <reason>] [-actor <name>]
+  bookkeeper accruals
   bookkeeper review
   bookkeeper export       <connector> [-confirm]
-  bookkeeper books        [-format table|ledger] [-stdout]
+  bookkeeper books        [-format table|ledger] [-basis cash|accrual] [-stdout]
   bookkeeper docs
 `)
 }
@@ -165,9 +178,36 @@ BOOKKEEPING
       lease (via -meta rentapp.lease=<id>) is recorded against that lease, keyed by the
       deposit's fingerprint so a repeat is a no-op. Without -confirm it is a dry run that
       prints what it would send.
-  books [-format table|ledger] [-stdout]
+  books [-format table|ledger] [-basis cash|accrual] [-stdout]
       Fold the log into a table (default), or regenerate .bookkeeper/books.ledger. -stdout
-      writes the ledger to standard output instead of the store.
+      writes the ledger to standard output instead of the store. -basis chooses the lens:
+      cash (the default) books only money that moved; accrual also books every open invoice
+      and bill, and lets the deposit that pays one clear its receivable. The basis is a
+      read-time choice over one log, so the same books read either way and switch with no
+      rewrite.
+
+ACCRUAL  (value recognized before its cash; only shown on -basis accrual)
+  accrue invoice -party <name> -amount <amt> -category <Income:...> [-account <a>] [-date <d>] [-currency <c>]
+  accrue bill    -party <name> -amount <amt> -category <Expenses:...> [-account <a>] [-date <d>] [-currency <c>]
+      Recognize an invoice (money owed to you) or a bill (money you owe), before the cash
+      moves. An invoice debits a receivable and credits income; a bill debits an expense and
+      credits a payable. -account names where it parks, defaulting to Assets:Receivable for an
+      invoice and Liabilities:Payable for a bill. -date is when the value was earned or
+      incurred (default today), not when it will be paid. The amount is a positive magnitude;
+      the kind decides the signs. Recognizing the same accrual twice is a no-op, keyed by a
+      fingerprint of its content, exactly as re-importing a statement is.
+  settle -accrual <id> (-tx <fingerprint> | -reopen)
+      Record that a bank line paid an accrual, so on the accrual basis the cash clears the
+      parked receivable or payable instead of booking the income or expense a second time
+      (that was booked when the accrual was recognized). A deposit's memo does not reliably
+      name which invoice it clears, so this pairing is recorded rather than guessed. -reopen
+      unlinks it; a later settle supersedes.
+  void -accrual <id> [-why <reason>]
+      Drop an accrual that should not have been raised. Like discard, the recognized fact
+      stays in the log; a later fact supersedes it.
+  accruals
+      List the open accruals with their fingerprints, kind, party, amount, category, parked
+      account, and the line that settled each, if any.
 
 Fingerprints come from the log; find an uncategorized line's fingerprint there to
 categorize it. See the README for the design.
@@ -763,12 +803,167 @@ func match(args []string) error {
 	return nil
 }
 
+// accrue recognizes an invoice or a bill: value earned or incurred before its cash moves. The kind
+// is the first argument, so "accrue invoice" and "accrue bill" read as the two things a person
+// actually does, and the signs follow from it rather than being spelled out.
+func accrue(args []string) error {
+	kind, rest, err := firstArg(args, "invoice or bill")
+	if err != nil {
+		return err
+	}
+	if kind != books.KindInvoice && kind != books.KindBill {
+		return fmt.Errorf("accrue takes %q or %q, not %q", books.KindInvoice, books.KindBill, kind)
+	}
+
+	fs := flag.NewFlagSet("accrue", flag.ExitOnError)
+	party := fs.String("party", "", "the customer billed, or the vendor billing you")
+	amount := fs.String("amount", "", "the magnitude recognized, e.g. 1600.00")
+	currency := fs.String("currency", "CAD", "the currency of the amount")
+	category := fs.String("category", "", "the Income (invoice) or Expenses (bill) account the value is recognized in")
+	account := fs.String("account", "", "where it parks; defaults to Assets:Receivable or Liabilities:Payable")
+	date := fs.String("date", "", "when the value was earned or incurred (YYYY-MM-DD); defaults to today")
+	why := fs.String("why", "", "why this accrual was raised; recorded with it")
+	actor := fs.String("actor", "human", "who is recognizing this; the log records who decided")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	switch {
+	case *party == "":
+		return fmt.Errorf("-party is required")
+	case *amount == "":
+		return fmt.Errorf("-amount is required")
+	case *category == "":
+		return fmt.Errorf("-category is required")
+	}
+
+	amt, err := model.NewAmount(*amount, *currency)
+	if err != nil {
+		return err
+	}
+	when := time.Now()
+	if *date != "" {
+		if when, err = time.Parse("2006-01-02", *date); err != nil {
+			return fmt.Errorf("-date %q is not YYYY-MM-DD", *date)
+		}
+	}
+
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	a, added, err := books.Recognize(log, *actor, *why, books.Accrual{
+		Kind: kind, Date: when, Party: *party, Amount: amt, Category: *category, Account: *account,
+	})
+	if err != nil {
+		return err
+	}
+	if added {
+		fmt.Printf("%s %s\n", kind, a.ID)
+	} else {
+		fmt.Printf("%s %s already recorded\n", kind, a.ID)
+	}
+	return nil
+}
+
+// settle links an accrual to the bank line that paid it, or reopens it. The pairing is recorded
+// rather than guessed, because a deposit's memo does not reliably name which invoice it clears.
+func settle(args []string) error {
+	fs := flag.NewFlagSet("settle", flag.ExitOnError)
+	accrualID := fs.String("accrual", "", "the accrual fingerprint to settle")
+	txID := fs.String("tx", "", "the bank line that paid it")
+	reopen := fs.Bool("reopen", false, "unlink the accrual from its paying line")
+	actor := fs.String("actor", "human", "who is settling; the log records who decided")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *accrualID == "" {
+		return fmt.Errorf("-accrual is required")
+	}
+	if *reopen == (*txID != "") {
+		return fmt.Errorf("give -tx <fingerprint> to settle, or -reopen to unlink, not both or neither")
+	}
+
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	if err := books.Settle(log, *actor, *accrualID, *txID); err != nil {
+		return err
+	}
+	if *reopen {
+		fmt.Printf("reopened %s\n", *accrualID)
+	} else {
+		fmt.Printf("settled %s with %s\n", *accrualID, *txID)
+	}
+	return nil
+}
+
+// voidAccrual drops an accrual that should not have been raised.
+func voidAccrual(args []string) error {
+	fs := flag.NewFlagSet("void", flag.ExitOnError)
+	accrualID := fs.String("accrual", "", "the accrual fingerprint to void")
+	why := fs.String("why", "", "why it is voided; recorded with the void")
+	actor := fs.String("actor", "human", "who is voiding; the log records who decided")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *accrualID == "" {
+		return fmt.Errorf("-accrual is required")
+	}
+
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	if err := books.Void(log, *actor, *why, *accrualID); err != nil {
+		return err
+	}
+	fmt.Printf("voided %s\n", *accrualID)
+	return nil
+}
+
+// accrualList prints the open accruals and the line that settled each, if any.
+func accrualList(args []string) error {
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	accs, err := books.Accruals(log)
+	if err != nil {
+		return err
+	}
+	settled, err := books.Settlements(log)
+	if err != nil {
+		return err
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tDATE\tKIND\tPARTY\tAMOUNT\tCATEGORY\tACCOUNT\tSETTLED BY")
+	for _, a := range accs {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			a.ID, a.Date.Format("2006-01-02"), a.Kind, a.Party, a.Amount, a.Category, a.Account, settled[a.ID])
+	}
+	return w.Flush()
+}
+
 func renderBooks(args []string) error {
 	fs := flag.NewFlagSet("books", flag.ExitOnError)
 	format := fs.String("format", "table", "output format: table or ledger")
+	basis := fs.String("basis", "cash", "accounting basis: cash or accrual")
 	stdout := fs.Bool("stdout", false, "write the ledger to stdout instead of the store")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *basis != string(books.CashBasis) && *basis != string(books.AccrualBasis) {
+		return fmt.Errorf("unknown basis %q: want cash or accrual", *basis)
 	}
 
 	s, err := store.Open(".")
@@ -777,7 +972,7 @@ func renderBooks(args []string) error {
 	}
 	defer s.Close()
 
-	txs, entries, err := books.Ledger(s.Log)
+	txs, entries, err := books.LedgerBasis(s.Log, books.Basis(*basis))
 	if err != nil {
 		return err
 	}

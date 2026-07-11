@@ -104,6 +104,9 @@ Events are immutable, past-tense facts.
 | `transaction.matched` | force or break a transfer pairing the automatic fold got wrong |
 | `transaction.discarded` | that line was garbage; keep it out of the books |
 | `transaction.exported` | this deposit was written to a connector (e.g. rent booked against a lease) |
+| `accrual.recognized` | value was earned or incurred before its cash: an invoice or a bill. Once per fingerprint |
+| `accrual.settled` | the bank line that paid an accrual, so its cash clears the receivable rather than re-booking income |
+| `accrual.voided` | that accrual should not have been raised; keep it out of the books |
 | `rule.added` | a pattern should be handled |
 | `rule.changed` | a rule's answer is wrong |
 | `rule.removed` | a rule should stop firing |
@@ -322,6 +325,71 @@ DATE        PAYEE                AMOUNT   POSTS TO
 9 lines posted, 2 of them uncategorized
 ```
 
+### Cash and accrual are one log read two ways
+
+Cash-basis books record money when it moves; accrual-basis books record value when it is earned or
+incurred, before the cash follows. bookkeeper does not choose between them and does not store a mode.
+The basis is a **read-time lens** over the one log, chosen with `-basis`:
+
+```sh
+bk books -basis cash      # only money that moved. The default, and every earlier example
+bk books -basis accrual   # also books the invoices and bills that have not been paid yet
+```
+
+Cash basis is what every example above already is: it ignores accruals entirely, so it is exactly
+the books bookkeeper was born on. Accrual basis adds the value you have recognized but not yet been
+paid — an invoice raised, a bill received — each as its own line.
+
+An **invoice** is money owed to you; a **bill** is money you owe. They are the one kind of fact a
+bank statement cannot supply, because the money has not moved, so they are recorded rather than
+folded from a line:
+
+```sh
+bk accrue invoice -party "J. Smith" -amount 1600.00 -category "Income:Consulting" -date 2026-03-01
+bk accrue bill    -party "Power Co"  -amount 142.03  -category "Expenses:Utilities:Power" -date 2026-03-02
+```
+
+The magnitude is positive and the kind decides the signs: an invoice debits a receivable and credits
+income, a bill debits an expense and credits a payable. Where it parks defaults to `Assets:Receivable`
+or `Liabilities:Payable`; `-account` overrides. On the accrual basis the invoice above books on the
+day it was earned:
+
+```text
+2026/03/01  * J. Smith
+  Income:Consulting  -1600.00 CAD
+  Assets:Receivable
+```
+
+When the deposit that pays it lands in the bank, `settle` records which line paid which accrual, so
+the cash clears the receivable instead of booking the income a second time (that income was booked
+when the invoice was recognized):
+
+```sh
+bk import march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
+bk settle -accrual 9617607456a06619 -tx 6afa3719db1eb739-1
+```
+
+```text
+2026/03/20  * J. Smith
+  Assets:Receivable  -1600.00 CAD
+  Assets:Bank:Chequing
+```
+
+The receivable now nets to zero (debited when the invoice was raised, credited when the cash cleared
+it), and `Income:Consulting` is booked exactly once.
+
+The pairing is **recorded, not guessed**. An internal transfer pairs automatically because each
+sighting names the other's account with certainty; a deposit's memo does not reliably name which
+invoice it clears, so settling is an asserted fact rather than a fold, in keeping with *say only what
+is known*. A wrong accrual is dropped with `void`, which supersedes it the way `discard` supersedes a
+bad import; `bk accruals` lists the open ones and what settled each.
+
+Because the basis is a lens and accruals are additive facts, you can **start on cash and turn on
+accrual later** with no migration: recognize invoices from whatever day you begin, and every period
+before that reads identically under both bases, because there is nothing there to accrue. The one
+honest caveat is the seam — a period that straddles the switch mixes the two — and the log dates
+exactly when the first `accrual.recognized` appears, so the switch documents itself.
+
 ### Fixing a rule fixes history
 
 Learn that every hardware receipt was Unit 1, and say so once. `set` changes only the fields you
@@ -491,6 +559,14 @@ Internal transfers seen in both accounts' statements are recognised and booked o
 deterministic fold over the lines and their categorization, so the money is not double-counted. A
 bad line is undone with `discard`, which supersedes the imported line without deleting it.
 
+Cash and accrual are the same log read through two lenses, chosen with `bk books -basis`. Cash is the
+default and every statement example is already it. Accrual also books the value recognized before its
+cash: `accrue invoice` raises a receivable, `accrue bill` raises a payable, and `settle` records the
+bank line that paid one so the cash clears the parked account rather than booking income or expense
+twice. The basis is a read-time choice, never stored, so a book can start on cash and turn on accrual
+later with no migration; a wrong accrual is dropped with `void`. Recognizing the same accrual twice
+is a no-op, keyed by a fingerprint of its content, exactly as re-importing a statement is.
+
 Inputs are files (CSV, and the ledger form it writes), read once inline with `import`, and connectors. A
 connector is bidirectional in principle; `export` is the direction built first, because the bank
 statement is where the money is read from. The rent app is the first connector: `export` records
@@ -517,7 +593,7 @@ Ports and adapters: a domain core, with the outside world reached only through a
 
 ```text
 lib/model/            the normalized shapes: Amount, Transaction, Posting, Entry
-lib/books/            the commands and folds: Import, AddRule, Categorize, Discard, Ledger, ...
+lib/books/            the commands and folds: Import, AddRule, Categorize, Recognize, Settle, Ledger, ...
 lib/rules/            the deterministic categorization engine
 lib/eventlog/         the append-only log and its storage
 lib/store/            locating and opening a .bookkeeper book of record

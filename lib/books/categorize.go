@@ -49,10 +49,32 @@ func Categorize(log *eventlog.Log, actor, why, txID, payee string, postings []mo
 	return err
 }
 
-// Ledger folds the whole log into transactions and their final entries, in date order. Each line
-// is categorized by the rules, then overridden by the latest human or model assertion for that
-// specific line. This is the pipeline the table and the ledger artifact both render.
+// Ledger folds the whole log into transactions and their final entries, in date order, on the cash
+// basis. Each line is categorized by the rules, then overridden by the latest human or model
+// assertion for that specific line. This is the pipeline the table and the ledger artifact both
+// render, and the basis the tool was born on: every line is money that actually moved.
 func Ledger(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) {
+	return LedgerBasis(log, CashBasis)
+}
+
+// LedgerBasis folds the log through the chosen lens. On the cash basis it is Ledger: only money that
+// moved. On the accrual basis it also books every open invoice and bill as its own line and lets a
+// settling deposit clear the receivable it raised. The basis is a read-time choice over one log, so
+// the same books can be read either way, and a set of books can switch between them without any
+// rewrite: the accrual lines simply appear or fall away.
+func LedgerBasis(log *eventlog.Log, basis Basis) ([]model.Transaction, []model.Entry, error) {
+	txs, entries, err := cashLedger(log)
+	if err != nil {
+		return nil, nil, err
+	}
+	if basis == AccrualBasis {
+		return overlayAccruals(log, txs, entries)
+	}
+	return txs, entries, nil
+}
+
+// cashLedger folds the log into the lines the bank reported and their final entries, in date order.
+func cashLedger(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) {
 	txs, entries, err := categorized(log)
 	if err != nil {
 		return nil, nil, err
