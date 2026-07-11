@@ -300,12 +300,34 @@ bk import statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -am
 bk import visa.csv -account "Liabilities:Card:Visa" -currency CAD -debit Charge -credit Payment -date Posted
 ```
 
-### Connectors
+### Adapters: how the outside world gets in and out
 
-A connector is a named, registered external system — the other kind of input besides a file, and
-bidirectional in principle: `export` writes to it today, and importing from it by name is the same
-registry, built later. Registering one is a logged fact (`connector.registered`) and moves no data
-by itself; `export` is the verb that does.
+Ports and adapters: the core folds normalized transactions and knows nothing of files, formats, or
+endpoints — only an adapter does, and each speaks exactly one protocol (see Layout). There are two
+kinds of door. A **file** is a one-time input, read with its details supplied inline. A
+**connector** is a live system, registered once by name. One subsection per adapter:
+
+#### CSV statements
+
+Every bank exports CSV and it needs no credentials, so it is the default transport. `import` reads
+one with the account, currency, and columns named inline (see above). The parser accepts the
+shapes banks actually emit — `$1,234.56`, `(45.00)` for a negative, a single signed column or a
+debit/credit pair, a blank amount as zero — and refuses a row carrying both a debit and a credit.
+Each line is stored already normalized, so the books never re-parse the file.
+
+#### Ledger files
+
+The plain-text ledger format is both a door and the artifact. `import` reads a ledger file with no
+flags: each entry's single amountless posting names the account its line came from, and the file's
+own categorization is deliberately not carried in — the rules place every line, so the books stay
+a fold. `bk books -format ledger` writes the same format back out as the committed artifact,
+read-only and regenerated whole.
+
+#### Connectors: register, list, rm
+
+A connector is bidirectional in principle: `export` writes to it today, and importing from it by
+name is the same registry, built later. Registering one is a logged fact (`connector.registered`)
+and moves no data by itself; `export` is the verb that does.
 
 ```sh
 bk connectors register <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
@@ -314,7 +336,7 @@ bk connectors rm <name>
 ```
 
 - `<name>` is yours to choose and is how every other command refers to it: `bk export rent`.
-- `-kind` names the adapter that speaks the system's protocol; `rentapp` is the one built so far.
+- `-kind` names the adapter that speaks the system's protocol; each kind below.
 - `-url` is the system's base URL.
 - `-token-env` names the **environment variable** that holds the bearer token. The token itself is
   never stored: the log keeps only the variable's name and reads it at the moment the connector is
@@ -325,11 +347,14 @@ bk connectors rm <name>
 `connectors rm` forgets one; like everything else the registration stays in the log and the fold
 drops it, so a re-register is a new fact, not an edit.
 
-The rent app is the first connector: `export` records rent the books already booked back to it, so
-its paid/unpaid state stays current. Which lease a deposit belongs to is not in the bank memo, so
-the tenant's rule carries it as metadata: `-meta rentapp.lease=<id>` rides onto the categorized
-deposit, and `export` records that deposit against that lease, keyed by the deposit's fingerprint
-so a repeat is a no-op. Without `-confirm` it is a dry run:
+#### The rent app (`-kind rentapp`)
+
+The first connector: `export` records rent the books already booked back to it, so its paid/unpaid
+state stays current. Which lease a deposit belongs to is not in the bank memo, so the tenant's
+rule carries it as metadata: `-meta rentapp.lease=<id>` rides onto the categorized deposit, and
+`export` sends each such deposit as its lease, amount, and date, with the deposit's fingerprint as
+the idempotency key — so a repeat records nothing twice, and a partially failed run reports which
+deposits failed while the rest stand. Without `-confirm` it is a dry run:
 
 ```sh
 export BK_RENT_TOKEN=...   # the rent app's bearer token
