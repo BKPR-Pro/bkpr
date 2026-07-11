@@ -5,6 +5,13 @@ Turns bank and card statements into a set of books.
 The goal is Mint's touch with a real ledger's resolution: you set it up, it runs, and the only
 recurring work is re-categorizing a couple of things every once in a while.
 
+It is driven entirely through commands, so it does not matter whether a person or an agent operates
+it. Every capability has deterministic, idempotent, machine-readable I/O: `review` reports the whole
+books as JSON, every write is safe to repeat, and the log is the whole state. Whoever runs it imports
+statements, writes rules, and answers the `Uncategorized` lines the same way. The only trace of who
+is `-actor`, stamped on each authoring command (default `human`; e.g. `-actor claude` when an agent
+runs it), so the log records the hand without the tool caring whose it is.
+
 ## Every line posts, and nothing is guessed
 
 **Nothing blocks on a question.** A gate would be exactly the friction this tool exists to remove.
@@ -82,8 +89,7 @@ The whole design follows from one rule:
 | --- | --- | --- |
 | a statement line | no, it came from outside | in the log |
 | a rule | no, it is authored out of what you know | in the log |
-| a model's answer | no, it is nondeterministic and it cost money | in the log |
-| your judgment | no, the receipt is in your truck | in the log |
+| an answer where the rules ran out | no, it is a judgment (the receipt is in your truck) | in the log |
 | a categorization | yes, it is `rules(transaction)` | derived on read |
 | a transfer pairing | yes, from the movement key | derived on read |
 | the ledger file | yes, from the log | a generated artifact |
@@ -100,7 +106,7 @@ Events are immutable, past-tense facts.
 | event | what it means |
 | --- | --- |
 | `transaction.imported` | a statement line was read in. Once per fingerprint, ever |
-| `transaction.categorized` | a person or a model asserted the postings for this line |
+| `transaction.categorized` | a person or an agent asserted the postings for this line |
 | `transaction.matched` | force or break a transfer pairing the automatic fold got wrong |
 | `transaction.voided` | that line should not count; keep it out of the books |
 | `transaction.exported` | this deposit was written to a connector (e.g. rent booked against a lease) |
@@ -113,10 +119,12 @@ Events are immutable, past-tense facts.
 | `rule.removed` | a rule should stop firing |
 | `rule.moved` | two rules fire in the wrong order |
 | `connector.registered` / `connector.removed` | a live connector, registered by name |
+| `policy.set` | the cost-basis method for an account, or the book default |
+| `account.set` | metadata on an account (a letterhead name, a mailing address) |
 
 An event's name says **what happened**. Its `actor` says **who**. Reading `actor` should never be
 necessary to know what kind of fact you are looking at, which is why there is no
-`categorized_by_model`. A person answering an `Uncategorized` line and a model answering one are
+`categorized_by_agent`. A person answering an `Uncategorized` line and an agent answering one are
 doing the same thing, and the log should say so.
 
 Nothing is ever edited. Asserting a line's postings twice appends two facts, the later fold wins,
@@ -223,20 +231,18 @@ first's back. It is a trade taken deliberately, to keep the book of record reada
 dependency-free (the binary is stdlib only). Storage sits behind a small interface, and the tests
 fold over an in-memory adapter.
 
-## Three tiers, and a model that never writes
+## Two tiers: rules, and whoever operates them
 
 1. **Rules.** Deterministic, free, reproducible. Handles almost everything.
-2. **A model.** An external agent that drives the whole tool through its commands, the same surface
-   a person uses: import, rules, categorize, match, export, review. Within this pipeline its job is
-   the lines the rules left `Uncategorized` — it proposes postings, and code writes. bookkeeper
-   never calls a model itself.
-3. **You.** Never blocking. `ledger bal Uncategorized` is the whole review surface: whatever is
-   left is a rule you have not written or a line to correct, and nothing stops the books being
-   complete in the meantime.
+2. **Whoever operates it.** A person or an agent, through the same commands — import, rules,
+   categorize, match, export, review. The standing job is the lines the rules left `Uncategorized`:
+   find them (from `review`, or `ledger bal Uncategorized`), assert the postings, and code writes,
+   with `-actor` recording the hand. Never blocking — whatever is left is a rule not yet written or a
+   line to correct, and the books are complete in the meantime.
 
-A model may label. Code does the writing, the deduplication, and the arithmetic. Quarantining the
-nondeterminism is what keeps the books regenerable, and it is why a model's answer is written to
-the log: it cannot be recomputed, so it must be remembered.
+Whoever operates it may label; code does the writing, the deduplication, and the arithmetic.
+Quarantining the nondeterminism is what keeps the books regenerable, and it is why an asserted answer
+is written to the log: it cannot be recomputed, so it must be remembered.
 
 ## Inputs and the artifact
 
@@ -574,8 +580,9 @@ statement line already knows which account it came from, and a line no rule matc
 
 ## Design rules
 
-- **Deterministic where money is recorded.** The books are a pure function of the log. A model
-  proposes; code writes.
+- **Deterministic where money is recorded.** Every capability is a command with machine-readable,
+  idempotent I/O, so a person or an agent runs the tool the same way. Whoever operates it proposes;
+  code writes. The books stay a pure function of the log.
 - **Idempotent end to end.** Every line carries a stable fingerprint, so a re-import is always
   safe. Two genuinely identical charges on one day stay two charges.
 - **An amount is an exact quantity of a commodity.** Held as integer minor units, so no float ever
@@ -606,11 +613,18 @@ commodity, still cannot be summed and so is refused.
 A brokerage account holds shares against cash. A purchase is a priced posting
 (`-post "Assets:Brokerage:AAPL=10 AAPL @@ 1000.00 USD"`), and a sale names the shares it disposed of
 and where the gain lands (`-sell "Assets:Brokerage:AAPL=10 AAPL" -gain "Income:Capital Gains"`). The
-cost base the shares leave at is folded from the account's purchases under the average cost base
-(ACB), so the gain is derived rather than stored: correct an earlier purchase's base and every later
-sale's gain moves with it. A sale that disposes of more than the account holds is refused when it is
-asserted. The base is a total, never a divided per-unit price, so a full disposal returns the exact
-cost and a partial one rounds to the cent without leaking.
+cost base the shares leave at is folded from the account's purchases, so the gain is derived rather
+than stored: correct an earlier purchase's base and every later sale's gain moves with it. A sale
+that disposes of more than the account holds is refused when it is asserted. The base is a total,
+never a divided per-unit price, so a full disposal returns the exact cost and a partial one rounds to
+the cent without leaking.
+
+The cost-basis method is itself a fact in the log, set by `policy set` and folded like a rule.
+`policy set -method acb` (the default, Canada's rule for capital property) blends every purchase into
+one average; `policy set -method fifo` draws each sale from the oldest lots first. Without `-account`
+it sets the book-wide default; with one it overrides that account only, so a US account can run FIFO
+in the same book a Canadian default keeps on ACB. Because the method is folded, not baked into the
+sale, changing it reclassifies every affected gain on the next regeneration.
 
 Internal transfers seen in both accounts' statements are recognised and booked once, as a
 deterministic fold over the lines and their categorization, so the money is not double-counted. A
@@ -626,25 +640,100 @@ keyed by a fingerprint of its content, exactly as re-importing a statement is. I
 mirror images sharing one machinery, so a receivable and a payable book side by side and differ only
 in signs and words.
 
-Inputs are files (CSV, and the ledger form it writes), read once inline with `import`, and connectors. A
-connector is bidirectional in principle; `export` is the direction built first, because the bank
-statement is where the money is read from. The rent app is the first connector: `export` records
-rent the books already booked back to it so its paid/unpaid state stays current, with its token kept
-in the environment rather than the books. The lease a deposit belongs to rides on the tenant's rule
-as metadata (`rentapp.lease`), and the export is keyed by the deposit's fingerprint, so re-running
-it records nothing twice. Importing a rent roll later, as context rather than as a second copy of
-the money, is a natural next step and is not precluded.
+Inputs are files (CSV, and the ledger form it writes), read once inline with `import`, and
+connectors. `import <connector>` fetches a registered connector's lines and records them through the
+same path a file does, deduped by fingerprint; the connector already carries its account and
+currency, so a name is all `import` needs. The fetch is a boundary the core never crosses (a
+`connector -> transactions` value the CLI supplies), so a future aggregator or official-API adapter
+is a new case, not a rewrite. A bank connector (kind `rbc`, `simplii`, or `pcfinancial`, for the
+Canadian banks that expose no free transaction API) drives a headless-browser **Playwright** script
+to read the account: Go runs the per-institution script with the connector's details in the
+environment, and the script prints the lines as JSON, which Go normalizes and fingerprints like a
+CSV. The automation lives in Node so the Go binary stays stdlib-only. The scripts are stubs today, so
+an import fails loudly until one is written and a CSV export is the way in; which mechanism it grows
+into (the browser import, or an FDX-shaped official API once Canada designates one, realistically
+2027) is written up in `docs/importing-from-banks.md`.
 
-The surface an external model drives is in place: `review` prints the open decisions as JSON (the
-`Uncategorized` lines with their fingerprints), and `categorize`, `rules set`, and `void` take an
-`-actor`, so a model proposes through the same path a person uses and the log records who answered.
-bookkeeper never calls a model itself.
+A connector is bidirectional in principle, and `export` was the direction built first. The rent app
+is the first connector: `export` records rent the books already booked back to it so its paid/unpaid
+state stays current, with its token kept in the environment rather than the books. The lease a
+deposit belongs to rides on the tenant's rule as metadata (`rentapp.lease`), and the export is keyed
+by the deposit's fingerprint, so re-running it records nothing twice. It is export-only, so importing
+from it is refused: the rent money already arrives on the bank statement, and importing the rent
+app's copy would double-count it.
 
-Next: the cost basis follow-ons. The policy is ACB and pluggable at the seam; making it a logged,
-per-account setting (so a US account can run FIFO in the same book) and reading the share quantity
-straight off a brokerage statement (so a trade need not be typed) are the slices from here. Parked
-until asked: importing from a connector (the rent roll as context), and out-of-tree connectors as
-installable plugins.
+The tool is driven entirely through commands, so a person or an agent operates it the same way.
+`review` reports the whole books as JSON, and the authoring commands take an `-actor` (default
+`human`, e.g. `-actor claude`), so whoever answers works through one path and the log records the
+hand without the core caring whose it is.
+
+An account can carry metadata (`accounts set`, folded like a rule): a letterhead name and address on
+the account money moves through, a customer's address on the account a payment is booked to. `receipt
+-tx <fingerprint>` reads that metadata to render one settled transaction as a printable invoice or
+receipt: the account's letterhead, the payee as the bill-to, the postings as line items, always
+stamped PAID because every line came off a statement. It bills in the currency that was billed, so a
+USD contract paid in CAD reads as the USD owed. (This prints a document from money that already
+moved; the accrual `invoice raise` above is the invoice for money still owed.)
+
+`report` folds the books into the full picture of the company: an **income statement** over a period
+(what was earned and spent, by account, with the net) and a **balance sheet** as of its end (assets
+held, liabilities owed, and net worth). A P&L is flows over a period, so income and expenses live
+there; a balance sheet is a position on a date, so that is where liabilities sit. The balance sheet
+counts the source-account posting the entries elide, since that is where cash and debt actually
+accumulate. `-income` or `-balance` shows one; `-account` narrows by a substring of the path, so "123
+Main" reaches a property's rent and its repairs at once; `-from`/`-to` bound the period. Totals are
+per commodity, because a USD fee and CAD rent, or cash and shares, do not sum without a price. It is
+a fold, so it adds a view, not state.
+
+`report -gains` is the tax-time view off the same cost-basis fold: a disposal per row — date, shares,
+proceeds, cost base, and realized gain (a loss is negative) — with the total gain, for a year bounded
+by `-from`/`-to` (Canada's Schedule 3, the T5008 world). The proceeds and base are read straight off
+the resolved sale, never recomputed, so the schedule and the books can never disagree.
+
+Both `receipt` and `report` render **text by default and `-format html`** for a self-contained page
+to open and print to PDF, with `-out` to write a file. The HTML uses the standard library's
+templates, so bookkeeper needs no PDF library and stays stdlib-only. These, and the ledger, are the
+outputs besides the log: a deliberate widening of "the artifact is the product". A new document
+follows the same shape (see below), so it is the same convention, not a special case.
+
+## Next
+
+In order:
+
+1. **Cross-currency transfer.** A conversion between your own accounts (USD out, CAD in) is one
+   movement in two commodities, so the transfer fold — which pairs only equal-and-opposite amounts of
+   a single currency — does not catch it. Recognize it as a priced pairing that carries the rate, so
+   the money is not double-counted and the exchange lands on the books.
+2. **The RBC bank import.** Fill in `scripts/rbc.js`: drive the login and read the account into the
+   JSON the importer already expects (`BK_IMPORT_*` in, `[{date, description, amount}]` out). The
+   login itself lives in the web layer (below) or, standalone, in an encrypted `.env`, and reaches
+   the script as `BK_IMPORT_SECRET` at run time, so the engine never stores a plaintext credential —
+   `Connector.TokenEnv` is the handoff. Simplii and PC Financial follow the same shape. Until each is
+   written, a CSV export is the way in.
+
+Around the engine, the product is a **web layer** that wraps it, and it owns two things this tool
+deliberately does not: the **human surface**, so a person never sees a fingerprint (chat over the
+books, and the `report` and `receipt` views to read and print), and the **secret store** a live
+connection needs. bookkeeper's job is to stay a clean thing to drive and to keep secrets out of the
+committed log: the web layer holds them and injects them at run time through the `TokenEnv` /
+`BK_IMPORT_*` contract. Standalone, the bare CLI reads the same secrets from an **encrypted `.env`**,
+decrypting it at run time with a key held in the **OS keychain** — no plaintext secret on disk, no
+passphrase, and no new build dependency: AES-GCM decryption is standard-library, and the keychain is
+reached through an adapter (the way the browser import reaches Node), so the binary stays stdlib-only
+and the tool works without the web layer too. Either way the book of record stays plain, committable,
+and secret-free.
+That division is the whole trust story — a model proposes, code writes, and every change is an
+auditable git diff — and it only holds because the engine underneath is exactly what it is.
+
+The larger focus after those is **future projections**: a recurring fact (a `periodic` — rent on the
+first, a monthly mortgage) and a `project` fold that carries it forward to show projected cash flow
+and balances, with expected-vs-actual reconciliation ("which rent has not landed") as its follow-on.
+Like every other view it is a fold over the log, so it adds a projection, not stored state.
+
+Backlog, until asked: remembered CSV import profiles (so a file's account and columns need not be
+retyped each month), an aggregator or FDX official-API adapter if a free one appears (realistically
+2027), reading the share quantity straight off a brokerage statement so a trade need not be typed,
+and out-of-tree connectors as installable plugins.
 
 ## Layout
 
@@ -654,9 +743,10 @@ Ports and adapters: a domain core, with the outside world reached only through a
 lib/model/            the normalized shapes: Amount, Transaction, Posting, Entry
 lib/books/            the commands and folds: Import, AddRule, Categorize, Raise, Settle, Ledger, ...
 lib/rules/            the deterministic categorization engine
+lib/costbasis/        folds acquisitions and disposals into a cost base (ACB, FIFO)
 lib/eventlog/         the append-only log and its storage
 lib/store/            locating and opening a .bookkeeper book of record
-lib/adapters/source/  reads statements from the outside world (CSV and ledger files)
+lib/adapters/source/  imports statements: CSV, ledger files, and banks (via a Playwright script)
 lib/adapters/ledger/  renders the books as a plain-text double-entry artifact
 lib/adapters/rentapp/ the rent app connector: exports recorded rent payments
 cli/                  the command-line wrapper (the driving adapter)
@@ -672,6 +762,32 @@ txs, entries, _ := books.Ledger(s.Log)
 ```
 
 `bk docs` prints the full command reference, so the CLI is self-documenting.
+
+## Building on it
+
+For an agent or a person writing code against bookkeeper, four conventions cover almost everything.
+Follow the nearest existing example; each capability has exactly one.
+
+- **A new view (report, document).** Fold `books.Ledger(log)` into a plain view struct (a pure
+  function, no I/O), render it, and print it. Renderers default to **text** and take
+  **`-format html`** for a self-contained, print-to-PDF page built with the standard library's
+  `html/template`; `-out` writes a file through the shared `writeOut`. `report` and `invoice` are
+  the pattern. Keep the fold pure and the render dumb, so both are testable without a store.
+- **A new input.** The input port is `Source func() ([]model.Transaction, error)` in the CLI: every
+  input is one, and `importFrom` runs it and hands the lines to `books.Import`, deduped by
+  fingerprint. The adapters that yield those lines live in `lib/adapters/source` — a file reader
+  (`ReadCSV`, `ReadLedger`) or a bank (`ReadBank`), each fingerprinting with `source.Identify`. A new
+  input is a reader plus a `sourceFor`/`fetcherFor` case that binds it into a `Source`; the core
+  never reaches the network, only an adapter does.
+- **A new authored fact.** Rules, sources, policies, and account metadata are all the same shape: a
+  collection in the log, keyed by identity, folded on read (see `lib/books/rules.go`,
+  `policy.go`, `accounts.go`). One command, one event, latest fact wins.
+- **A new destination.** An adapter that writes out (see `lib/adapters/rentapp`), driven by the CLI
+  and keyed by a stable fingerprint so a re-run records nothing twice.
+
+The design rules above are the guardrails: deterministic where money is recorded, idempotent end to
+end, say only what is known, stdlib-only. Every change is test-first, and the git hooks run
+`gofmt`, `go vet`, the tests, and markdownlint on commit.
 
 ## Development
 

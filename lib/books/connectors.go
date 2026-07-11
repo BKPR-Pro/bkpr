@@ -24,11 +24,11 @@ const (
 // committed to git: TokenEnv names the environment variable that holds it, read when it is used.
 type Connector struct {
 	Name     string `json:"-"`
-	Kind     string `json:"kind"`      // which connector, e.g. rentapp
-	URL      string `json:"url"`       // its base URL
-	TokenEnv string `json:"token_env"` // env var holding the bearer token; never the token
+	Kind     string `json:"kind"`      // which system: rentapp (export), or a bank to import from: rbc, simplii, pcfinancial
+	URL      string `json:"url"`       // its base or login URL
+	TokenEnv string `json:"token_env"` // env var holding its secret; never the secret itself
 	Account  string `json:"account"`   // ledger account its transactions land in
-	Currency string `json:"currency"`  // their currency
+	Currency string `json:"currency"`  // default commodity for a line that carries none of its own
 }
 
 // RegisterConnector registers a connector, or updates one under the same name. The token is

@@ -3,8 +3,9 @@
 // A directory holds a set of books the way it holds a git repository, marked by `.bookkeeper` and
 // found by walking up. `import` records what a statement said, once per line, into the append-only
 // log inside it. `books` folds that log back out through a rule set and renders it. Where the
-// rules run out of knowledge the account path stops at Uncategorized rather than guessing, and
-// later slices hand those to a model and then to a person.
+// rules run out of knowledge the account path stops at Uncategorized rather than guessing, and the
+// agent operating the tool answers those through the same commands a person would. bookkeeper is
+// built to be driven by an agent; it holds no model of its own.
 package main
 
 import (
@@ -13,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -54,6 +56,14 @@ func main() {
 		err = billCmd(os.Args[2:])
 	case "review":
 		err = review(os.Args[2:])
+	case "policy":
+		err = policyCmd(os.Args[2:])
+	case "accounts":
+		err = accountCmd(os.Args[2:])
+	case "receipt":
+		err = receiptCmd(os.Args[2:])
+	case "report":
+		err = reportCmd(os.Args[2:])
 	case "export":
 		err = exportCmd(os.Args[2:])
 	case "books":
@@ -90,9 +100,16 @@ usage:
   bookkeeper connectors list
   bookkeeper import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
   bookkeeper import       <file.ledger>
+  bookkeeper import       <connector>
   bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
   bookkeeper void         -tx <fingerprint> [-why <reason>] [-actor <name>]
   bookkeeper match        -tx <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
+  bookkeeper policy  set  -method <acb|fifo> [-account <a>] [-actor <name>]
+  bookkeeper policy  list
+  bookkeeper accounts set  <account> -meta <k=v> ... [-actor <name>]
+  bookkeeper accounts list
+  bookkeeper receipt  -tx <fingerprint> [-as invoice|receipt] [-format text|html] [-out <file>]
+  bookkeeper report   [-income | -balance | -gains] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
   bookkeeper invoice raise   -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
   bookkeeper invoice settle  -id <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
   bookkeeper invoice void    -id <fingerprint> [-why <reason>] [-actor <name>]
@@ -146,12 +163,18 @@ BOOKKEEPING
   import <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>)
                     [-date <col>] [-description <col>] [-date-format <layout>]
   import <file.ledger>
+  import <connector>
       Read transactions in. A file is a one-time input: a CSV does not name its own account,
       currency, or columns, so you supply them inline; a ledger file names all of that itself
       (each entry's single amountless posting is the account it came from). The line is
       imported raw and the rules place it, so a ledger file's own categorization is not
-      carried in. Importing from a registered connector by name is the same verb, built
-      later; the bank statement is where the money is read from first.
+      carried in. A connector is named instead of a file: it already carries its account and
+      currency (from connectors register) and fetches its own lines. All three land through the
+      same import, deduped by fingerprint, so re-running is safe. A bank connector (kind rbc,
+      simplii, or pcfinancial) drives a headless-browser Playwright script to read the account,
+      for the Canadian banks with no free API; the scripts are stubs today, so until one is
+      written its import fails loudly and a manual CSV export is the way in. rentapp is
+      export-only.
   categorize -tx <fingerprint> (-category <account> | -post <account>=<amount> ... |
              -sell <account>=<qty> ... -gain <account>) [-payee <name>] [-why <reason>] [-actor <name>]
       Assert the postings for one line, overriding the rule for that line only. Use -post
@@ -160,8 +183,8 @@ BOOKKEEPING
       -post "Assets:Brokerage:AAPL=10 AAPL @@ 1000.00 USD". A sale instead names the shares
       it disposed of with -sell and where the gain lands with -gain; the cost base, and so the
       gain, is folded from your purchases: -sell "Assets:Brokerage:AAPL=10 AAPL" -gain "Income:Capital Gains".
-      -actor records who decided (default human), so a model driving this command is told
-      apart from a person in the log; rules set and void take it too.
+      -actor records who decided (default human, e.g. -actor claude when an agent runs it), so
+      the log tells hands apart without the tool caring whose; rules set and void take it too.
   void -tx <fingerprint> [-why <reason>] [-actor <name>]
       Annul a bad imported line. The imported fact stays in the log; a later fact supersedes
       it. Voiding an invoice is the same verb on a different noun: invoice void.
@@ -169,11 +192,42 @@ BOOKKEEPING
       Override the automatic transfer fold, which pairs the two sightings of one movement
       only when each names the other's account. -with forces a pair it missed, dropping the
       later sighting; -break keeps a line the fold wrongly paired. A later match supersedes.
+  policy set -method <acb|fifo> [-account <a>]
+  policy list
+      Set the cost-basis method a sale's base is folded under. Without -account it sets the
+      book-wide default; with one it overrides that account only, so a US account can run FIFO
+      in the same book a Canadian default keeps on ACB. ACB blends every purchase into one
+      average; FIFO draws each sale from the oldest lots first. The default is ACB. list shows
+      the default and every override.
+  report [-income | -balance | -gains] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
+      The full picture: an income statement over the period (what was earned and spent, by
+      account, with the net) and a balance sheet as of its end (assets held, liabilities owed,
+      and net worth). -income or -balance shows just one; -gains shows the capital-gains
+      schedule instead — a disposal per row (date, shares, proceeds, cost base, and realized
+      gain) with the total gain, read off the cost-basis fold, for a tax year with -from/-to.
+      -account narrows to accounts whose path contains the text, so "123 Main" reaches a
+      property's income and its expenses at once, a client name reaches its consulting income,
+      and a symbol reaches its disposals. Totals are per commodity, since a USD fee and CAD
+      rent, or cash and shares, do not sum without a price. -format is text by default, or html
+      for a page to print to PDF; -out writes to a file.
   review
-      Print the decision queue as JSON: the lines the rules could not place, each with its
-      fingerprint, date, amount, description, and where it currently posts. This is the
-      surface an external model reads to know what needs categorizing; it never writes, and
-      the model answers back through categorize and rules set.
+      Print the whole books as JSON, in date order: every entry with its fingerprint, date,
+      amount, description, payee, and postings (with prices). A generic report, the same fold
+      the table renders. It never writes; whoever reads it answers back through categorize and
+      rules set, and finds unplaced lines by their Uncategorized account, not a special queue.
+  accounts set <account> -meta <k=v> ...
+  accounts list
+      Attach metadata to an account, merged per key. Well-known keys are name and address; an
+      invoice reads them as the letterhead (the account the money moved through) and the
+      customer block. It is authored knowledge, so it folds like a rule.
+  receipt -tx <fingerprint> [-as invoice|receipt] [-format text|html] [-out <file>]
+      Render one settled transaction as a printable invoice or receipt, found by its fingerprint:
+      the biller is the transaction's account (its metadata is the letterhead), the bill-to is
+      the payee, and the postings are the line items. It always reads PAID, because every line
+      bookkeeper holds came off a statement, and it bills in the currency the posting names.
+      -format is text by default, or html for a page to open and print to PDF; -out writes to a
+      file. (This prints a document from money that already moved; invoice raise is the accrual
+      invoice for money still owed.)
   export <connector> [-confirm]
       Write rent the books already booked out to a registered connector (see connectors register),
       so its paid/unpaid state stays current. Each rent deposit that a rule attributed to a
@@ -262,56 +316,95 @@ func firstArg(args []string, desc string) (string, []string, error) {
 	return args[0], args[1:], nil
 }
 
-// importCmd reads transactions into the log. Today its argument is a statement file whose details
-// are supplied inline (a CSV does not name its own account, currency, or columns). Importing from a
-// registered connector by name is the same verb and will land here too; for now a bank statement is
-// where the money is read from, since that is the direction built first.
+// Source is the input port: anything that yields normalized transactions. Every input -- a CSV or
+// ledger file, or a connector's live fetch -- is one of these, so import records them all through
+// one path, deduped by fingerprint. It is the ports-and-adapters seam for input, expressed as a
+// function because that is all a source is: something you run to get lines.
+type Source func() ([]model.Transaction, error)
+
+// importCmd reads transactions into the log. Its argument is either a statement file, whose details
+// are supplied inline (a CSV does not name its own account, currency, or columns), or the name of a
+// registered connector, which already carries its account and currency and fetches its own lines.
+// Either resolves to a Source and lands through the same importFrom.
 func importCmd(args []string) error {
-	arg, rest, err := firstArg(args, "a file to import")
+	arg, rest, err := firstArg(args, "a file or connector to import")
 	if err != nil {
 		return err
 	}
-
 	s, err := store.Open(".")
 	if err != nil {
 		return err
 	}
 	defer s.Close()
 
-	switch ext := strings.ToLower(filepath.Ext(arg)); ext {
-	case ".csv":
-		return importCSV(s.Log, arg, rest)
-	case ".ledger":
-		return importLedger(s.Log, arg)
-	default:
-		return fmt.Errorf("import: I do not know how to read %q; .csv and .ledger are supported, connectors are coming", arg)
+	src, actor, err := sourceFor(s.Log, arg, rest)
+	if err != nil {
+		return err
 	}
+	return importFrom(s.Log, actor, src)
 }
 
-// importLedger reads a plain-text ledger file: each entry's amountless posting is the account its
-// statement line came from, and the line's amount is the negation of the priced postings. The
-// categorization in the file is not carried in; the line is imported raw and the rules place it, so
-// the books stay a fold rather than a set of frozen assertions.
-func importLedger(log *eventlog.Log, path string) error {
-	f, err := os.Open(path)
+// importFrom runs a source and records what it yields. It is the one tail every import flows
+// through, file or connector, so re-running any of them is a no-op on the lines already in the log.
+func importFrom(log *eventlog.Log, actor string, src Source) error {
+	txs, err := src()
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-
-	txs, err := source.ReadLedger(f)
+	result, err := books.Import(log, actor, txs)
 	if err != nil {
 		return err
 	}
-	result, err := books.Import(log, "statement:"+filepath.Base(path), txs)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("%d entries read: %d imported, %d already in the log\n", len(txs), result.Imported, result.Skipped)
+	fmt.Printf("%d transactions: %d imported, %d already in the log\n", len(txs), result.Imported, result.Skipped)
 	return nil
 }
 
-func importCSV(log *eventlog.Log, path string, args []string) error {
+// sourceFor resolves an import argument to a Source and the actor the log records it under. A file's
+// kind is its extension; anything else is a registered connector. A ledger file's own categorization
+// is not carried in: the line is imported raw and the rules place it, so the books stay a fold.
+func sourceFor(log *eventlog.Log, arg string, rest []string) (Source, string, error) {
+	label := "statement:" + filepath.Base(arg)
+	switch ext := strings.ToLower(filepath.Ext(arg)); ext {
+	case ".csv":
+		m, err := csvMapping(rest)
+		if err != nil {
+			return nil, "", err
+		}
+		return fileSource(arg, func(r io.Reader) ([]model.Transaction, error) { return source.ReadCSV(r, m) }), label, nil
+	case ".ledger":
+		return fileSource(arg, source.ReadLedger), label, nil
+	default:
+		c, ok, err := books.ConnectorByName(log, arg)
+		if err != nil {
+			return nil, "", err
+		}
+		if !ok {
+			return nil, "", fmt.Errorf("import: %q is not a .csv or .ledger file, nor a registered connector (see `connectors list`)", arg)
+		}
+		fetch, err := fetcherFor(c.Kind)
+		if err != nil {
+			return nil, "", err
+		}
+		return func() ([]model.Transaction, error) { return fetch(c) }, "connector:" + c.Name, nil
+	}
+}
+
+// fileSource opens a file when the source is run and reads it with the given reader, so the handle
+// lives no longer than the read.
+func fileSource(path string, read func(io.Reader) ([]model.Transaction, error)) Source {
+	return func() ([]model.Transaction, error) {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		return read(f)
+	}
+}
+
+// csvMapping parses the inline flags a CSV import needs, since a CSV does not name its own account,
+// currency, or columns.
+func csvMapping(args []string) (source.CSV, error) {
 	fs := flag.NewFlagSet("import (csv)", flag.ExitOnError)
 	var m source.CSV
 	fs.StringVar(&m.Account, "account", "", "the ledger account this statement belongs to")
@@ -323,35 +416,17 @@ func importCSV(log *eventlog.Log, path string, args []string) error {
 	fs.StringVar(&m.Debit, "debit", "", "header of the debit column, if amounts are a pair")
 	fs.StringVar(&m.Credit, "credit", "", "header of the credit column, if amounts are a pair")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return source.CSV{}, err
 	}
 	switch {
 	case m.Account == "":
-		return fmt.Errorf("-account is required: which account's statement is this?")
+		return source.CSV{}, fmt.Errorf("-account is required: which account's statement is this?")
 	case m.Currency == "":
-		return fmt.Errorf("-currency is required")
+		return source.CSV{}, fmt.Errorf("-currency is required")
 	case m.Amount == "" && m.Debit == "" && m.Credit == "":
-		return fmt.Errorf("-amount, or -debit and -credit, is required")
+		return source.CSV{}, fmt.Errorf("-amount, or -debit and -credit, is required")
 	}
-
-	statement, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer statement.Close()
-
-	txs, err := source.ReadCSV(statement, m)
-	if err != nil {
-		return err
-	}
-
-	result, err := books.Import(log, "statement:"+filepath.Base(path), txs)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("%d lines read: %d imported, %d already in the log\n", len(txs), result.Imported, result.Skipped)
-	return nil
+	return m, nil
 }
 
 // connectorSet dispatches `connectors register|rm|list`.
@@ -380,11 +455,11 @@ func connectorRegister(args []string) error {
 	}
 	fs := flag.NewFlagSet("connectors register", flag.ExitOnError)
 	var c books.Connector
-	fs.StringVar(&c.Kind, "kind", "rentapp", "which connector this is")
+	fs.StringVar(&c.Kind, "kind", "rentapp", "which system: rentapp (export), or a bank to import from with no free API: rbc, simplii, pcfinancial")
 	fs.StringVar(&c.URL, "url", "", "the connector's base URL")
 	fs.StringVar(&c.TokenEnv, "token-env", "", "the environment variable holding its bearer token")
 	fs.StringVar(&c.Account, "account", "", "the ledger account its transactions land in")
-	fs.StringVar(&c.Currency, "currency", "CAD", "the currency of its transactions")
+	fs.StringVar(&c.Currency, "currency", "CAD", "default commodity for a fetched line that carries none of its own (a brokerage line's own currency wins)")
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
@@ -436,6 +511,154 @@ func connectorList(args []string) error {
 	fmt.Fprintln(w, "NAME\tKIND\tURL\tACCOUNT\tCURRENCY\tTOKEN-ENV")
 	for _, c := range set {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", c.Name, c.Kind, c.URL, c.Account, c.Currency, c.TokenEnv)
+	}
+	return w.Flush()
+}
+
+// policyCmd dispatches `policy set|list`, the cost-basis method a sale's base is folded under.
+func policyCmd(args []string) error {
+	if len(args) == 0 {
+		usage()
+		return fmt.Errorf("policy needs set or list")
+	}
+	switch args[0] {
+	case "set":
+		return policySetOne(args[1:])
+	case "list":
+		return policyList(args[1:])
+	default:
+		usage()
+		return fmt.Errorf("unknown policy subcommand %q", args[0])
+	}
+}
+
+func policySetOne(args []string) error {
+	fs := flag.NewFlagSet("policy set", flag.ExitOnError)
+	method := fs.String("method", "", "the cost-basis method: acb or fifo")
+	account := fs.String("account", "", "the account this applies to; omit to set the book default")
+	actor := fs.String("actor", "human", "who is setting this; the log records who decided")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *method == "" {
+		return fmt.Errorf("a method is required: acb or fifo")
+	}
+
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	if err := books.SetPolicy(log, *actor, *account, *method); err != nil {
+		return err
+	}
+	if *account == "" {
+		fmt.Printf("book default cost basis is now %s\n", *method)
+	} else {
+		fmt.Printf("%s cost basis is now %s\n", *account, *method)
+	}
+	return nil
+}
+
+func policyList(args []string) error {
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	set, err := books.Policies(log)
+	if err != nil {
+		return err
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ACCOUNT\tMETHOD")
+	for _, p := range set.PolicyList() {
+		account := p.Account
+		if account == books.BookDefault {
+			account = "(book default)"
+		}
+		fmt.Fprintf(w, "%s\t%s\n", account, p.Method)
+	}
+	return w.Flush()
+}
+
+// accountCmd dispatches `accounts set|list`, the metadata an account carries (a letterhead address,
+// a customer's mailing address, a display name) that a document like an invoice reads.
+func accountCmd(args []string) error {
+	if len(args) == 0 {
+		usage()
+		return fmt.Errorf("accounts needs set or list")
+	}
+	switch args[0] {
+	case "set":
+		return accountSetMeta(args[1:])
+	case "list":
+		return accountList(args[1:])
+	default:
+		usage()
+		return fmt.Errorf("unknown accounts subcommand %q", args[0])
+	}
+}
+
+func accountSetMeta(args []string) error {
+	account, rest, err := firstArg(args, "the account to set metadata on")
+	if err != nil {
+		return err
+	}
+	meta := metaFlag{}
+	fs := flag.NewFlagSet("accounts set", flag.ExitOnError)
+	fs.Var(&meta, "meta", "key=value, repeatable; e.g. -meta name=\"Excite Creative\" -meta address=\"123 Main St\"")
+	actor := fs.String("actor", "human", "who is setting this; the log records who decided")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	if len(meta) == 0 {
+		return fmt.Errorf("give at least one -meta key=value to set")
+	}
+
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	if err := books.SetAccountMeta(log, *actor, account, meta); err != nil {
+		return err
+	}
+	fmt.Printf("set %d field(s) on %s\n", len(meta), account)
+	return nil
+}
+
+func accountList(args []string) error {
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	all, err := books.AccountMeta(log)
+	if err != nil {
+		return err
+	}
+	accounts := make([]string, 0, len(all))
+	for a := range all {
+		accounts = append(accounts, a)
+	}
+	sort.Strings(accounts)
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ACCOUNT\tKEY\tVALUE")
+	for _, a := range accounts {
+		keys := make([]string, 0, len(all[a]))
+		for k := range all[a] {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(w, "%s\t%s\t%s\n", a, k, strings.ReplaceAll(all[a][k], "\n", " / "))
+		}
 	}
 	return w.Flush()
 }
@@ -527,7 +750,7 @@ func ruleSetOne(args []string) error {
 // upsertRule adds r, or changes the rule already matching its pattern. On a change only the named
 // fields move, and metadata merges per key rather than replacing the bag, so naming one key leaves
 // the others. On a new rule the given fields stand and before places it. actor records who decided,
-// so a model's rules are told apart from a person's.
+// so a rule authored by an agent is told apart from one a person wrote.
 func upsertRule(log *eventlog.Log, r rules.Rule, provided map[string]bool, before, why, actor string) error {
 	current, err := books.Rules(log)
 	if err != nil {

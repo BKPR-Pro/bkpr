@@ -53,10 +53,15 @@ func Sell(log *eventlog.Log, actor, why, txID, payee, gainAccount string, dispos
 }
 
 // validateSale folds the current log, substitutes the pending sale for its line, and resolves the
-// disposals. It surfaces an oversell or a mixed-commodity mistake now, at the moment the sale is
-// asserted, the same way an unbalanced categorization is refused before it reaches the log.
+// disposals under the book's cost-basis policies. It surfaces an oversell or a mixed-commodity
+// mistake now, at the moment the sale is asserted, the same way an unbalanced categorization is
+// refused before it reaches the log.
 func validateSale(log *eventlog.Log, txID string, pending model.Entry) error {
 	txs, entries, err := categorized(log)
+	if err != nil {
+		return err
+	}
+	policies, err := Policies(log)
 	if err != nil {
 		return err
 	}
@@ -72,7 +77,7 @@ func validateSale(log *eventlog.Log, txID string, pending model.Entry) error {
 	if target < 0 {
 		return fmt.Errorf("books: no transaction %q to sell against", txID)
 	}
-	if err := resolveDisposals(txs, entries); err != nil {
+	if err := resolveDisposals(txs, entries, policies.For); err != nil {
 		return err
 	}
 	if !entries[target].Balances(txs[target]) {
@@ -96,9 +101,10 @@ func clonePostings(ps []model.Posting) []model.Posting {
 // Buy and sell are told apart by sign: a priced share posting with a positive quantity is a
 // purchase that adds to the base, and an unpriced share posting on a gain-bearing entry is the
 // disposal to value. The gain is whatever is left between the base and the proceeds, so the entry
-// ends up accounting for the whole line.
-func resolveDisposals(txs []model.Transaction, entries []model.Entry) error {
-	state := costbasis.New()
+// ends up accounting for the whole line. Each account's base is drawn under the policy the selector
+// returns for it, so ACB and FIFO accounts fold side by side.
+func resolveDisposals(txs []model.Transaction, entries []model.Entry, policyFor func(string) costbasis.Policy) error {
+	state := costbasis.New(policyFor)
 
 	for i := range entries {
 		tx, e := txs[i], &entries[i]

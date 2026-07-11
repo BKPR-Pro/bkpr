@@ -28,52 +28,58 @@ func reviewLog(t *testing.T) *eventlog.Log {
 	return log
 }
 
-// review is the queue a model drives from: only the lines the rules could not place, each with the
-// fingerprint the model writes back against and enough of the line to decide.
-func TestReviewListsOnlyTheUncategorizedLines(t *testing.T) {
+// review is a generic report of the whole books, not a queue: every entry is present, placed or not,
+// each with the fingerprint an authoring command writes back against.
+func TestReviewReportsEveryEntry(t *testing.T) {
 	rep, err := reviewData(reviewLog(t))
 	if err != nil {
 		t.Fatalf("reviewData: %v", err)
 	}
 
-	if len(rep.Uncategorized) != 1 {
-		t.Fatalf("got %d uncategorized, want 1 (the matched line is placed)", len(rep.Uncategorized))
+	if len(rep.Entries) != 2 {
+		t.Fatalf("got %d entries, want both lines (placed and not)", len(rep.Entries))
 	}
-	got := rep.Uncategorized[0]
-	if got.Fingerprint != "mystery" {
-		t.Errorf("fingerprint = %q, want the unmatched line", got.Fingerprint)
+	byID := map[string]reviewEntry{}
+	for _, e := range rep.Entries {
+		byID[e.Fingerprint] = e
 	}
-	if got.Date != "2026-03-02" || got.Account != "Assets:Bank:Chequing" || got.Amount != "-15.00 CAD" {
-		t.Errorf("item = %+v, want the line's own fields", got)
+	if got := byID["known"]; len(got.Postings) != 1 || got.Postings[0].Account != "Expenses:Materials" {
+		t.Errorf("placed line = %+v, want its rule's account", got)
 	}
-	if got.Description != "WHO KNOWS" {
-		t.Errorf("description = %q", got.Description)
+	mystery := byID["mystery"]
+	if mystery.Amount != "-15.00 CAD" || mystery.Description != "WHO KNOWS" {
+		t.Errorf("mystery = %+v, want the line's own fields", mystery)
 	}
-	if len(got.PostsTo) != 1 || got.PostsTo[0] != "Uncategorized" {
-		t.Errorf("posts_to = %v, want [Uncategorized]", got.PostsTo)
+	if len(mystery.Postings) != 1 || mystery.Postings[0].Account != "Uncategorized" {
+		t.Errorf("mystery posts to %v, want [Uncategorized] so the reader can find it", mystery.Postings)
 	}
 }
 
-// A leaf-uncategorized line (the kind is known, the detail is not) is still in the queue, so a model
-// can resolve the property a hardware charge served.
-func TestReviewIncludesAnUncategorizedLeaf(t *testing.T) {
+// A price on a posting (a share bought with cash) is carried, so the report is the whole entry, not a
+// single-commodity summary.
+func TestReviewCarriesPostingPrices(t *testing.T) {
 	log := eventlog.New(eventlog.NewMemory())
-	books.AddRule(log, "human", rules.Rule{Match: "acme", Category: "Expenses:Materials:Uncategorized"}, "")
-	books.Import(log, "statement:march", []model.Transaction{
-		{ID: "leaf", Account: "Assets:Bank:Chequing", Date: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
-			Amount: model.Amount{Units: -8420, Scale: 2, Commodity: "CAD"}, Description: "ACME HARDWARE"},
-	})
+	buy := model.Transaction{ID: "buy", Account: "Assets:Brokerage:Cash",
+		Date: time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC), Amount: model.Amount{Units: -100000, Scale: 2, Commodity: "USD"}}
+	books.Import(log, "statement:brokerage", []model.Transaction{buy})
+	cost := model.Amount{Units: 100000, Scale: 2, Commodity: "USD"}
+	books.Categorize(log, "human", "", "buy", "Bought Apple",
+		[]model.Posting{{Account: "Assets:Brokerage:AAPL", Amount: model.Amount{Units: 10, Commodity: "AAPL"}, Cost: &cost}})
 
 	rep, err := reviewData(log)
 	if err != nil {
 		t.Fatalf("reviewData: %v", err)
 	}
-	if len(rep.Uncategorized) != 1 || rep.Uncategorized[0].PostsTo[0] != "Expenses:Materials:Uncategorized" {
-		t.Fatalf("got %+v, want the leaf line with its partial account", rep.Uncategorized)
+	if len(rep.Entries) != 1 || len(rep.Entries[0].Postings) != 1 {
+		t.Fatalf("got %+v", rep.Entries)
+	}
+	p := rep.Entries[0].Postings[0]
+	if p.Amount != "10 AAPL" || p.Cost != "1000.00 USD" {
+		t.Errorf("posting = %+v, want 10 AAPL @@ 1000.00 USD", p)
 	}
 }
 
-// The output is valid JSON keyed by fingerprint-bearing items, so an external model can parse it.
+// The output is valid JSON, so whoever operates the tool can parse it.
 func TestReviewReportMarshalsToJSON(t *testing.T) {
 	rep, _ := reviewData(reviewLog(t))
 	b, err := json.Marshal(rep)
@@ -84,7 +90,7 @@ func TestReviewReportMarshalsToJSON(t *testing.T) {
 	if err := json.Unmarshal(b, &back); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if len(back.Uncategorized) != 1 || back.Uncategorized[0].Fingerprint != "mystery" {
+	if len(back.Entries) != 2 {
 		t.Errorf("round-tripped %+v", back)
 	}
 }

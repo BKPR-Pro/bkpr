@@ -162,7 +162,7 @@ func reconstruct(date time.Time, payee string, postings []posting, seen map[stri
 
 	account := elided[0]
 	amount := sum.Negate()
-	fp := fingerprint(account, date, amount, payee)
+	fp := Fingerprint(account, date, amount, payee)
 	seen[fp]++
 
 	return model.Transaction{

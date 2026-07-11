@@ -10,7 +10,7 @@ import (
 	"github.com/dallasread/bookkeeper/lib/rules"
 )
 
-// ActionCategorized records that a person or a model asserted the postings for one transaction.
+// ActionCategorized records that a person or an agent asserted the postings for one transaction.
 // It is keyed by the transaction's fingerprint and overrides whatever the rules would have said
 // for that one line. It never generalizes, because the attribution is real-world context the
 // description does not contain.
@@ -103,8 +103,13 @@ func cashLedger(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) {
 	}
 
 	// A sale asserts only which shares left; the cost base they carry, and so the gain, is folded
-	// from the account's history here rather than stored on the assertion.
-	if err := resolveDisposals(txs, entries); err != nil {
+	// from the account's history here rather than stored on the assertion, under each account's
+	// cost-basis policy.
+	policies, err := Policies(log)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := resolveDisposals(txs, entries, policies.For); err != nil {
 		return nil, nil, err
 	}
 

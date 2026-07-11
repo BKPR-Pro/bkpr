@@ -55,8 +55,6 @@ func ReadCSV(r io.Reader, m CSV) ([]model.Transaction, error) {
 	}
 
 	var txs []model.Transaction
-	seen := map[string]int{} // fingerprint -> times seen, so identical lines stay distinct
-
 	for line := 2; ; line++ {
 		record, err := reader.Read()
 		if err == io.EOF {
@@ -86,19 +84,15 @@ func ReadCSV(r io.Reader, m CSV) ([]model.Transaction, error) {
 			return nil, fmt.Errorf("line %d: %w", line, err)
 		}
 
-		description := raw[m.Description]
-		fingerprint := fingerprint(m.Account, date, amount, description)
-		seen[fingerprint]++
-
 		txs = append(txs, model.Transaction{
-			ID:          fmt.Sprintf("%s-%d", fingerprint, seen[fingerprint]),
 			Account:     m.Account,
 			Date:        date,
 			Amount:      amount,
-			Description: description,
+			Description: raw[m.Description],
 			Raw:         raw,
 		})
 	}
+	Identify(txs)
 	return txs, nil
 }
 
@@ -173,7 +167,10 @@ func parseAmount(s, commodity string) (model.Amount, error) {
 	return amount, nil
 }
 
-func fingerprint(account string, date time.Time, amount model.Amount, description string) string {
+// Fingerprint is the stable identity of a normalized line: a hash of the account, date, amount, and
+// normalized description. The same account and line always fingerprint the same, whatever source
+// read them, so a CSV and a bank import of one account produce interchangeable ids.
+func Fingerprint(account string, date time.Time, amount model.Amount, description string) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
 		account,
 		date.Format("2006-01-02"),
@@ -181,6 +178,18 @@ func fingerprint(account string, date time.Time, amount model.Amount, descriptio
 		strings.Join(strings.Fields(strings.ToLower(description)), " "),
 	}, "\x00")))
 	return hex.EncodeToString(sum[:])[:16]
+}
+
+// Identify assigns each transaction its fingerprint-based id, in order, disambiguating genuinely
+// identical lines on one day with a -N suffix so they stay distinct. A source builds transactions
+// without an id and calls this once, so the idempotency root is computed one way for every source.
+func Identify(txs []model.Transaction) {
+	seen := map[string]int{}
+	for i := range txs {
+		fp := Fingerprint(txs[i].Account, txs[i].Date, txs[i].Amount, txs[i].Description)
+		seen[fp]++
+		txs[i].ID = fmt.Sprintf("%s-%d", fp, seen[fp])
+	}
 }
 
 func blank(record []string) bool {

@@ -288,6 +288,32 @@ func gainOf(t *testing.T, log *eventlog.Log, id string) string {
 	return ""
 }
 
+// A FIFO account draws a sale's base from the oldest lot, so the same two buys and sale that give a
+// $200 gain under the default ACB give a different gain once the account is set to FIFO. This is the
+// whole point of the setting: the policy, folded from the log, changes the base and so the gain.
+func TestAFIFOAccountBooksTheOldestLotsGain(t *testing.T) {
+	log := newLog()
+	if err := books.SetPolicy(log, "human", "Assets:Brokerage:AAPL", "fifo"); err != nil {
+		t.Fatalf("SetPolicy: %v", err)
+	}
+	b1 := brokerage(t, log, "b1", 1, -100000, "BUY 10 @ 100")
+	books.Categorize(log, "human", "", b1.ID, "Buy1", []model.Posting{priced(10, "AAPL", 100000)})
+	b2 := brokerage(t, log, "b2", 10, -140000, "BUY 10 @ 140")
+	books.Categorize(log, "human", "", b2.ID, "Buy2", []model.Posting{priced(10, "AAPL", 140000)})
+	sell := brokerage(t, log, "sell", 30, 80000, "SELL 5") // $800 proceeds
+
+	err := books.Sell(log, "human", "", sell.ID, "Sold Apple", "Income:Capital Gains",
+		[]model.Posting{{Account: "Assets:Brokerage:AAPL", Amount: model.Amount{Units: 5, Commodity: "AAPL"}}})
+	if err != nil {
+		t.Fatalf("Sell: %v", err)
+	}
+
+	// FIFO base for 5 is the oldest lot at 100, so 500; gain is 800 - 500 = 300. ACB would be 200.
+	if got := gainOf(t, log, "sell"); got != "-300.00 USD" {
+		t.Errorf("gain = %q, want -300.00 USD (FIFO oldest lot)", got)
+	}
+}
+
 // Selling more than the account holds is a broken book, so it is refused when the sale is asserted,
 // not silently rendered.
 func TestSellingMoreThanHeldIsRefused(t *testing.T) {
