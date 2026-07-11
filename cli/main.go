@@ -45,6 +45,8 @@ func main() {
 		err = categorize(os.Args[2:])
 	case "discard":
 		err = discard(os.Args[2:])
+	case "push":
+		err = push(os.Args[2:])
 	case "books":
 		err = renderBooks(os.Args[2:])
 	case "docs":
@@ -82,6 +84,7 @@ usage:
   bookkeeper import       <file.ledger>
   bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>]
   bookkeeper discard      -tx <fingerprint> [-why <reason>]
+  bookkeeper push         <destination> [-confirm]
   bookkeeper books        [-format table|ledger] [-stdout]
   bookkeeper docs
 `)
@@ -136,6 +139,12 @@ BOOKKEEPING
   discard -tx <fingerprint> [-why <reason>]
       Drop a bad import from the books. The imported fact stays in the log; a later fact
       supersedes it.
+  push <destination> [-confirm]
+      Record rent the books already booked into a registered destination (see sources add),
+      so its paid/unpaid state stays current. Each rent deposit that a rule attributed to a
+      lease (via -meta rentapp.lease=<id>) is recorded against that lease, keyed by the
+      deposit's fingerprint so a repeat is a no-op. Without -confirm it is a dry run that
+      prints what it would send. Nothing is ever imported from the destination.
   books [-format table|ledger] [-stdout]
       Fold the log into a table (default), or regenerate .bookkeeper/books.ledger. -stdout
       writes the ledger to standard output instead of the store.

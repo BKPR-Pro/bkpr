@@ -103,6 +103,7 @@ Events are immutable, past-tense facts.
 | `transaction.categorized` | a person or a model asserted the postings for this line |
 | `transaction.matched` | force or break a transfer pairing the automatic fold got wrong (planned) |
 | `transaction.discarded` | that line was garbage; keep it out of the books |
+| `transaction.pushed` | this deposit was recorded to a destination (e.g. rent booked against a lease) |
 | `rule.added` | a pattern should be handled |
 | `rule.changed` | a rule's answer is wrong |
 | `rule.removed` | a rule should stop firing |
@@ -272,14 +273,22 @@ bk import visa.csv -account "Liabilities:Card:Visa" -currency CAD -debit Charge 
 ```
 
 A live connector is a **destination**, registered once and pushed to; bookkeeper does not import
-from it. The rent app is the first: bookkeeper pushes recorded rent back so its paid/unpaid state
-stays current (the push command is the next slice). The token is kept in an environment variable,
-never in the books.
+from it. The rent app is the first: `push` records rent the books already booked back to it, so its
+paid/unpaid state stays current. The token is kept in an environment variable, never in the books.
+
+Which lease a deposit belongs to is not in the bank memo, so the tenant's rule carries it as
+metadata: `-meta rentapp.lease=<id>` rides onto the categorized deposit, and `push` records that
+deposit against that lease, keyed by the deposit's fingerprint so a repeat is a no-op. Without
+`-confirm` it is a dry run.
 
 ```sh
 export BK_RENT_TOKEN=...   # the rent app's bearer token
 bk sources add rent -kind rentapp -url https://rent.stcroixproperties.ca \
   -token-env BK_RENT_TOKEN -account "Assets:Bank:Chequing" -currency CAD
+bk rules add -match "hyungjin" -category "Income:Real Estate:Rent:22 Lisgar Street" \
+  -meta rentapp.lease=31
+bk push rent            # dry run: what it would record
+bk push rent -confirm   # records each rent deposit against its lease
 ```
 
 `rules add` records a rule; each is one event. Order decides which of two matching rules wins, so a
@@ -470,9 +479,11 @@ bad import is undone with `discard`, which supersedes the imported line without 
 Inputs are files (CSV today, ledger coming), imported once inline. The bank statement is the source
 of truth for money, so bookkeeper never pulls transactions from a live app: importing rent from the
 rent app would count the same deposit twice, once by the app and once by the bank. A live connector
-is a **destination** instead. The rent app is the first: bookkeeper pushes recorded rent back so its
-paid/unpaid state stays current, with its token kept in the environment rather than the books. The
-push command is the next slice.
+is a **destination** instead. The rent app is the first: `push` records rent the books already
+booked back to it so its paid/unpaid state stays current, with its token kept in the environment
+rather than the books. The lease a deposit belongs to rides on the tenant's rule as metadata
+(`rentapp.lease`), and the push is keyed by the deposit's fingerprint, so re-running it records
+nothing twice.
 
 Next, in order: the model tier (a model proposes categorizations for the `Uncategorized` lines),
 then the ledger-import parser and the manual transfer override (`transaction.matched`). Prices and
