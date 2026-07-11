@@ -1,13 +1,9 @@
 package books
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/dallasread/bookkeeper/lib/eventlog"
@@ -25,14 +21,6 @@ const (
 	// re-importing a statement is.
 	ActionRaised = "raised"
 
-	// ActionSettled links an invoice to the bank line that paid it. The memo of a deposit does not
-	// reliably name which invoice it clears, so the pairing is recorded rather than guessed, unlike
-	// an internal transfer where each sighting names the other's account. A later settle supersedes.
-	ActionSettled = "settled"
-
-	// An invoice that should not have been raised is voided; the verb is shared with a voided
-	// transaction (see ActionVoided in void.go), because annulling a recorded thing is one operation.
-
 	// defaultReceivable is where an invoice parks until its cash arrives, when the caller names no
 	// account of their own.
 	defaultReceivable = "Assets:Receivable"
@@ -49,20 +37,6 @@ type Invoice struct {
 	Amount   model.Amount // the magnitude owed; a positive quantity
 	Category string       // the Income account the revenue is recognized in
 	Account  string       // the Assets:Receivable account it parks in until paid
-}
-
-// raisedData is the payload of an invoice.raised event.
-type raisedData struct {
-	Date     time.Time    `json:"date"`
-	Party    string       `json:"party"`
-	Amount   model.Amount `json:"amount"`
-	Category string       `json:"category"`
-	Account  string       `json:"account"`
-	Why      string       `json:"why,omitempty"`
-}
-
-type settledData struct {
-	Tx string `json:"tx,omitempty"` // the bank line that paid it; empty reopens the invoice
 }
 
 // Raise records an invoice: revenue earned and billed before the cash moves. It returns the stored
@@ -84,9 +58,9 @@ func Raise(log *eventlog.Log, actor, why string, inv Invoice) (Invoice, bool, er
 	if inv.Account == "" {
 		inv.Account = defaultReceivable
 	}
-	inv.ID = invoiceID(inv)
+	inv.ID = accrualFingerprint(CollectionInvoice, inv.Date, inv.Party, inv.Amount, inv.Category, inv.Account)
 
-	data, err := json.Marshal(raisedData{
+	data, err := json.Marshal(accrualData{
 		Date: inv.Date, Party: inv.Party, Amount: inv.Amount,
 		Category: inv.Category, Account: inv.Account, Why: why,
 	})
@@ -107,10 +81,10 @@ func Raise(log *eventlog.Log, actor, why string, inv Invoice) (Invoice, bool, er
 	}
 }
 
-// Settle records that a bank line paid an invoice, so the cash clears the receivable rather than
-// booking the income a second time (that was booked when the invoice was raised). An empty txID
+// SettleInvoice records that a bank line paid an invoice, so the cash clears the receivable rather
+// than booking the income a second time (that was booked when the invoice was raised). An empty txID
 // reopens the invoice. A later settle supersedes.
-func Settle(log *eventlog.Log, actor, invoiceID, txID string) error {
+func SettleInvoice(log *eventlog.Log, actor, invoiceID, txID string) error {
 	inv, err := invoice(log, invoiceID)
 	if err != nil {
 		return err
@@ -120,15 +94,7 @@ func Settle(log *eventlog.Log, actor, invoiceID, txID string) error {
 			return err
 		}
 	}
-	data, err := json.Marshal(settledData{Tx: txID})
-	if err != nil {
-		return err
-	}
-	_, err = log.Track(eventlog.Event{
-		Collection: CollectionInvoice, RecordID: inv.ID, Action: ActionSettled,
-		Version: version, Actor: actor, Data: data,
-	})
-	return err
+	return trackSettlement(log, actor, CollectionInvoice, inv.ID, txID)
 }
 
 // VoidInvoice supersedes an invoice that should not have been raised, the same operation as voiding
@@ -138,15 +104,7 @@ func VoidInvoice(log *eventlog.Log, actor, why, invoiceID string) error {
 	if _, err := invoice(log, invoiceID); err != nil {
 		return err
 	}
-	data, err := json.Marshal(voidedData{Why: why})
-	if err != nil {
-		return err
-	}
-	_, err = log.Track(eventlog.Event{
-		Collection: CollectionInvoice, RecordID: invoiceID, Action: ActionVoided,
-		Version: version, Actor: actor, Data: data,
-	})
-	return err
+	return trackVoid(log, actor, CollectionInvoice, why, invoiceID)
 }
 
 // Invoices folds the log into the invoices it currently holds, in the order they were raised, with
@@ -173,7 +131,7 @@ func Invoices(log *eventlog.Log) ([]Invoice, error) {
 		if voided[e.RecordID] {
 			continue
 		}
-		var data raisedData
+		var data accrualData
 		if err := e.Decode(&data); err != nil {
 			return nil, fmt.Errorf("books: event %s: %w", e.ID, err)
 		}
@@ -200,127 +158,29 @@ func invoice(log *eventlog.Log, id string) (Invoice, error) {
 	return Invoice{}, fmt.Errorf("books: no invoice %q; raise it before settling or voiding it", id)
 }
 
-// Settlements folds the current bank line, if any, that settles each invoice. A later settle
-// supersedes, and an empty one reopens, so the map holds only invoices still linked to a line.
-func Settlements(log *eventlog.Log) (map[string]string, error) {
-	events, err := log.All()
+// InvoiceSettlements folds the current bank line, if any, that settles each invoice.
+func InvoiceSettlements(log *eventlog.Log) (map[string]string, error) {
+	return settlementsFor(log, CollectionInvoice)
+}
+
+// invoiceLines folds the invoices into the shared accrual shape: a receivable is an asset, so the
+// parked amount is the positive magnitude and the income posting takes its negation.
+func invoiceLines(log *eventlog.Log) ([]accrualLine, error) {
+	invs, err := Invoices(log)
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]string{}
-	for _, e := range events {
-		if e.Collection != CollectionInvoice || e.Action != ActionSettled {
-			continue
-		}
-		var d settledData
-		if err := e.Decode(&d); err != nil {
-			return nil, fmt.Errorf("books: event %s: %w", e.ID, err)
-		}
-		if d.Tx == "" {
-			delete(out, e.RecordID)
-			continue
-		}
-		out[e.RecordID] = d.Tx
+	settled, err := InvoiceSettlements(log)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]accrualLine, 0, len(invs))
+	for _, inv := range invs {
+		out = append(out, accrualLine{
+			kind: CollectionInvoice, id: inv.ID, date: inv.Date, party: inv.Party,
+			parkedAccount: inv.Account, parkedAmount: inv.Amount, category: inv.Category,
+			settledBy: settled[inv.ID],
+		})
 	}
 	return out, nil
-}
-
-// transaction and entry render an invoice as a synthetic balanced line, so the same ledger writer
-// that renders a bank statement renders an invoice with no special case. The receivable is the
-// elided account, exactly as a statement's own account is: the invoice debits the receivable and
-// credits income.
-func (inv Invoice) transaction() model.Transaction {
-	return model.Transaction{
-		ID:          "invoice:" + inv.ID,
-		Account:     inv.Account,
-		Date:        inv.Date,
-		Amount:      inv.Amount,
-		Description: inv.Party,
-	}
-}
-
-func (inv Invoice) entry() model.Entry {
-	return model.Entry{Payee: inv.Party, Postings: []model.Posting{{Account: inv.Category, Amount: inv.Amount.Negate()}}}
-}
-
-// invoiceID fingerprints an invoice by its content, the way a statement line is fingerprinted, so
-// raising the same one twice collapses to one fact.
-func invoiceID(inv Invoice) string {
-	sum := sha256.Sum256([]byte(strings.Join([]string{
-		inv.Date.Format("2006-01-02"),
-		strings.Join(strings.Fields(strings.ToLower(inv.Party)), " "),
-		inv.Amount.String(),
-		inv.Category,
-		inv.Account,
-	}, "\x00")))
-	return hex.EncodeToString(sum[:])[:16]
-}
-
-// overlayInvoices turns the cash-basis books into accrual-basis ones. It books each open invoice as
-// its own line, and where a bank line settled one it redirects that line from income to the
-// receivable, so the cash clears the receivable instead of double-booking the revenue the invoice
-// already recognized. The combined lines are re-sorted so invoices interleave in date order.
-func overlayInvoices(log *eventlog.Log, txs []model.Transaction, entries []model.Entry) ([]model.Transaction, []model.Entry, error) {
-	invs, err := Invoices(log)
-	if err != nil {
-		return nil, nil, err
-	}
-	settled, err := Settlements(log)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// A bank line that settled an invoice clears the receivable rather than booking income again: the
-	// revenue was recognized when the invoice was, and this is only its cash.
-	byTx := map[string]Invoice{}
-	for _, inv := range invs {
-		if tx, ok := settled[inv.ID]; ok {
-			byTx[tx] = inv
-		}
-	}
-	pos := make(map[string]int, len(txs))
-	for i, tx := range txs {
-		pos[tx.ID] = i
-	}
-	for txID, inv := range byTx {
-		i, ok := pos[txID]
-		if !ok {
-			continue // the line was voided or suppressed; nothing to clear against
-		}
-		entries[i] = model.Entry{
-			Payee:    entries[i].Payee,
-			Postings: []model.Posting{{Account: inv.Account, Amount: txs[i].Amount.Negate()}},
-		}
-	}
-
-	for _, inv := range invs {
-		txs = append(txs, inv.transaction())
-		entries = append(entries, inv.entry())
-	}
-
-	sortByDate(txs, entries)
-	return txs, entries, nil
-}
-
-// sortByDate orders the lines and their entries together, by date and then id, so the artifact is
-// byte-stable across runs the way Transactions already keeps the cash-basis lines.
-func sortByDate(txs []model.Transaction, entries []model.Entry) {
-	idx := make([]int, len(txs))
-	for i := range idx {
-		idx[i] = i
-	}
-	sort.SliceStable(idx, func(a, b int) bool {
-		i, j := idx[a], idx[b]
-		if !txs[i].Date.Equal(txs[j].Date) {
-			return txs[i].Date.Before(txs[j].Date)
-		}
-		return txs[i].ID < txs[j].ID
-	})
-	st := make([]model.Transaction, len(txs))
-	se := make([]model.Entry, len(entries))
-	for n, i := range idx {
-		st[n], se[n] = txs[i], entries[i]
-	}
-	copy(txs, st)
-	copy(entries, se)
 }

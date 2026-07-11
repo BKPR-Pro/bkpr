@@ -84,7 +84,7 @@ func TestSettlementClearsTheReceivableWithoutDoubleBookingIncome(t *testing.T) {
 	// The deposit lands in the bank and the rules would call it income.
 	loaded(t, log, rule("j smith", "Income:Consulting"))
 	importOne(t, log, line("pay", 20, 160000, "E-TRANSFER FROM J SMITH"))
-	if err := books.Settle(log, "human", inv.ID, "pay"); err != nil {
+	if err := books.SettleInvoice(log, "human", inv.ID, "pay"); err != nil {
 		t.Fatalf("Settle: %v", err)
 	}
 
@@ -184,14 +184,14 @@ func TestReopeningUnlinksTheSettlement(t *testing.T) {
 	inv := raise(t, log, "J. Smith", 1, 160000, "Income:Consulting")
 	loaded(t, log, rule("j smith", "Income:Consulting"))
 	importOne(t, log, line("pay", 20, 160000, "E-TRANSFER FROM J SMITH"))
-	if err := books.Settle(log, "human", inv.ID, "pay"); err != nil {
+	if err := books.SettleInvoice(log, "human", inv.ID, "pay"); err != nil {
 		t.Fatalf("Settle: %v", err)
 	}
-	if err := books.Settle(log, "human", inv.ID, ""); err != nil {
+	if err := books.SettleInvoice(log, "human", inv.ID, ""); err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
 
-	if settled, _ := books.Settlements(log); len(settled) != 0 {
+	if settled, _ := books.InvoiceSettlements(log); len(settled) != 0 {
 		t.Errorf("got %d settlements after reopening, want 0", len(settled))
 	}
 }
@@ -200,7 +200,7 @@ func TestReopeningUnlinksTheSettlement(t *testing.T) {
 // nothing, the way categorizing an unimported line is.
 func TestSettlingAnUnknownInvoiceIsRefused(t *testing.T) {
 	log := newLog()
-	if err := books.Settle(log, "human", "nope", ""); err == nil {
+	if err := books.SettleInvoice(log, "human", "nope", ""); err == nil {
 		t.Fatal("settled an invoice that was never raised")
 	}
 	if err := books.VoidInvoice(log, "human", "", "nope"); err == nil {

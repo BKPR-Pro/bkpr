@@ -69,17 +69,17 @@ const (
 )
 
 // LedgerBasis folds the log through the chosen lens. On the cash basis it is Ledger: only money that
-// moved. On the accrual basis it also books every open invoice as its own line and lets a settling
-// deposit clear the receivable it raised. The basis is a read-time choice over one log, so the same
-// books can be read either way, and a set of books can switch between them without any rewrite: the
-// accrual lines simply appear or fall away.
+// moved. On the accrual basis it also books every open invoice and bill as its own line and lets a
+// settling bank line clear the receivable or payable it raised. The basis is a read-time choice over
+// one log, so the same books can be read either way, and a set of books can switch between them
+// without any rewrite: the accrual lines simply appear or fall away.
 func LedgerBasis(log *eventlog.Log, basis Basis) ([]model.Transaction, []model.Entry, error) {
 	txs, entries, err := cashLedger(log)
 	if err != nil {
 		return nil, nil, err
 	}
 	if basis == AccrualBasis {
-		return overlayInvoices(log, txs, entries)
+		return overlayAccruals(log, txs, entries)
 	}
 	return txs, entries, nil
 }

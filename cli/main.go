@@ -50,6 +50,8 @@ func main() {
 		err = match(os.Args[2:])
 	case "invoice":
 		err = invoiceCmd(os.Args[2:])
+	case "bill":
+		err = billCmd(os.Args[2:])
 	case "review":
 		err = review(os.Args[2:])
 	case "export":
@@ -95,6 +97,10 @@ usage:
   bookkeeper invoice settle  -id <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
   bookkeeper invoice void    -id <fingerprint> [-why <reason>] [-actor <name>]
   bookkeeper invoice list
+  bookkeeper bill    receive -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
+  bookkeeper bill    settle  -id <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
+  bookkeeper bill    void    -id <fingerprint> [-why <reason>] [-actor <name>]
+  bookkeeper bill    list
   bookkeeper review
   bookkeeper export       <connector> [-confirm]
   bookkeeper books        [-format table|ledger] [-basis cash|accrual] [-stdout]
@@ -179,24 +185,31 @@ BOOKKEEPING
       and lets the deposit that pays one clear its receivable. The basis is a read-time choice
       over one log, so the same books read either way and switch with no rewrite.
 
-INVOICE  (revenue owed to you before its cash; only shown on -basis accrual)
+INVOICES AND BILLS  (value recognized before its cash; only shown on -basis accrual)
   invoice raise -party <name> -amount <amt> -category <Income:...> [-account <a>] [-date <d>] [-currency <c>]
-      Raise an invoice: revenue earned and billed before the cash moves. It debits a
-      receivable and credits income. -account names where it parks, defaulting to
-      Assets:Receivable. -date is when the revenue was earned (default today), not when it
-      will be paid. The amount is a positive magnitude. Raising the same invoice twice is a
-      no-op, keyed by a fingerprint of its content, exactly as re-importing a statement is.
+      Raise an invoice: revenue owed to you, earned and billed before the cash moves. It debits
+      a receivable and credits income. -account names where it parks, defaulting to
+      Assets:Receivable. -date is when the revenue was earned (default today), not when it will
+      be paid. The amount is a positive magnitude. Raising the same invoice twice is a no-op,
+      keyed by a fingerprint of its content, exactly as re-importing a statement is.
+  bill receive -party <name> -amount <amt> -category <Expenses:...> [-account <a>] [-date <d>] [-currency <c>]
+      Receive a bill: money you owe, the mirror of an invoice. It debits an expense and credits
+      a payable, defaulting to Liabilities:Payable. Everything else matches invoice raise.
   invoice settle -id <fingerprint> (-tx <fingerprint> | -reopen)
-      Record that a bank line paid an invoice, so on the accrual basis the cash clears the
-      receivable instead of booking the income a second time (that was booked when the invoice
-      was raised). A deposit's memo does not reliably name which invoice it clears, so this
-      pairing is recorded rather than guessed. -reopen unlinks it; a later settle supersedes.
+  bill settle    -id <fingerprint> (-tx <fingerprint> | -reopen)
+      Record that a bank line paid an invoice or bill, so on the accrual basis the cash clears
+      the receivable or payable instead of booking the income or expense a second time (that
+      was booked when the accrual was raised). A memo does not reliably name which accrual a
+      line clears, so this pairing is recorded rather than guessed. -reopen unlinks it; a later
+      settle supersedes.
   invoice void -id <fingerprint> [-why <reason>]
-      Drop an invoice that should not have been raised. The same verb as voiding a bad import:
+  bill void    -id <fingerprint> [-why <reason>]
+      Drop an accrual that should not have been raised. The same verb as voiding a bad import:
       the raised fact stays in the log; a later fact supersedes it.
   invoice list
-      List the open invoices with their fingerprints, date, party, amount, category, parked
-      account, and the line that settled each, if any.
+  bill list
+      List the open invoices or bills with their fingerprints, date, party, amount, category,
+      parked account, and the line that settled each, if any.
 
 Fingerprints come from the log; find an uncategorized line's fingerprint there to
 categorize it. See the README for the design.
@@ -894,7 +907,7 @@ func invoiceSettle(args []string) error {
 	}
 	defer closeLog()
 
-	if err := books.Settle(log, *actor, *id, *txID); err != nil {
+	if err := books.SettleInvoice(log, *actor, *id, *txID); err != nil {
 		return err
 	}
 	if *reopen {
@@ -943,7 +956,7 @@ func invoiceList(args []string) error {
 	if err != nil {
 		return err
 	}
-	settled, err := books.Settlements(log)
+	settled, err := books.InvoiceSettlements(log)
 	if err != nil {
 		return err
 	}
@@ -953,6 +966,168 @@ func invoiceList(args []string) error {
 	for _, inv := range invs {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			inv.ID, inv.Date.Format("2006-01-02"), inv.Party, inv.Amount, inv.Category, inv.Account, settled[inv.ID])
+	}
+	return w.Flush()
+}
+
+// billCmd dispatches `bill receive|settle|void|list`. A bill is the mirror of an invoice — money you
+// owe rather than money owed to you — and is its own first-class namespace the same way.
+func billCmd(args []string) error {
+	if len(args) == 0 {
+		usage()
+		return fmt.Errorf("bill needs receive, settle, void, or list")
+	}
+	switch args[0] {
+	case "receive":
+		return billReceive(args[1:])
+	case "settle":
+		return billSettle(args[1:])
+	case "void":
+		return billVoid(args[1:])
+	case "list":
+		return billList(args[1:])
+	default:
+		usage()
+		return fmt.Errorf("unknown bill subcommand %q", args[0])
+	}
+}
+
+// billReceive records a bill: an expense incurred and billed before its cash leaves.
+func billReceive(args []string) error {
+	fs := flag.NewFlagSet("bill receive", flag.ExitOnError)
+	party := fs.String("party", "", "the vendor billing you")
+	amount := fs.String("amount", "", "the magnitude owed, e.g. 142.03")
+	currency := fs.String("currency", "CAD", "the currency of the amount")
+	category := fs.String("category", "", "the Expenses account the expense is recognized in")
+	account := fs.String("account", "", "where it parks until paid; defaults to Liabilities:Payable")
+	date := fs.String("date", "", "when the expense was incurred (YYYY-MM-DD); defaults to today")
+	why := fs.String("why", "", "why this bill was received; recorded with it")
+	actor := fs.String("actor", "human", "who is recording it; the log records who decided")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	switch {
+	case *party == "":
+		return fmt.Errorf("-party is required")
+	case *amount == "":
+		return fmt.Errorf("-amount is required")
+	case *category == "":
+		return fmt.Errorf("-category is required")
+	}
+
+	amt, err := model.NewAmount(*amount, *currency)
+	if err != nil {
+		return err
+	}
+	when := time.Now()
+	if *date != "" {
+		if when, err = time.Parse("2006-01-02", *date); err != nil {
+			return fmt.Errorf("-date %q is not YYYY-MM-DD", *date)
+		}
+	}
+
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	b, added, err := books.ReceiveBill(log, *actor, *why, books.Bill{
+		Date: when, Party: *party, Amount: amt, Category: *category, Account: *account,
+	})
+	if err != nil {
+		return err
+	}
+	if added {
+		fmt.Printf("bill %s\n", b.ID)
+	} else {
+		fmt.Printf("bill %s already recorded\n", b.ID)
+	}
+	return nil
+}
+
+// billSettle links a bill to the bank line that paid it, or reopens it.
+func billSettle(args []string) error {
+	fs := flag.NewFlagSet("bill settle", flag.ExitOnError)
+	id := fs.String("id", "", "the bill fingerprint to settle")
+	txID := fs.String("tx", "", "the bank line that paid it")
+	reopen := fs.Bool("reopen", false, "unlink the bill from its paying line")
+	actor := fs.String("actor", "human", "who is settling; the log records who decided")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return fmt.Errorf("-id is required")
+	}
+	if *reopen == (*txID != "") {
+		return fmt.Errorf("give -tx <fingerprint> to settle, or -reopen to unlink, not both or neither")
+	}
+
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	if err := books.SettleBill(log, *actor, *id, *txID); err != nil {
+		return err
+	}
+	if *reopen {
+		fmt.Printf("reopened %s\n", *id)
+	} else {
+		fmt.Printf("settled %s with %s\n", *id, *txID)
+	}
+	return nil
+}
+
+// billVoid drops a bill that should not have been received.
+func billVoid(args []string) error {
+	fs := flag.NewFlagSet("bill void", flag.ExitOnError)
+	id := fs.String("id", "", "the bill fingerprint to void")
+	why := fs.String("why", "", "why it is voided; recorded with the void")
+	actor := fs.String("actor", "human", "who is voiding; the log records who decided")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return fmt.Errorf("-id is required")
+	}
+
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	if err := books.VoidBill(log, *actor, *why, *id); err != nil {
+		return err
+	}
+	fmt.Printf("voided %s\n", *id)
+	return nil
+}
+
+// billList prints the open bills and the line that settled each, if any.
+func billList(args []string) error {
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	bills, err := books.Bills(log)
+	if err != nil {
+		return err
+	}
+	settled, err := books.BillSettlements(log)
+	if err != nil {
+		return err
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tDATE\tPARTY\tAMOUNT\tCATEGORY\tACCOUNT\tSETTLED BY")
+	for _, b := range bills {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			b.ID, b.Date.Format("2006-01-02"), b.Party, b.Amount, b.Category, b.Account, settled[b.ID])
 	}
 	return w.Flush()
 }
