@@ -40,6 +40,8 @@ func renderBooks(args []string) error {
 	basis := fs.String("basis", "cash", "accounting basis: cash or accrual")
 	since := fs.String("since", "", "on -basis accrual, book only invoices/bills dated on or after this (YYYY-MM-DD)")
 	fs.Var(&accounts, "account", "show only lines posting to an account matching this pattern; repeatable, any match keeps the line")
+	from := fs.String("from", "", "show only lines dated on or after this (YYYY-MM-DD)")
+	to := fs.String("to", "", "show only lines dated on or before this (YYYY-MM-DD)")
 	stdout := fs.Bool("stdout", false, "write the ledger to stdout instead of the store")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -57,6 +59,10 @@ func renderBooks(args []string) error {
 			return fmt.Errorf("-since %q is not YYYY-MM-DD", *since)
 		}
 	}
+	fromDay, toDay, err := periodBounds(*from, *to)
+	if err != nil {
+		return err
+	}
 
 	s, err := store.Open(".")
 	if err != nil {
@@ -72,6 +78,9 @@ func renderBooks(args []string) error {
 		if txs, entries, err = filterByAccount(accounts, txs, entries); err != nil {
 			return err
 		}
+	}
+	if !fromDay.IsZero() || !toDay.IsZero() {
+		txs, entries = filterByDate(fromDay, toDay, txs, entries)
 	}
 
 	// The summary is computed once, here, and handed to whichever renderer runs. That is the
@@ -90,7 +99,7 @@ func renderBooks(args []string) error {
 	case "ledger":
 		// A filtered ledger is a reading and goes to stdout; the artifact in the store is only
 		// ever the whole books, so a partial one can never overwrite it.
-		if *stdout || len(accounts) > 0 {
+		if *stdout || len(accounts) > 0 || !fromDay.IsZero() || !toDay.IsZero() {
 			if err := ledger.WriteAll(os.Stdout, txs, entries); err != nil {
 				return err
 			}
@@ -205,6 +214,45 @@ func filterByAccount(patterns []string, txs []model.Transaction, entries []model
 		}
 	}
 	return keptTxs, keptEntries, nil
+}
+
+// periodBounds parses -from and -to. Both ends are inclusive: -from 2026-03-01 -to 2026-03-31 is
+// exactly March, which is how a person names a month. This narrows the reading by date; it is not
+// -since, which chooses how far back the accrual basis books invoices and bills at all.
+func periodBounds(from, to string) (time.Time, time.Time, error) {
+	var fromDay, toDay time.Time
+	var err error
+	if from != "" {
+		if fromDay, err = time.Parse("2006-01-02", from); err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("-from %q is not YYYY-MM-DD", from)
+		}
+	}
+	if to != "" {
+		if toDay, err = time.Parse("2006-01-02", to); err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("-to %q is not YYYY-MM-DD", to)
+		}
+	}
+	if !fromDay.IsZero() && !toDay.IsZero() && toDay.Before(fromDay) {
+		return time.Time{}, time.Time{}, fmt.Errorf("-to %s is before -from %s", to, from)
+	}
+	return fromDay, toDay, nil
+}
+
+// filterByDate keeps the lines dated inside the period, both ends inclusive; a zero end is open.
+func filterByDate(from, to time.Time, txs []model.Transaction, entries []model.Entry) ([]model.Transaction, []model.Entry) {
+	var keptTxs []model.Transaction
+	var keptEntries []model.Entry
+	for i, tx := range txs {
+		if !from.IsZero() && tx.Date.Before(from) {
+			continue
+		}
+		if !to.IsZero() && tx.Date.After(to) {
+			continue
+		}
+		keptTxs = append(keptTxs, tx)
+		keptEntries = append(keptEntries, entries[i])
+	}
+	return keptTxs, keptEntries
 }
 
 func postsToAny(e model.Entry, res []*regexp.Regexp) bool {

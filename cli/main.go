@@ -110,7 +110,7 @@ usage:
   bk bill    list
   bk bill    aging   [-as-of <YYYY-MM-DD>]
   bk export       <connector> [-confirm]
-  bk books        [-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re> ...] [-stdout]
+  bk books        [-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re> ...] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-stdout]
   bk help         [command]
   bk docs
   bk version
@@ -215,14 +215,18 @@ var reference = []docGroup{
       deposit's fingerprint so a repeat is a no-op. Without -confirm it is a dry run that
       prints what it would send.
 `},
-		{[]string{"books"}, `  books [-format table|json|ledger] [-basis cash|accrual] [-since YYYY-MM-DD] [-account <re> ...] [-stdout]
+		{[]string{"books"}, `  books [-format table|json|ledger] [-basis cash|accrual] [-since YYYY-MM-DD] [-account <re> ...]
+        [-from YYYY-MM-DD] [-to YYYY-MM-DD] [-stdout]
       Fold the log into a table (default), machine-readable JSON, or regenerate
       .bookkeeper/books.ledger (-stdout writes the ledger to standard output instead).
       -account narrows any of the three to the lines posting to a matching account, at any
       depth, the way ledger matches account names; repeat it to name several accounts, and a
-      line posting to any of them is kept. There is no separate review command: the decision
-      queue is books -account Uncategorized, each line with the fingerprint to answer it by,
-      and -format json is the same queue for an external model, which answers back through
+      line posting to any of them is kept. -from and -to narrow by date, both ends inclusive,
+      so -from 2026-03-01 -to 2026-03-31 is exactly March and its health line is that month's
+      income statement. (-since is different: it chooses how far back the accrual basis books
+      invoices and bills at all.) There is no separate review command: the decision queue is
+      books -account Uncategorized, each line with the fingerprint to answer it by, and
+      -format json is the same queue for an external model, which answers back through
       categorize and rules set. A filtered ledger is a reading and goes to stdout; the artifact
       in the store is only ever the whole books.
       Every format ends with the same health line - income, expenses, net, and money whose kind

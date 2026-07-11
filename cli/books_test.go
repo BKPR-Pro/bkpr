@@ -78,6 +78,35 @@ func TestFilterByAccountTakesSeveralPatterns(t *testing.T) {
 	}
 }
 
+// The period is inclusive on both ends, so -from 2026-03-01 -to 2026-03-31 is exactly March, the
+// way a person names a month; a zero end leaves that side open.
+func TestFilterByDateIsInclusiveOnBothEnds(t *testing.T) {
+	txs, entries := foldBooks(t, booksLog(t)) // known on 03-01, mystery on 03-02
+	day := func(d int) time.Time { return time.Date(2026, 3, d, 0, 0, 0, 0, time.UTC) }
+
+	kept, _ := filterByDate(day(1), day(1), txs, entries)
+	if len(kept) != 1 || kept[0].ID != "known" {
+		t.Fatalf("a one-day period should keep exactly that day's line, got %v", kept)
+	}
+	kept, _ = filterByDate(day(2), time.Time{}, txs, entries)
+	if len(kept) != 1 || kept[0].ID != "mystery" {
+		t.Fatalf("an open -to should keep everything from -from on, got %v", kept)
+	}
+	kept, _ = filterByDate(time.Time{}, day(1), txs, entries)
+	if len(kept) != 1 || kept[0].ID != "known" {
+		t.Fatalf("an open -from should keep everything up to -to, got %v", kept)
+	}
+}
+
+func TestPeriodBoundsRefusesAnInvertedPeriod(t *testing.T) {
+	if _, _, err := periodBounds("2026-03-31", "2026-03-01"); err == nil {
+		t.Error("-to before -from should be refused")
+	}
+	if _, _, err := periodBounds("march", ""); err == nil {
+		t.Error("a date that is not YYYY-MM-DD should be refused")
+	}
+}
+
 func TestFilterByAccountRefusesABadPattern(t *testing.T) {
 	txs, entries := foldBooks(t, booksLog(t))
 	if _, _, err := filterByAccount([]string{"("}, txs, entries); err == nil {

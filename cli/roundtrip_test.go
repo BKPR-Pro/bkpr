@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dallasread/bookkeeper/lib/books"
 	"github.com/dallasread/bookkeeper/lib/model"
@@ -196,6 +197,20 @@ func TestRoundTripLengthyBooks(t *testing.T) {
 	}
 	if fuel != 4 {
 		t.Errorf("want the 4 monthly fuel lines to keep their raw description, found %d", fuel)
+	}
+
+	// One month sliced out of the reading folds to that month's own health line: the CSV's ten
+	// February lines plus the two visa lines, summarized as filtered.
+	feb, febEntries := filterByDate(
+		time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), txs2, entries2)
+	febSum, err := summarize(feb, febEntries)
+	if err != nil {
+		t.Fatalf("summarize february: %v", err)
+	}
+	febWant := "lines 12, uncategorized 2 | income 4100.00 CAD | expenses 444.33 CAD | net 3655.67 CAD | unknown -59.99 CAD"
+	if got := healthLine(t, febSum); got != febWant {
+		t.Fatalf("february folded to\n  %s\nwant\n  %s", got, febWant)
 	}
 
 	// And the artifact is idempotent as an input, exactly as a statement is.

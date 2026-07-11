@@ -395,6 +395,7 @@ so there is no separate review command: the decision queue is just the books, fi
 bk books                                  # a table, to read
 bk books -account Uncategorized           # only the lines the rules could not place
 bk books -account Fuel -account Water     # several accounts, one reading
+bk books -from 2026-03-01 -to 2026-03-31  # exactly March: that month's lines and health line
 bk books -format json                     # the same reading for a machine
 bk books -format ledger                   # regenerates .bookkeeper/books.ledger
 bk books -account Fuel -format ledger     # a filtered ledger, to stdout; the artifact stays whole
