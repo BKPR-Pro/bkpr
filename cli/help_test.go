@@ -11,7 +11,7 @@ import (
 func TestHelpTopicKnowsEveryCommand(t *testing.T) {
 	for _, name := range []string{
 		"init", "connectors", "rules", "import", "categorize", "void",
-		"match", "review", "export", "books", "invoice", "bill",
+		"match", "export", "books", "invoice", "bill",
 	} {
 		var buf bytes.Buffer
 		if err := helpTopic(&buf, name); err != nil {

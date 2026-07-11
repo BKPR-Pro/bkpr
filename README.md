@@ -13,7 +13,7 @@ go build -o bk ./cli      # bk is the short name used throughout
 bk init
 bk import statement.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
 bk books                  # every line and where it posted
-bk review                 # the lines the rules could not place, with their fingerprints
+bk books -account Uncategorized   # only the lines the rules could not place
 bk rules set "shell|petro" -category "Expenses:Travel:Fuel" -payee "Fuel Stop"
 bk books                  # the whole history, reclassified by the rule you just wrote
 ```
@@ -245,7 +245,7 @@ fold over an in-memory adapter.
 
 1. **Rules.** Deterministic, free, reproducible. Handles almost everything.
 2. **A model.** An external agent that drives the whole tool through its commands, the same surface
-   a person uses: import, rules, categorize, match, export, review. Within this pipeline its job is
+   a person uses: import, rules, categorize, match, export, books. Within this pipeline its job is
    the lines the rules left `Uncategorized` — it proposes postings, and code writes. bookkeeper
    never calls a model itself.
 3. **You.** Never blocking. `ledger bal Uncategorized` is the whole review surface: whatever is
@@ -329,22 +329,29 @@ bk rules set "city water"  -category "Expenses:Utilities:Water" -before "water"
 bk rules list
 ```
 
-`books` folds the log into a table, or regenerates the ledger artifact in the store:
+`books` folds the log and renders it: a table or JSON to read, or the regenerated ledger artifact.
+`-account` narrows the reading to the lines posting to a matching account, so there is no separate
+review command — the decision queue is just the books, filtered:
 
 ```sh
-bk books                 # a table, to read
-bk books -format ledger  # regenerates .bookkeeper/books.ledger
+bk books                            # a table, to read
+bk books -account Uncategorized     # only the lines the rules could not place
+bk books -account "123 Example"     # any other account question, same machinery
+bk books -format json               # the same reading for a machine
+bk books -format ledger             # regenerates .bookkeeper/books.ledger
 ```
 
 ```text
-DATE        PAYEE                AMOUNT   POSTS TO
-2026-03-01  Fuel Stop            -62.40   Expenses:Consulting:Travel:Fuel
-2026-03-02  Acme Hardware        -84.20   Expenses:Real Estate:Materials:Uncategorized
-2026-03-05  J. Smith             1600.00  Income:Real Estate:Rent:123 Example Street
-2026-03-12  UNKNOWN MERCHANT 88  -39.99   Uncategorized
+FINGERPRINT         DATE        PAYEE                AMOUNT   POSTS TO
+6d67c4670ff1e372-1  2026-03-01  Fuel Stop            -62.40   Expenses:Consulting:Travel:Fuel
+bf3292b4aac90b2e-1  2026-03-02  Acme Hardware        -84.20   Expenses:Real Estate:Materials:Uncategorized
+a106c3b1d01636de-1  2026-03-05  J. Smith             1600.00  Income:Real Estate:Rent:123 Example Street
+5f79d9a707bc433f-1  2026-03-12  UNKNOWN MERCHANT 88  -39.99   Uncategorized
 
-9 lines posted, 2 of them uncategorized
+9 lines posted, 2 of them uncategorized (bk books -account Uncategorized shows only them)
 ```
+
+The fingerprint is the handle every correction takes, which is why the table leads with it.
 
 ### Cash and accrual are one log read two ways
 
@@ -493,8 +500,9 @@ buys, and committing both files is how the change reviews.
 
 Some attributions are not a rule. A hardware receipt in your truck says Unit 1, and no pattern over
 the description could have known that. So `categorize` asserts the answer for that one line, keyed
-by its fingerprint, and it wins over whatever the rule said. `bk review` lists every waiting line
-with its fingerprint, and any unique prefix of one is enough, as with a git hash:
+by its fingerprint, and it wins over whatever the rule said. `bk books -account Uncategorized`
+lists every waiting line with its fingerprint, and any unique prefix of one is enough, as with a
+git hash:
 
 ```sh
 bk categorize 0d76f1f1 -category "Expenses:...:Unit 1" -payee "Acme" -why "receipt was Unit 1"
@@ -654,11 +662,11 @@ as metadata (`rentapp.lease`), and the export is keyed by the deposit's fingerpr
 it records nothing twice. Importing a rent roll later, as context rather than as a second copy of
 the money, is a natural next step and is not precluded.
 
-The surface an external model drives is in place: `review` prints the open decisions (the
-`Uncategorized` lines with their fingerprints) as a table for a person and as JSON with
-`-format json` for a model, and `categorize`, `rules set`, and `void` take an `-actor`, so a model
-proposes through the same path a person uses and the log records who answered. bookkeeper never
-calls a model itself.
+The surface an external model drives is in place, and it is not a separate command: the decision
+queue is `books -account Uncategorized` (the open lines with their fingerprints), `-format json`
+is the same reading for a machine, and `categorize`, `rules set`, and `void` take an `-actor`, so
+a model proposes through the same path a person uses and the log records who answered. bookkeeper
+never calls a model itself.
 
 Next: the cost basis follow-ons. The policy is ACB and pluggable at the seam; making it a logged,
 per-account setting (so a US account can run FIFO in the same book) and reading the share quantity
