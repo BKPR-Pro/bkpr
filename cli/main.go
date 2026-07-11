@@ -15,8 +15,10 @@ import (
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/dallasread/bookkeeper/lib/adapters/ledger"
+	"github.com/dallasread/bookkeeper/lib/adapters/rentapp"
 	"github.com/dallasread/bookkeeper/lib/adapters/source"
 	"github.com/dallasread/bookkeeper/lib/books"
 	"github.com/dallasread/bookkeeper/lib/eventlog"
@@ -37,6 +39,8 @@ func main() {
 		err = initStore(os.Args[2:])
 	case "import":
 		err = importStatement(os.Args[2:])
+	case "sources":
+		err = sourceSet(os.Args[2:])
 	case "rules":
 		err = ruleSet(os.Args[2:])
 	case "categorize":
@@ -73,8 +77,12 @@ usage:
   bookkeeper rules   rm   -match <re>
   bookkeeper rules   mv   -match <re> [-before <re>]
   bookkeeper rules   list
+  bookkeeper sources add  <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
+  bookkeeper sources rm   <name>
+  bookkeeper sources list
   bookkeeper import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
   bookkeeper import       <file.ledger>
+  bookkeeper import       <source-name>
   bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>]
   bookkeeper discard      -tx <fingerprint> [-why <reason>]
   bookkeeper books        [-format table|ledger] [-stdout]
@@ -94,6 +102,14 @@ SETUP
   init [dir]
       Create a set of books in dir (default: here).
 
+  sources add <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
+      Register a live source you pull from by name, unlike a file which is imported once.
+      The bearer token is never stored: -token-env names the environment variable that
+      holds it, read at import time. -account is the ledger account the pulled transactions
+      land in.
+  sources rm <name>               Forget a source.
+  sources list                    Show the registered sources.
+
 RULES  (deterministic categorization; first matching rule wins per field)
   rules add -match <re> -category <account> [-payee <name>] [-before <re>]
       Add a rule. Order decides which of two matching rules wins; a new rule lands last
@@ -110,10 +126,11 @@ BOOKKEEPING
   import <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>)
                     [-date <col>] [-description <col>] [-date-format <layout>]
   import <file.ledger>
-      Import transactions from a file, a one-time input. A CSV does not name its own
-      account, currency, or columns, so you supply them inline. A ledger file names all of
-      that itself, so it takes no options. (A live source you pull from repeatedly, like the
-      rent app, is registered instead and imported by name; that is coming.)
+  import <source-name>
+      Import transactions. A file is a one-time input: a CSV does not name its own account,
+      currency, or columns, so you supply them inline; a ledger file names all of that
+      itself. A registered source (see sources add) is pulled by name instead. The argument
+      is matched against registered sources first, then treated as a file.
   categorize -tx <fingerprint> (-category <account> | -post <account>=<amount> ...)
              [-payee <name>] [-why <reason>]
       Assert the postings for one line, overriding the rule for that line only. Use -post
@@ -160,25 +177,84 @@ func firstArg(args []string, desc string) (string, []string, error) {
 	return args[0], args[1:], nil
 }
 
-// importStatement reads transactions from a file into the log. A file is a one-time input, so its
-// details are supplied inline rather than registered: the format is the file's business, and a CSV
-// (which does not name its own account, currency, or columns) takes them as flags, while a ledger
-// file names all of that itself.
+// importStatement reads transactions into the log. Its argument is either the name of a registered
+// live source (pulled by name) or a file (a one-time input whose details are supplied inline). A
+// source name is tried first, so `import rent` reaches the connector while `import march.csv`
+// falls through to a file.
 func importStatement(args []string) error {
-	path, rest, err := firstArg(args, "the file to import")
+	arg, rest, err := firstArg(args, "a source name or a file to import")
 	if err != nil {
 		return err
 	}
 
-	switch ext := strings.ToLower(filepath.Ext(path)); ext {
+	s, err := store.Open(".")
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	if src, ok, err := books.SourceByName(s.Log, arg); err != nil {
+		return err
+	} else if ok {
+		return importSource(s.Log, src)
+	}
+
+	switch ext := strings.ToLower(filepath.Ext(arg)); ext {
 	case ".csv":
-		return importCSV(path, rest)
+		return importCSV(s.Log, arg, rest)
 	default:
-		return fmt.Errorf("import: don't know how to read %q; .csv is supported, ledger files are coming", path)
+		return fmt.Errorf("import: %q is not a registered source, and I do not know how to read it as a file; .csv is supported, ledger files are coming", arg)
 	}
 }
 
-func importCSV(path string, args []string) error {
+// importSource pulls transactions from a live connector and records them. The connector's own
+// transaction id is the fingerprint, so re-importing is a clean no-op, and its bearer token is
+// read from the environment, never from the log.
+func importSource(log *eventlog.Log, src books.Source) error {
+	if src.Kind != "rentapp" {
+		return fmt.Errorf("import: source %q has an unknown kind %q", src.Name, src.Kind)
+	}
+	token := os.Getenv(src.TokenEnv)
+	if token == "" {
+		return fmt.Errorf("import: %s is empty; set the %s environment variable to the rent app's token", src.TokenEnv, src.TokenEnv)
+	}
+
+	pulled, err := rentapp.New(src.URL, token).Transactions("")
+	if err != nil {
+		return err
+	}
+
+	txs := make([]model.Transaction, 0, len(pulled))
+	for _, p := range pulled {
+		if p.Archived {
+			continue
+		}
+		date, err := time.Parse("2006-01-02", p.PaidAt)
+		if err != nil {
+			return fmt.Errorf("import: transaction %s has an unreadable paid_at %q: %w", p.ID, p.PaidAt, err)
+		}
+		txs = append(txs, model.Transaction{
+			ID:          src.Name + ":" + p.ID, // the connector's id, namespaced to the source
+			Account:     src.Account,
+			Date:        date,
+			Amount:      model.Amount{Units: p.AmountCents, Scale: 2, Commodity: src.Currency},
+			Description: p.Description,
+			Raw: map[string]string{
+				"lease_id": p.LeaseID, "kind": p.Kind, "method": p.Method, "rentapp_id": p.ID,
+			},
+		})
+	}
+
+	result, err := books.Import(log, "source:"+src.Name, txs)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%d transactions pulled from %s: %d imported, %d already in the log\n",
+		len(txs), src.Name, result.Imported, result.Skipped)
+	return nil
+}
+
+func importCSV(log *eventlog.Log, path string, args []string) error {
 	fs := flag.NewFlagSet("import (csv)", flag.ExitOnError)
 	var m source.CSV
 	fs.StringVar(&m.Account, "account", "", "the ledger account this statement belongs to")
@@ -212,19 +288,99 @@ func importCSV(path string, args []string) error {
 		return err
 	}
 
-	s, err := store.Open(".")
-	if err != nil {
-		return err
-	}
-	defer s.Close()
-
-	result, err := books.Import(s.Log, "statement:"+filepath.Base(path), txs)
+	result, err := books.Import(log, "statement:"+filepath.Base(path), txs)
 	if err != nil {
 		return err
 	}
 
 	fmt.Printf("%d lines read: %d imported, %d already in the log\n", len(txs), result.Imported, result.Skipped)
 	return nil
+}
+
+// sourceSet dispatches `sources add|rm|list`.
+func sourceSet(args []string) error {
+	if len(args) == 0 {
+		usage()
+		return fmt.Errorf("sources needs add, rm, or list")
+	}
+	switch args[0] {
+	case "add":
+		return sourceAdd(args[1:])
+	case "rm":
+		return sourceRemove(args[1:])
+	case "list":
+		return sourceList(args[1:])
+	default:
+		usage()
+		return fmt.Errorf("unknown sources subcommand %q", args[0])
+	}
+}
+
+func sourceAdd(args []string) error {
+	name, rest, err := firstArg(args, "a name for the source, e.g. rent")
+	if err != nil {
+		return err
+	}
+	fs := flag.NewFlagSet("sources add", flag.ExitOnError)
+	var s books.Source
+	fs.StringVar(&s.Kind, "kind", "rentapp", "which connector this source uses")
+	fs.StringVar(&s.URL, "url", "", "the connector's base URL")
+	fs.StringVar(&s.TokenEnv, "token-env", "", "the environment variable holding its bearer token")
+	fs.StringVar(&s.Account, "account", "", "the ledger account its transactions land in")
+	fs.StringVar(&s.Currency, "currency", "CAD", "the currency of its transactions")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	s.Name = name
+
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	if err := books.AddSource(log, "human", s); err != nil {
+		return err
+	}
+	fmt.Printf("source %s\n", s.Name)
+	return nil
+}
+
+func sourceRemove(args []string) error {
+	name, _, err := firstArg(args, "the source to forget")
+	if err != nil {
+		return err
+	}
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	if err := books.RemoveSource(log, "human", name); err != nil {
+		return err
+	}
+	fmt.Printf("removed source %s\n", name)
+	return nil
+}
+
+func sourceList(args []string) error {
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	set, err := books.Sources(log)
+	if err != nil {
+		return err
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tKIND\tURL\tACCOUNT\tCURRENCY\tTOKEN-ENV")
+	for _, s := range set {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, s.Kind, s.URL, s.Account, s.Currency, s.TokenEnv)
+	}
+	return w.Flush()
 }
 
 // ruleSet dispatches `rules add|set|rm|mv|list`.

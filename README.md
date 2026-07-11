@@ -107,6 +107,7 @@ Events are immutable, past-tense facts.
 | `rule.changed` | a rule's answer is wrong |
 | `rule.removed` | a rule should stop firing |
 | `rule.moved` | two rules fire in the wrong order |
+| `source.added` / `source.removed` | a live connector to pull from, registered by name |
 
 An event's name says **what happened**. Its `actor` says **who**. Reading `actor` should never be
 necessary to know what kind of fact you are looking at, which is why there is no
@@ -153,9 +154,13 @@ history. It does not, because the fingerprint is built from the normalized field
 would move every fingerprint and silently orphan every correction keyed to one.
 
 So a bad import is not fixed by re-parsing. You re-import with the right flags (the corrected line
-lands under a new fingerprint) and `discard` the garbage one. A *live source* you pull from
-repeatedly (the rent app) is different: it is a standing connector, registered and imported by name,
-and that is coming.
+lands under a new fingerprint) and `discard` the garbage one.
+
+A **live source** you pull from repeatedly is the other kind of input. It is a standing connector,
+registered once (`sources add`) and imported by name (`import rent`). It is logged, unlike a file's
+inline flags, because it persists. Its bearer token is never stored: the registration keeps the
+name of the environment variable that holds it, read at import time, so the log stays committable.
+The connector's own transaction id is used as the fingerprint, so re-importing is a clean no-op.
 
 ### Nothing has to be acknowledged
 
@@ -263,6 +268,18 @@ bk import statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -am
 
 # a debit/credit pair instead of one signed column:
 bk import visa.csv -account "Liabilities:Card:Visa" -currency CAD -debit Charge -credit Payment -date Posted
+```
+
+A **live source** is registered once and then imported by name. The rent app is the first: it
+records rent, deposits, and fees, and `import rent` pulls them (idempotently, by their own ids).
+The token is kept in an environment variable, never in the books.
+
+```sh
+export BK_RENT_TOKEN=...   # the rent app's bearer token
+bk sources add rent -kind rentapp -url https://rent.stcroixproperties.ca \
+  -token-env BK_RENT_TOKEN -account "Assets:Bank:Chequing" -currency CAD
+bk import rent
+# 12 transactions pulled from rent: 12 imported, 0 already in the log
 ```
 
 `rules add` records a rule; each is one event. Order decides which of two matching rules wins, so a
@@ -450,15 +467,19 @@ Internal transfers seen in both accounts' statements are recognised and booked o
 deterministic fold over the lines and their categorization, so the money is not double-counted. A
 bad import is undone with `discard`, which supersedes the imported line without deleting it.
 
-The only destination is the ledger file. Bookkeeper is a standalone tool: statements in, a
-committed double-entry ledger out. Driving other systems from it (for example recording rent
-payments back to a property app) is deliberately out of scope; the artifact is the product.
+Inputs are files (CSV today, ledger coming) imported once inline, and live sources registered and
+pulled by name. The rent app is the first live source: `import rent` pulls its recorded
+transactions, idempotently, with its token kept in the environment rather than the books. The
+ledger file is still the only *output*; the rentapp connector can also push payments back, but
+that direction is not yet wired to a command.
 
-Next, in order: the model tier (a model proposes categorizations for the `Uncategorized` lines, so
-you are not writing a rule for every merchant), then the manual transfer override
-(`transaction.matched`, to correct a pairing the fold missed) and the CSV views
-(`bk transactions --csv`, for the tabular parts of the data). Prices and cost basis (so a brokerage
-account can hold shares against cash) are a later slice; the `Amount` type is ready for them.
+One caveat with pulling rent: the same rent shows up both here and as a bank deposit, so importing
+both double-counts it until matching (like the transfer fold) recognises them as one movement.
+
+Next, in order: matching pulled rent to the bank deposit (extending the transfer fold), the model
+tier (a model proposes categorizations for the `Uncategorized` lines), then the ledger-import
+parser and the manual transfer override (`transaction.matched`). Prices and cost basis (so a
+brokerage account can hold shares against cash) are a later slice; the `Amount` type is ready.
 
 ## Layout
 
@@ -472,7 +493,7 @@ lib/eventlog/         the append-only log and its storage
 lib/store/            locating and opening a .bookkeeper book of record
 lib/adapters/source/  reads statements from the outside world (CSV today)
 lib/adapters/ledger/  renders the books as a plain-text double-entry artifact
-lib/adapters/rentapp/ pulls the rent roll and pushes recorded payments to the rent app
+lib/adapters/rentapp/ the rent app connector: pulls recorded transactions, pushes payments
 cli/                  the command-line wrapper (the driving adapter)
 ```
 
