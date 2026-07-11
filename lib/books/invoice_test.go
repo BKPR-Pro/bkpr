@@ -8,17 +8,17 @@ import (
 	"github.com/dallasread/bookkeeper/lib/model"
 )
 
-// invoice recognizes a 1600.00 CAD invoice to a party on the given day, defaulting the parked
-// account to Assets:Receivable.
-func invoice(t *testing.T, log *eventlog.Log, party string, day int, cents int64, category string) books.Accrual {
+// raise records a 1600.00 CAD invoice to a party on the given day, defaulting the parked account to
+// Assets:Receivable.
+func raise(t *testing.T, log *eventlog.Log, party string, day int, cents int64, category string) books.Invoice {
 	t.Helper()
-	a, _, err := books.Recognize(log, "human", "", books.Accrual{
-		Kind: books.KindInvoice, Date: on(day), Party: party, Amount: cad(cents), Category: category,
+	inv, _, err := books.Raise(log, "human", "", books.Invoice{
+		Date: on(day), Party: party, Amount: cad(cents), Category: category,
 	})
 	if err != nil {
-		t.Fatalf("Recognize invoice: %v", err)
+		t.Fatalf("Raise: %v", err)
 	}
-	return a
+	return inv
 }
 
 // booksOn folds the log through the given basis.
@@ -46,10 +46,10 @@ func balances(txs []model.Transaction, entries []model.Entry) map[string]int64 {
 }
 
 // On the cash basis, an invoice is invisible: nothing moved yet, so there is nothing to book. This
-// is the basis the tool was born on, and recognizing an accrual must not disturb it.
+// is the basis the tool was born on, and raising an invoice must not disturb it.
 func TestAnInvoiceIsInvisibleOnTheCashBasis(t *testing.T) {
 	log := newLog()
-	invoice(t, log, "J. Smith", 1, 160000, "Income:Consulting")
+	raise(t, log, "J. Smith", 1, 160000, "Income:Consulting")
 
 	txs, _ := booksOn(t, log, books.CashBasis)
 	if len(txs) != 0 {
@@ -58,10 +58,10 @@ func TestAnInvoiceIsInvisibleOnTheCashBasis(t *testing.T) {
 }
 
 // On the accrual basis the same invoice books as its own line: it debits the receivable and credits
-// income, dated when the value was earned rather than when it will be paid.
+// income, dated when the revenue was earned rather than when it will be paid.
 func TestAnInvoiceBooksOnTheAccrualBasis(t *testing.T) {
 	log := newLog()
-	invoice(t, log, "J. Smith", 1, 160000, "Income:Consulting")
+	raise(t, log, "J. Smith", 1, 160000, "Income:Consulting")
 
 	txs, entries := booksOn(t, log, books.AccrualBasis)
 	if len(txs) != 1 {
@@ -80,9 +80,9 @@ func TestAnInvoiceBooksOnTheAccrualBasis(t *testing.T) {
 // to zero once the cash arrives.
 func TestSettlementClearsTheReceivableWithoutDoubleBookingIncome(t *testing.T) {
 	log := newLog()
-	inv := invoice(t, log, "J. Smith", 1, 160000, "Income:Consulting")
-	// The rent/deposit lands in the bank and the rules would call it income.
-	loaded(t, log, rule("j. smith", "Income:Consulting"))
+	inv := raise(t, log, "J. Smith", 1, 160000, "Income:Consulting")
+	// The deposit lands in the bank and the rules would call it income.
+	loaded(t, log, rule("j smith", "Income:Consulting"))
 	importOne(t, log, line("pay", 20, 160000, "E-TRANSFER FROM J SMITH"))
 	if err := books.Settle(log, "human", inv.ID, "pay"); err != nil {
 		t.Fatalf("Settle: %v", err)
@@ -104,31 +104,32 @@ func TestSettlementClearsTheReceivableWithoutDoubleBookingIncome(t *testing.T) {
 	}
 }
 
-// A bill is the mirror of an invoice: on the accrual basis it debits an expense and credits a
-// payable, so the expense is recognized when incurred rather than when the cash leaves.
-func TestABillBooksAPayableOnTheAccrualBasis(t *testing.T) {
+// A custom parked account rides through: an invoice may name where it holds until paid, so several
+// customers can carry their own receivable sub-accounts.
+func TestAnInvoiceMayNameItsReceivableAccount(t *testing.T) {
 	log := newLog()
-	if _, _, err := books.Recognize(log, "human", "", books.Accrual{
-		Kind: books.KindBill, Date: on(1), Party: "Power Co", Amount: cad(50000), Category: "Expenses:Utilities",
-	}); err != nil {
-		t.Fatalf("Recognize bill: %v", err)
+	inv, _, err := books.Raise(log, "human", "", books.Invoice{
+		Date: on(1), Party: "J. Smith", Amount: cad(160000),
+		Category: "Income:Consulting", Account: "Assets:Receivable:J. Smith",
+	})
+	if err != nil {
+		t.Fatalf("Raise: %v", err)
+	}
+	if inv.Account != "Assets:Receivable:J. Smith" {
+		t.Fatalf("account = %q, want the one named", inv.Account)
 	}
 
 	txs, entries := booksOn(t, log, books.AccrualBasis)
-	bal := balances(txs, entries)
-	if bal["Expenses:Utilities"] != 50000 {
-		t.Errorf("expense = %d, want 50000 debited", bal["Expenses:Utilities"])
-	}
-	if bal["Liabilities:Payable"] != -50000 {
-		t.Errorf("payable = %d, want -50000 credited", bal["Liabilities:Payable"])
+	if got := balances(txs, entries)["Assets:Receivable:J. Smith"]; got != 160000 {
+		t.Errorf("named receivable = %d, want 160000", got)
 	}
 }
 
-// Voiding an accrual drops it from the books, the way discard drops a bad import. The recognized
-// fact stays in the log; the fold honours the later void.
-func TestVoidingAnAccrualDropsIt(t *testing.T) {
+// Voiding an invoice drops it from the books, the way discard drops a bad import. The raised fact
+// stays in the log; the fold honours the later void.
+func TestVoidingAnInvoiceDropsIt(t *testing.T) {
 	log := newLog()
-	inv := invoice(t, log, "J. Smith", 1, 160000, "Income:Consulting")
+	inv := raise(t, log, "J. Smith", 1, 160000, "Income:Consulting")
 	if err := books.Void(log, "human", "the client cancelled", inv.ID); err != nil {
 		t.Fatalf("Void: %v", err)
 	}
@@ -138,16 +139,16 @@ func TestVoidingAnAccrualDropsIt(t *testing.T) {
 	}
 }
 
-// Recognizing the same invoice twice records one fact, the way re-importing a statement is a no-op.
-func TestRecognizingTheSameInvoiceTwiceIsANoOp(t *testing.T) {
+// Raising the same invoice twice records one fact, the way re-importing a statement is a no-op.
+func TestRaisingTheSameInvoiceTwiceIsANoOp(t *testing.T) {
 	log := newLog()
-	first := invoice(t, log, "J. Smith", 1, 160000, "Income:Consulting")
+	first := raise(t, log, "J. Smith", 1, 160000, "Income:Consulting")
 
-	again, added, err := books.Recognize(log, "human", "", books.Accrual{
-		Kind: books.KindInvoice, Date: on(1), Party: "J. Smith", Amount: cad(160000), Category: "Income:Consulting",
+	again, added, err := books.Raise(log, "human", "", books.Invoice{
+		Date: on(1), Party: "J. Smith", Amount: cad(160000), Category: "Income:Consulting",
 	})
 	if err != nil {
-		t.Fatalf("Recognize: %v", err)
+		t.Fatalf("Raise: %v", err)
 	}
 	if added {
 		t.Error("the second identical invoice was recorded again")
@@ -155,15 +156,15 @@ func TestRecognizingTheSameInvoiceTwiceIsANoOp(t *testing.T) {
 	if again.ID != first.ID {
 		t.Errorf("fingerprints differ: %q vs %q", again.ID, first.ID)
 	}
-	if accs, _ := books.Accruals(log); len(accs) != 1 {
-		t.Fatalf("got %d accruals, want 1", len(accs))
+	if invs, _ := books.Invoices(log); len(invs) != 1 {
+		t.Fatalf("got %d invoices, want 1", len(invs))
 	}
 }
 
-// The seam property behind switching midstream: with no accruals recognized, the accrual basis and
-// the cash basis are identical. Accrual only ever adds the value it was told about, so history you
-// never invoiced reads the same either way.
-func TestWithNoAccrualsBothBasesAgree(t *testing.T) {
+// The seam property behind switching midstream: with no invoices raised, the accrual basis and the
+// cash basis are identical. Accrual only ever adds the value it was told about, so history you never
+// invoiced reads the same either way.
+func TestWithNoInvoicesBothBasesAgree(t *testing.T) {
 	log := newLog()
 	loaded(t, log, rule("acme", "Expenses:Repairs"))
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE"))
@@ -172,18 +173,37 @@ func TestWithNoAccrualsBothBasesAgree(t *testing.T) {
 	cashTxs, _ := booksOn(t, log, books.CashBasis)
 	accTxs, _ := booksOn(t, log, books.AccrualBasis)
 	if len(cashTxs) != len(accTxs) {
-		t.Fatalf("cash has %d lines, accrual has %d; they should agree with no accruals", len(cashTxs), len(accTxs))
+		t.Fatalf("cash has %d lines, accrual has %d; they should agree with no invoices", len(cashTxs), len(accTxs))
 	}
 }
 
-// Settling or voiding a fingerprint that was never recognized is refused rather than recorded
-// against nothing, the way categorizing an unimported line is.
-func TestSettlingAnUnknownAccrualIsRefused(t *testing.T) {
+// Reopening a settled invoice unlinks it, so on the accrual basis the receivable no longer clears
+// against that line.
+func TestReopeningUnlinksTheSettlement(t *testing.T) {
+	log := newLog()
+	inv := raise(t, log, "J. Smith", 1, 160000, "Income:Consulting")
+	loaded(t, log, rule("j smith", "Income:Consulting"))
+	importOne(t, log, line("pay", 20, 160000, "E-TRANSFER FROM J SMITH"))
+	if err := books.Settle(log, "human", inv.ID, "pay"); err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	if err := books.Settle(log, "human", inv.ID, ""); err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+
+	if settled, _ := books.Settlements(log); len(settled) != 0 {
+		t.Errorf("got %d settlements after reopening, want 0", len(settled))
+	}
+}
+
+// Settling or voiding a fingerprint that was never raised is refused rather than recorded against
+// nothing, the way categorizing an unimported line is.
+func TestSettlingAnUnknownInvoiceIsRefused(t *testing.T) {
 	log := newLog()
 	if err := books.Settle(log, "human", "nope", ""); err == nil {
-		t.Fatal("settled an accrual that was never recognized")
+		t.Fatal("settled an invoice that was never raised")
 	}
 	if err := books.Void(log, "human", "", "nope"); err == nil {
-		t.Fatal("voided an accrual that was never recognized")
+		t.Fatal("voided an invoice that was never raised")
 	}
 }

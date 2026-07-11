@@ -48,14 +48,8 @@ func main() {
 		err = discard(os.Args[2:])
 	case "match":
 		err = match(os.Args[2:])
-	case "accrue":
-		err = accrue(os.Args[2:])
-	case "settle":
-		err = settle(os.Args[2:])
-	case "void":
-		err = voidAccrual(os.Args[2:])
-	case "accruals":
-		err = accrualList(os.Args[2:])
+	case "invoice":
+		err = invoiceCmd(os.Args[2:])
 	case "review":
 		err = review(os.Args[2:])
 	case "export":
@@ -97,10 +91,10 @@ usage:
   bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
   bookkeeper discard      -tx <fingerprint> [-why <reason>] [-actor <name>]
   bookkeeper match        -tx <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
-  bookkeeper accrue       (invoice|bill) -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
-  bookkeeper settle       -accrual <id> (-tx <fingerprint> | -reopen) [-actor <name>]
-  bookkeeper void         -accrual <id> [-why <reason>] [-actor <name>]
-  bookkeeper accruals
+  bookkeeper invoice raise   -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
+  bookkeeper invoice settle  -id <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
+  bookkeeper invoice void    -id <fingerprint> [-why <reason>] [-actor <name>]
+  bookkeeper invoice list
   bookkeeper review
   bookkeeper export       <connector> [-confirm]
   bookkeeper books        [-format table|ledger] [-basis cash|accrual] [-stdout]
@@ -181,32 +175,27 @@ BOOKKEEPING
   books [-format table|ledger] [-basis cash|accrual] [-stdout]
       Fold the log into a table (default), or regenerate .bookkeeper/books.ledger. -stdout
       writes the ledger to standard output instead of the store. -basis chooses the lens:
-      cash (the default) books only money that moved; accrual also books every open invoice
-      and bill, and lets the deposit that pays one clear its receivable. The basis is a
-      read-time choice over one log, so the same books read either way and switch with no
-      rewrite.
+      cash (the default) books only money that moved; accrual also books every open invoice,
+      and lets the deposit that pays one clear its receivable. The basis is a read-time choice
+      over one log, so the same books read either way and switch with no rewrite.
 
-ACCRUAL  (value recognized before its cash; only shown on -basis accrual)
-  accrue invoice -party <name> -amount <amt> -category <Income:...> [-account <a>] [-date <d>] [-currency <c>]
-  accrue bill    -party <name> -amount <amt> -category <Expenses:...> [-account <a>] [-date <d>] [-currency <c>]
-      Recognize an invoice (money owed to you) or a bill (money you owe), before the cash
-      moves. An invoice debits a receivable and credits income; a bill debits an expense and
-      credits a payable. -account names where it parks, defaulting to Assets:Receivable for an
-      invoice and Liabilities:Payable for a bill. -date is when the value was earned or
-      incurred (default today), not when it will be paid. The amount is a positive magnitude;
-      the kind decides the signs. Recognizing the same accrual twice is a no-op, keyed by a
-      fingerprint of its content, exactly as re-importing a statement is.
-  settle -accrual <id> (-tx <fingerprint> | -reopen)
-      Record that a bank line paid an accrual, so on the accrual basis the cash clears the
-      parked receivable or payable instead of booking the income or expense a second time
-      (that was booked when the accrual was recognized). A deposit's memo does not reliably
-      name which invoice it clears, so this pairing is recorded rather than guessed. -reopen
-      unlinks it; a later settle supersedes.
-  void -accrual <id> [-why <reason>]
-      Drop an accrual that should not have been raised. Like discard, the recognized fact
-      stays in the log; a later fact supersedes it.
-  accruals
-      List the open accruals with their fingerprints, kind, party, amount, category, parked
+INVOICE  (revenue owed to you before its cash; only shown on -basis accrual)
+  invoice raise -party <name> -amount <amt> -category <Income:...> [-account <a>] [-date <d>] [-currency <c>]
+      Raise an invoice: revenue earned and billed before the cash moves. It debits a
+      receivable and credits income. -account names where it parks, defaulting to
+      Assets:Receivable. -date is when the revenue was earned (default today), not when it
+      will be paid. The amount is a positive magnitude. Raising the same invoice twice is a
+      no-op, keyed by a fingerprint of its content, exactly as re-importing a statement is.
+  invoice settle -id <fingerprint> (-tx <fingerprint> | -reopen)
+      Record that a bank line paid an invoice, so on the accrual basis the cash clears the
+      receivable instead of booking the income a second time (that was booked when the invoice
+      was raised). A deposit's memo does not reliably name which invoice it clears, so this
+      pairing is recorded rather than guessed. -reopen unlinks it; a later settle supersedes.
+  invoice void -id <fingerprint> [-why <reason>]
+      Drop an invoice that should not have been raised. Like discard, the raised fact stays in
+      the log; a later fact supersedes it.
+  invoice list
+      List the open invoices with their fingerprints, date, party, amount, category, parked
       account, and the line that settled each, if any.
 
 Fingerprints come from the log; find an uncategorized line's fingerprint there to
@@ -803,28 +792,41 @@ func match(args []string) error {
 	return nil
 }
 
-// accrue recognizes an invoice or a bill: value earned or incurred before its cash moves. The kind
-// is the first argument, so "accrue invoice" and "accrue bill" read as the two things a person
-// actually does, and the signs follow from it rather than being spelled out.
-func accrue(args []string) error {
-	kind, rest, err := firstArg(args, "invoice or bill")
-	if err != nil {
-		return err
+// invoiceCmd dispatches `invoice raise|settle|void|list`. An invoice is a first-class thing you do,
+// so it is its own namespace, the way rules and connectors are, rather than a subtype of a more
+// abstract verb.
+func invoiceCmd(args []string) error {
+	if len(args) == 0 {
+		usage()
+		return fmt.Errorf("invoice needs raise, settle, void, or list")
 	}
-	if kind != books.KindInvoice && kind != books.KindBill {
-		return fmt.Errorf("accrue takes %q or %q, not %q", books.KindInvoice, books.KindBill, kind)
+	switch args[0] {
+	case "raise":
+		return invoiceRaise(args[1:])
+	case "settle":
+		return invoiceSettle(args[1:])
+	case "void":
+		return invoiceVoid(args[1:])
+	case "list":
+		return invoiceList(args[1:])
+	default:
+		usage()
+		return fmt.Errorf("unknown invoice subcommand %q", args[0])
 	}
+}
 
-	fs := flag.NewFlagSet("accrue", flag.ExitOnError)
-	party := fs.String("party", "", "the customer billed, or the vendor billing you")
-	amount := fs.String("amount", "", "the magnitude recognized, e.g. 1600.00")
+// invoiceRaise records an invoice: revenue earned and billed before its cash moves.
+func invoiceRaise(args []string) error {
+	fs := flag.NewFlagSet("invoice raise", flag.ExitOnError)
+	party := fs.String("party", "", "the customer billed")
+	amount := fs.String("amount", "", "the magnitude owed, e.g. 1600.00")
 	currency := fs.String("currency", "CAD", "the currency of the amount")
-	category := fs.String("category", "", "the Income (invoice) or Expenses (bill) account the value is recognized in")
-	account := fs.String("account", "", "where it parks; defaults to Assets:Receivable or Liabilities:Payable")
-	date := fs.String("date", "", "when the value was earned or incurred (YYYY-MM-DD); defaults to today")
-	why := fs.String("why", "", "why this accrual was raised; recorded with it")
-	actor := fs.String("actor", "human", "who is recognizing this; the log records who decided")
-	if err := fs.Parse(rest); err != nil {
+	category := fs.String("category", "", "the Income account the revenue is recognized in")
+	account := fs.String("account", "", "where it parks until paid; defaults to Assets:Receivable")
+	date := fs.String("date", "", "when the revenue was earned (YYYY-MM-DD); defaults to today")
+	why := fs.String("why", "", "why this invoice was raised; recorded with it")
+	actor := fs.String("actor", "human", "who is raising it; the log records who decided")
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	switch {
@@ -853,33 +855,34 @@ func accrue(args []string) error {
 	}
 	defer closeLog()
 
-	a, added, err := books.Recognize(log, *actor, *why, books.Accrual{
-		Kind: kind, Date: when, Party: *party, Amount: amt, Category: *category, Account: *account,
+	inv, added, err := books.Raise(log, *actor, *why, books.Invoice{
+		Date: when, Party: *party, Amount: amt, Category: *category, Account: *account,
 	})
 	if err != nil {
 		return err
 	}
 	if added {
-		fmt.Printf("%s %s\n", kind, a.ID)
+		fmt.Printf("invoice %s\n", inv.ID)
 	} else {
-		fmt.Printf("%s %s already recorded\n", kind, a.ID)
+		fmt.Printf("invoice %s already recorded\n", inv.ID)
 	}
 	return nil
 }
 
-// settle links an accrual to the bank line that paid it, or reopens it. The pairing is recorded
-// rather than guessed, because a deposit's memo does not reliably name which invoice it clears.
-func settle(args []string) error {
-	fs := flag.NewFlagSet("settle", flag.ExitOnError)
-	accrualID := fs.String("accrual", "", "the accrual fingerprint to settle")
+// invoiceSettle links an invoice to the bank line that paid it, or reopens it. The pairing is
+// recorded rather than guessed, because a deposit's memo does not reliably name which invoice it
+// clears.
+func invoiceSettle(args []string) error {
+	fs := flag.NewFlagSet("invoice settle", flag.ExitOnError)
+	id := fs.String("id", "", "the invoice fingerprint to settle")
 	txID := fs.String("tx", "", "the bank line that paid it")
-	reopen := fs.Bool("reopen", false, "unlink the accrual from its paying line")
+	reopen := fs.Bool("reopen", false, "unlink the invoice from its paying line")
 	actor := fs.String("actor", "human", "who is settling; the log records who decided")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *accrualID == "" {
-		return fmt.Errorf("-accrual is required")
+	if *id == "" {
+		return fmt.Errorf("-id is required")
 	}
 	if *reopen == (*txID != "") {
 		return fmt.Errorf("give -tx <fingerprint> to settle, or -reopen to unlink, not both or neither")
@@ -891,28 +894,28 @@ func settle(args []string) error {
 	}
 	defer closeLog()
 
-	if err := books.Settle(log, *actor, *accrualID, *txID); err != nil {
+	if err := books.Settle(log, *actor, *id, *txID); err != nil {
 		return err
 	}
 	if *reopen {
-		fmt.Printf("reopened %s\n", *accrualID)
+		fmt.Printf("reopened %s\n", *id)
 	} else {
-		fmt.Printf("settled %s with %s\n", *accrualID, *txID)
+		fmt.Printf("settled %s with %s\n", *id, *txID)
 	}
 	return nil
 }
 
-// voidAccrual drops an accrual that should not have been raised.
-func voidAccrual(args []string) error {
-	fs := flag.NewFlagSet("void", flag.ExitOnError)
-	accrualID := fs.String("accrual", "", "the accrual fingerprint to void")
+// invoiceVoid drops an invoice that should not have been raised.
+func invoiceVoid(args []string) error {
+	fs := flag.NewFlagSet("invoice void", flag.ExitOnError)
+	id := fs.String("id", "", "the invoice fingerprint to void")
 	why := fs.String("why", "", "why it is voided; recorded with the void")
 	actor := fs.String("actor", "human", "who is voiding; the log records who decided")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *accrualID == "" {
-		return fmt.Errorf("-accrual is required")
+	if *id == "" {
+		return fmt.Errorf("-id is required")
 	}
 
 	log, closeLog, err := open()
@@ -921,22 +924,22 @@ func voidAccrual(args []string) error {
 	}
 	defer closeLog()
 
-	if err := books.Void(log, *actor, *why, *accrualID); err != nil {
+	if err := books.Void(log, *actor, *why, *id); err != nil {
 		return err
 	}
-	fmt.Printf("voided %s\n", *accrualID)
+	fmt.Printf("voided %s\n", *id)
 	return nil
 }
 
-// accrualList prints the open accruals and the line that settled each, if any.
-func accrualList(args []string) error {
+// invoiceList prints the open invoices and the line that settled each, if any.
+func invoiceList(args []string) error {
 	log, closeLog, err := open()
 	if err != nil {
 		return err
 	}
 	defer closeLog()
 
-	accs, err := books.Accruals(log)
+	invs, err := books.Invoices(log)
 	if err != nil {
 		return err
 	}
@@ -946,10 +949,10 @@ func accrualList(args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tDATE\tKIND\tPARTY\tAMOUNT\tCATEGORY\tACCOUNT\tSETTLED BY")
-	for _, a := range accs {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			a.ID, a.Date.Format("2006-01-02"), a.Kind, a.Party, a.Amount, a.Category, a.Account, settled[a.ID])
+	fmt.Fprintln(w, "ID\tDATE\tPARTY\tAMOUNT\tCATEGORY\tACCOUNT\tSETTLED BY")
+	for _, inv := range invs {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			inv.ID, inv.Date.Format("2006-01-02"), inv.Party, inv.Amount, inv.Category, inv.Account, settled[inv.ID])
 	}
 	return w.Flush()
 }

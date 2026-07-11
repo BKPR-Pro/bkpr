@@ -104,9 +104,9 @@ Events are immutable, past-tense facts.
 | `transaction.matched` | force or break a transfer pairing the automatic fold got wrong |
 | `transaction.discarded` | that line was garbage; keep it out of the books |
 | `transaction.exported` | this deposit was written to a connector (e.g. rent booked against a lease) |
-| `accrual.recognized` | value was earned or incurred before its cash: an invoice or a bill. Once per fingerprint |
-| `accrual.settled` | the bank line that paid an accrual, so its cash clears the receivable rather than re-booking income |
-| `accrual.voided` | that accrual should not have been raised; keep it out of the books |
+| `invoice.raised` | revenue was earned and billed before its cash: money owed to you. Once per fingerprint |
+| `invoice.settled` | the bank line that paid an invoice, so its cash clears the receivable rather than re-booking income |
+| `invoice.voided` | that invoice should not have been raised; keep it out of the books |
 | `rule.added` | a pattern should be handled |
 | `rule.changed` | a rule's answer is wrong |
 | `rule.removed` | a rule should stop firing |
@@ -336,23 +336,22 @@ bk books -basis cash      # only money that moved. The default, and every earlie
 bk books -basis accrual   # also books the invoices and bills that have not been paid yet
 ```
 
-Cash basis is what every example above already is: it ignores accruals entirely, so it is exactly
-the books bookkeeper was born on. Accrual basis adds the value you have recognized but not yet been
-paid — an invoice raised, a bill received — each as its own line.
+Cash basis is what every example above already is: it ignores invoices entirely, so it is exactly
+the books bookkeeper was born on. Accrual basis adds the revenue you have earned but not yet been
+paid — an invoice raised — as its own line.
 
-An **invoice** is money owed to you; a **bill** is money you owe. They are the one kind of fact a
-bank statement cannot supply, because the money has not moved, so they are recorded rather than
-folded from a line:
+An **invoice** is money owed to you: revenue earned and billed before its cash arrives. It is the one
+kind of fact a bank statement cannot supply, because the money has not moved, so it is recorded
+rather than folded from a line. An invoice is a first-class thing you do, so it is its own command,
+the way rules and connectors are:
 
 ```sh
-bk accrue invoice -party "J. Smith" -amount 1600.00 -category "Income:Consulting" -date 2026-03-01
-bk accrue bill    -party "Power Co"  -amount 142.03  -category "Expenses:Utilities:Power" -date 2026-03-02
+bk invoice raise -party "J. Smith" -amount 1600.00 -category "Income:Consulting" -date 2026-03-01
 ```
 
-The magnitude is positive and the kind decides the signs: an invoice debits a receivable and credits
-income, a bill debits an expense and credits a payable. Where it parks defaults to `Assets:Receivable`
-or `Liabilities:Payable`; `-account` overrides. On the accrual basis the invoice above books on the
-day it was earned:
+It debits a receivable and credits income. Where it parks defaults to `Assets:Receivable`;
+`-account` overrides, so each customer can carry their own sub-account. On the accrual basis the
+invoice books on the day it was earned:
 
 ```text
 2026/03/01  * J. Smith
@@ -360,13 +359,13 @@ day it was earned:
   Assets:Receivable
 ```
 
-When the deposit that pays it lands in the bank, `settle` records which line paid which accrual, so
-the cash clears the receivable instead of booking the income a second time (that income was booked
-when the invoice was recognized):
+When the deposit that pays it lands in the bank, `invoice settle` records which line paid which
+invoice, so the cash clears the receivable instead of booking the income a second time (that income
+was booked when the invoice was raised):
 
 ```sh
 bk import march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
-bk settle -accrual 9617607456a06619 -tx 6afa3719db1eb739-1
+bk invoice settle -id 9617607456a06619 -tx 6afa3719db1eb739-1
 ```
 
 ```text
@@ -381,14 +380,14 @@ it), and `Income:Consulting` is booked exactly once.
 The pairing is **recorded, not guessed**. An internal transfer pairs automatically because each
 sighting names the other's account with certainty; a deposit's memo does not reliably name which
 invoice it clears, so settling is an asserted fact rather than a fold, in keeping with *say only what
-is known*. A wrong accrual is dropped with `void`, which supersedes it the way `discard` supersedes a
-bad import; `bk accruals` lists the open ones and what settled each.
+is known*. A wrong invoice is dropped with `invoice void`, which supersedes it the way `discard`
+supersedes a bad import; `bk invoice list` shows the open ones and what settled each.
 
-Because the basis is a lens and accruals are additive facts, you can **start on cash and turn on
-accrual later** with no migration: recognize invoices from whatever day you begin, and every period
+Because the basis is a lens and invoices are additive facts, you can **start on cash and turn on
+accrual later** with no migration: raise invoices from whatever day you begin, and every period
 before that reads identically under both bases, because there is nothing there to accrue. The one
 honest caveat is the seam — a period that straddles the switch mixes the two — and the log dates
-exactly when the first `accrual.recognized` appears, so the switch documents itself.
+exactly when the first `invoice.raised` appears, so the switch documents itself.
 
 ### Fixing a rule fixes history
 
@@ -560,12 +559,13 @@ deterministic fold over the lines and their categorization, so the money is not 
 bad line is undone with `discard`, which supersedes the imported line without deleting it.
 
 Cash and accrual are the same log read through two lenses, chosen with `bk books -basis`. Cash is the
-default and every statement example is already it. Accrual also books the value recognized before its
-cash: `accrue invoice` raises a receivable, `accrue bill` raises a payable, and `settle` records the
-bank line that paid one so the cash clears the parked account rather than booking income or expense
-twice. The basis is a read-time choice, never stored, so a book can start on cash and turn on accrual
-later with no migration; a wrong accrual is dropped with `void`. Recognizing the same accrual twice
-is a no-op, keyed by a fingerprint of its content, exactly as re-importing a statement is.
+default and every statement example is already it. Accrual also books the revenue recognized before
+its cash: `invoice raise` raises a receivable, and `invoice settle` records the bank line that paid it
+so the cash clears the receivable rather than booking income twice. The basis is a read-time choice,
+never stored, so a book can start on cash and turn on accrual later with no migration; a wrong invoice
+is dropped with `invoice void`. Raising the same invoice twice is a no-op, keyed by a fingerprint of
+its content, exactly as re-importing a statement is. The money-you-owe side (bills, payables) is a
+natural next step and is not precluded; it is left out until it is needed.
 
 Inputs are files (CSV, and the ledger form it writes), read once inline with `import`, and connectors. A
 connector is bidirectional in principle; `export` is the direction built first, because the bank
@@ -593,7 +593,7 @@ Ports and adapters: a domain core, with the outside world reached only through a
 
 ```text
 lib/model/            the normalized shapes: Amount, Transaction, Posting, Entry
-lib/books/            the commands and folds: Import, AddRule, Categorize, Recognize, Settle, Ledger, ...
+lib/books/            the commands and folds: Import, AddRule, Categorize, Raise, Settle, Ledger, ...
 lib/rules/            the deterministic categorization engine
 lib/eventlog/         the append-only log and its storage
 lib/store/            locating and opening a .bookkeeper book of record
