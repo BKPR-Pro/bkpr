@@ -33,7 +33,7 @@ func TestUpsertRuleCreatesWhenAbsent(t *testing.T) {
 	log := ruleLog(t)
 	r := rules.Rule{Match: "hyungjin", Category: "Income:Rent:22 Lisgar", Metadata: map[string]string{"rentapp.lease": "31"}}
 
-	if err := upsertRule(log, r, map[string]bool{"category": true, "meta": true}, "", ""); err != nil {
+	if err := upsertRule(log, r, map[string]bool{"category": true, "meta": true}, "", "", "human"); err != nil {
 		t.Fatalf("upsertRule: %v", err)
 	}
 	got := find(t, log, "hyungjin")
@@ -50,7 +50,7 @@ func TestUpsertRuleChangesOnlyNamedFields(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	err := upsertRule(log, rules.Rule{Match: "acme", Category: "Expenses:New"}, map[string]bool{"category": true}, "", "reclassify")
+	err := upsertRule(log, rules.Rule{Match: "acme", Category: "Expenses:New"}, map[string]bool{"category": true}, "", "reclassify", "human")
 	if err != nil {
 		t.Fatalf("upsertRule: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestUpsertRuleMergesMetadata(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	err := upsertRule(log, rules.Rule{Match: "hyungjin", Metadata: map[string]string{"rentapp.lease": "47"}}, map[string]bool{"meta": true}, "", "new lease")
+	err := upsertRule(log, rules.Rule{Match: "hyungjin", Metadata: map[string]string{"rentapp.lease": "47"}}, map[string]bool{"meta": true}, "", "new lease", "human")
 	if err != nil {
 		t.Fatalf("upsertRule: %v", err)
 	}

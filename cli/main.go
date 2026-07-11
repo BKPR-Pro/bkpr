@@ -72,7 +72,7 @@ Run "bookkeeper docs" for the full reference.
 
 usage:
   bookkeeper init         [dir]
-  bookkeeper rules   set  -match <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>]
+  bookkeeper rules   set  -match <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]
   bookkeeper rules   rm   -match <re>
   bookkeeper rules   mv   -match <re> [-before <re>]
   bookkeeper rules   list
@@ -81,8 +81,8 @@ usage:
   bookkeeper connectors list
   bookkeeper import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
   bookkeeper import       <file.ledger>
-  bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>]
-  bookkeeper discard      -tx <fingerprint> [-why <reason>]
+  bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
+  bookkeeper discard      -tx <fingerprint> [-why <reason>] [-actor <name>]
   bookkeeper export       <connector> [-confirm]
   bookkeeper books        [-format table|ledger] [-stdout]
   bookkeeper docs
@@ -130,13 +130,15 @@ BOOKKEEPING
       itself. Importing from a registered connector by name is the same verb, built later;
       the bank statement is where the money is read from first.
   categorize -tx <fingerprint> (-category <account> | -post <account>=<amount> ... |
-             -sell <account>=<qty> ... -gain <account>) [-payee <name>] [-why <reason>]
+             -sell <account>=<qty> ... -gain <account>) [-payee <name>] [-why <reason>] [-actor <name>]
       Assert the postings for one line, overriding the rule for that line only. Use -post
       more than once to split one charge across accounts. A -post amount may name its own
       commodity and an @@ total price, so a share bought with cash is
       -post "Assets:Brokerage:AAPL=10 AAPL @@ 1000.00 USD". A sale instead names the shares
       it disposed of with -sell and where the gain lands with -gain; the cost base, and so the
       gain, is folded from your purchases: -sell "Assets:Brokerage:AAPL=10 AAPL" -gain "Income:Capital Gains".
+      -actor records who decided (default human), so a model driving this command is told
+      apart from a person in the log; rules set and discard take it too.
   discard -tx <fingerprint> [-why <reason>]
       Drop a bad line from the books. The imported fact stays in the log; a later fact
       supersedes it.
@@ -394,6 +396,7 @@ func ruleSetOne(args []string) error {
 	fs.Var(&meta, "meta", "key=value carried onto the entry, repeatable, e.g. rentapp.lease=31")
 	before := fs.String("before", "", "on a new rule, place it ahead of the one matching this pattern")
 	why := fs.String("why", "", "why the rule changed; changing one reclassifies every line it matched")
+	actor := fs.String("actor", "human", "who is authoring this rule; the log records who decided")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -414,7 +417,7 @@ func ruleSetOne(args []string) error {
 	}
 	defer closeLog()
 
-	if err := upsertRule(log, r, provided, *before, *why); err != nil {
+	if err := upsertRule(log, r, provided, *before, *why, *actor); err != nil {
 		return err
 	}
 	fmt.Printf("rule %q\n", r.Match)
@@ -423,8 +426,9 @@ func ruleSetOne(args []string) error {
 
 // upsertRule adds r, or changes the rule already matching its pattern. On a change only the named
 // fields move, and metadata merges per key rather than replacing the bag, so naming one key leaves
-// the others. On a new rule the given fields stand and before places it.
-func upsertRule(log *eventlog.Log, r rules.Rule, provided map[string]bool, before, why string) error {
+// the others. On a new rule the given fields stand and before places it. actor records who decided,
+// so a model's rules are told apart from a person's.
+func upsertRule(log *eventlog.Log, r rules.Rule, provided map[string]bool, before, why, actor string) error {
 	current, err := books.Rules(log)
 	if err != nil {
 		return err
@@ -443,9 +447,9 @@ func upsertRule(log *eventlog.Log, r rules.Rule, provided map[string]bool, befor
 		if provided["meta"] {
 			merged.Metadata = mergeMeta(merged.Metadata, r.Metadata)
 		}
-		return books.SetRule(log, "human", why, merged)
+		return books.SetRule(log, actor, why, merged)
 	}
-	return books.AddRule(log, "human", r, before)
+	return books.AddRule(log, actor, r, before)
 }
 
 // mergeMeta overlays new keys onto the existing bag without dropping the untouched ones.
@@ -597,6 +601,7 @@ func categorize(args []string) error {
 	payee := fs.String("payee", "", "the payee to record on the entry")
 	why := fs.String("why", "", "why this line is categorized so; recorded with the assertion")
 	gain := fs.String("gain", "", "on a sale, the account its capital gain or loss lands in, e.g. Income:Capital Gains")
+	actor := fs.String("actor", "human", "who is categorizing; the log records who decided")
 	fs.Var(&split, "post", "account=amount, repeatable; amount may carry a commodity and an @@ total price, e.g. \"Assets:Brokerage:AAPL=10 AAPL @@ 1000.00 USD\"")
 	fs.Var(&sell, "sell", "account=quantity, repeatable; the shares this line sold, e.g. \"Assets:Brokerage:AAPL=10 AAPL\", paired with -gain")
 	if err := fs.Parse(args); err != nil {
@@ -628,7 +633,7 @@ func categorize(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := books.Sell(s.Log, "human", *why, *txID, *payee, *gain, disposals); err != nil {
+		if err := books.Sell(s.Log, *actor, *why, *txID, *payee, *gain, disposals); err != nil {
 			return err
 		}
 		fmt.Printf("categorized %s\n", *txID)
@@ -647,7 +652,7 @@ func categorize(args []string) error {
 		return err
 	}
 
-	if err := books.Categorize(s.Log, "human", *why, *txID, *payee, post); err != nil {
+	if err := books.Categorize(s.Log, *actor, *why, *txID, *payee, post); err != nil {
 		return err
 	}
 	fmt.Printf("categorized %s\n", *txID)
@@ -659,6 +664,7 @@ func discard(args []string) error {
 	fs := flag.NewFlagSet("discard", flag.ExitOnError)
 	txID := fs.String("tx", "", "the transaction fingerprint to discard")
 	why := fs.String("why", "", "why the line is garbage; recorded with the discard")
+	actor := fs.String("actor", "human", "who is discarding; the log records who decided")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -673,7 +679,7 @@ func discard(args []string) error {
 	}
 	defer s.Close()
 
-	if err := books.Discard(s.Log, "human", *why, *txID); err != nil {
+	if err := books.Discard(s.Log, *actor, *why, *txID); err != nil {
 		return err
 	}
 	fmt.Printf("discarded %s\n", *txID)
