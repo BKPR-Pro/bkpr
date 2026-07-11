@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/dallasread/bookkeeper/lib/eventlog"
@@ -113,20 +112,14 @@ func Transactions(log *eventlog.Log) ([]model.Transaction, error) {
 		if err := e.Decode(&data); err != nil {
 			return nil, fmt.Errorf("books: event %s: %w", e.ID, err)
 		}
-		tx := model.Transaction{
+		txs = append(txs, model.Transaction{
 			ID:          e.RecordID,
 			Account:     data.Account,
 			Date:        data.Date,
 			Amount:      data.Amount,
 			Description: data.Description,
 			Raw:         data.Raw,
-		}
-		// A live-source import records itself with actor "source:<name>"; a file with "statement:<file>".
-		// The source name is the provenance that distinguishes a pulled payment from a bank line.
-		if name, ok := strings.CutPrefix(e.Actor, "source:"); ok {
-			tx.Source = name
-		}
-		txs = append(txs, tx)
+		})
 	}
 
 	// The fingerprint breaks ties, so the order is total and the artifact is stable across runs.

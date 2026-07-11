@@ -107,7 +107,7 @@ Events are immutable, past-tense facts.
 | `rule.changed` | a rule's answer is wrong |
 | `rule.removed` | a rule should stop firing |
 | `rule.moved` | two rules fire in the wrong order |
-| `source.added` / `source.removed` | a live connector to pull from, registered by name |
+| `source.added` / `source.removed` | a live connector, registered by name |
 
 An event's name says **what happened**. Its `actor` says **who**. Reading `actor` should never be
 necessary to know what kind of fact you are looking at, which is why there is no
@@ -156,11 +156,12 @@ would move every fingerprint and silently orphan every correction keyed to one.
 So a bad import is not fixed by re-parsing. You re-import with the right flags (the corrected line
 lands under a new fingerprint) and `discard` the garbage one.
 
-A **live source** you pull from repeatedly is the other kind of input. It is a standing connector,
-registered once (`sources add`) and imported by name (`import rent`). It is logged, unlike a file's
-inline flags, because it persists. Its bearer token is never stored: the registration keeps the
-name of the environment variable that holds it, read at import time, so the log stays committable.
-The connector's own transaction id is used as the fingerprint, so re-importing is a clean no-op.
+Files are the only input. The bank statement is the source of truth for money, so bookkeeper never
+pulls transactions from a live app; importing rent from the rent app would record the same deposit
+twice, once by the app and once by the bank. A live connector is instead a **destination**,
+registered once (`sources add`) and pushed to. It is logged, unlike a file's inline flags, because
+it persists, and its bearer token is never stored: the registration keeps the name of the
+environment variable that holds it, read when the connector is used, so the log stays committable.
 
 ### Nothing has to be acknowledged
 
@@ -270,16 +271,15 @@ bk import statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -am
 bk import visa.csv -account "Liabilities:Card:Visa" -currency CAD -debit Charge -credit Payment -date Posted
 ```
 
-A **live source** is registered once and then imported by name. The rent app is the first: it
-records rent, deposits, and fees, and `import rent` pulls them (idempotently, by their own ids).
-The token is kept in an environment variable, never in the books.
+A live connector is a **destination**, registered once and pushed to; bookkeeper does not import
+from it. The rent app is the first: bookkeeper pushes recorded rent back so its paid/unpaid state
+stays current (the push command is the next slice). The token is kept in an environment variable,
+never in the books.
 
 ```sh
 export BK_RENT_TOKEN=...   # the rent app's bearer token
 bk sources add rent -kind rentapp -url https://rent.stcroixproperties.ca \
   -token-env BK_RENT_TOKEN -account "Assets:Bank:Chequing" -currency CAD
-bk import rent
-# 12 transactions pulled from rent: 12 imported, 0 already in the log
 ```
 
 `rules add` records a rule; each is one event. Order decides which of two matching rules wins, so a
@@ -467,17 +467,12 @@ Internal transfers seen in both accounts' statements are recognised and booked o
 deterministic fold over the lines and their categorization, so the money is not double-counted. A
 bad import is undone with `discard`, which supersedes the imported line without deleting it.
 
-Inputs are files (CSV today, ledger coming) imported once inline, and live sources registered and
-pulled by name. The rent app is the first live source: `import rent` pulls its recorded
-transactions, idempotently, with its token kept in the environment rather than the books. The
-ledger file is still the only *output*; the rentapp connector can also push payments back, but
-that direction is not yet wired to a command.
-
-Pulled rent and its bank deposit are the same money recorded twice, once by the rent app and once
-by the bank statement. They are recognised as one deposit and booked once, keeping the pulled record
-(it knows the lease and the kind) and suppressing the bank duplicate. This is the same fold as the
-transfer case, on a different signal: same account, same amount, close date, and exactly one side
-from a live source.
+Inputs are files (CSV today, ledger coming), imported once inline. The bank statement is the source
+of truth for money, so bookkeeper never pulls transactions from a live app: importing rent from the
+rent app would count the same deposit twice, once by the app and once by the bank. A live connector
+is a **destination** instead. The rent app is the first: bookkeeper pushes recorded rent back so its
+paid/unpaid state stays current, with its token kept in the environment rather than the books. The
+push command is the next slice.
 
 Next, in order: the model tier (a model proposes categorizations for the `Uncategorized` lines),
 then the ledger-import parser and the manual transfer override (`transaction.matched`). Prices and
@@ -496,7 +491,7 @@ lib/eventlog/         the append-only log and its storage
 lib/store/            locating and opening a .bookkeeper book of record
 lib/adapters/source/  reads statements from the outside world (CSV today)
 lib/adapters/ledger/  renders the books as a plain-text double-entry artifact
-lib/adapters/rentapp/ the rent app connector: pulls recorded transactions, pushes payments
+lib/adapters/rentapp/ the rent app connector (a destination): pushes recorded rent payments
 cli/                  the command-line wrapper (the driving adapter)
 ```
 

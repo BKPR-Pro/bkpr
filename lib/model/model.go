@@ -28,11 +28,6 @@ type Transaction struct {
 	Amount      Amount            // signed; negative is money out. Carries its own commodity.
 	Description string            // the raw memo the bank gave us
 	Raw         map[string]string // the original columns, kept for auditing
-
-	// Source names the live connector this came from (e.g. "rent"), empty for a file import. It is
-	// provenance the fold sets from the import's actor, and it is what tells a pulled rent payment
-	// apart from the bank deposit that is the same money.
-	Source string
 }
 
 // Posting is one side of an entry: an account, and a signed amount.
