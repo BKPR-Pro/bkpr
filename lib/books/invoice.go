@@ -30,9 +30,8 @@ const (
 	// an internal transfer where each sighting names the other's account. A later settle supersedes.
 	ActionSettled = "settled"
 
-	// ActionVoided supersedes an invoice that should not have been raised, the way discard supersedes
-	// a bad import. The raised fact stays in the log; the fold drops it.
-	ActionVoided = "voided"
+	// An invoice that should not have been raised is voided; the verb is shared with a voided
+	// transaction (see ActionVoided in void.go), because annulling a recorded thing is one operation.
 
 	// defaultReceivable is where an invoice parks until its cash arrives, when the caller names no
 	// account of their own.
@@ -64,10 +63,6 @@ type raisedData struct {
 
 type settledData struct {
 	Tx string `json:"tx,omitempty"` // the bank line that paid it; empty reopens the invoice
-}
-
-type voidedData struct {
-	Why string `json:"why,omitempty"`
 }
 
 // Raise records an invoice: revenue earned and billed before the cash moves. It returns the stored
@@ -136,9 +131,10 @@ func Settle(log *eventlog.Log, actor, invoiceID, txID string) error {
 	return err
 }
 
-// Void supersedes an invoice that should not have been raised. Like discard, it does not delete the
-// raised event; it appends a fact the fold honours, so the mistake and its correction both stay.
-func Void(log *eventlog.Log, actor, why, invoiceID string) error {
+// VoidInvoice supersedes an invoice that should not have been raised, the same operation as voiding
+// a bad import. It does not delete the raised event; it appends a fact the fold honours, so the
+// mistake and its correction both stay.
+func VoidInvoice(log *eventlog.Log, actor, why, invoiceID string) error {
 	if _, err := invoice(log, invoiceID); err != nil {
 		return err
 	}
@@ -289,7 +285,7 @@ func overlayInvoices(log *eventlog.Log, txs []model.Transaction, entries []model
 	for txID, inv := range byTx {
 		i, ok := pos[txID]
 		if !ok {
-			continue // the line was discarded or suppressed; nothing to clear against
+			continue // the line was voided or suppressed; nothing to clear against
 		}
 		entries[i] = model.Entry{
 			Payee:    entries[i].Payee,

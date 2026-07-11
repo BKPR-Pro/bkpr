@@ -102,7 +102,7 @@ Events are immutable, past-tense facts.
 | `transaction.imported` | a statement line was read in. Once per fingerprint, ever |
 | `transaction.categorized` | a person or a model asserted the postings for this line |
 | `transaction.matched` | force or break a transfer pairing the automatic fold got wrong |
-| `transaction.discarded` | that line was garbage; keep it out of the books |
+| `transaction.voided` | that line should not count; keep it out of the books |
 | `transaction.exported` | this deposit was written to a connector (e.g. rent booked against a lease) |
 | `invoice.raised` | revenue was earned and billed before its cash: money owed to you. Once per fingerprint |
 | `invoice.settled` | the bank line that paid an invoice, so its cash clears the receivable rather than re-booking income |
@@ -158,7 +158,7 @@ history. It does not, because the fingerprint is built from the normalized field
 would move every fingerprint and silently orphan every correction keyed to one.
 
 So a bad line is not fixed by re-parsing. You import again with the right flags (the corrected line
-lands under a new fingerprint) and `discard` the garbage one.
+lands under a new fingerprint) and `void` the garbage one.
 
 A connector is the other kind of input, and it is bidirectional in principle: `export` writes to it
 today, and importing from it by name is the same `import` verb, built later. It is registered once
@@ -181,7 +181,8 @@ out of six hundred means it is fine.
 ### Commands and folds
 
 A command captures one intent, guards a precondition, and emits one event. `Import`, `AddRule`,
-`ChangeRule`, `RemoveRule`, `MoveRule`, `Categorize`, `Match`, `Discard`. Nothing else writes.
+`ChangeRule`, `RemoveRule`, `MoveRule`, `Categorize`, `Match`, `VoidTransaction`, `Raise`, `Settle`,
+`VoidInvoice`, `RegisterConnector`. Nothing else writes.
 
 `TrackOnce` appends a fact that can only be true once and reports `ErrAlreadyTracked` otherwise,
 which is how re-importing an overlapping statement becomes a no-op rather than a second rent
@@ -380,8 +381,8 @@ it), and `Income:Consulting` is booked exactly once.
 The pairing is **recorded, not guessed**. An internal transfer pairs automatically because each
 sighting names the other's account with certainty; a deposit's memo does not reliably name which
 invoice it clears, so settling is an asserted fact rather than a fold, in keeping with *say only what
-is known*. A wrong invoice is dropped with `invoice void`, which supersedes it the way `discard`
-supersedes a bad import; `bk invoice list` shows the open ones and what settled each.
+is known*. A wrong invoice is dropped with `invoice void` — the same verb as voiding a bad import,
+one operation on a different noun; `bk invoice list` shows the open ones and what settled each.
 
 Because the basis is a lens and invoices are additive facts, you can **start on cash and turn on
 accrual later** with no migration: raise invoices from whatever day you begin, and every period
@@ -441,10 +442,10 @@ wins, with both kept in the log.
 
 Import stores each line already normalized, so a wrong flag (a flipped sign, the wrong date column)
 imports garbage that re-importing cannot repair on its own: the fingerprints are already in the log,
-and a re-import is a no-op on them. `discard` is the way out.
+and a re-import is a no-op on them. `void` is the way out.
 
 ```sh
-bk discard -tx 33247b87... -why "imported to the wrong account"
+bk void -tx 33247b87... -why "imported to the wrong account"
 ```
 
 It does not delete the imported event. It appends a fact that supersedes it, and the fold drops the
@@ -453,7 +454,7 @@ append. Re-importing the same statement will not bring the line back, because th
 still there and the import stays a no-op.
 
 The repair flow the append-only log makes possible: re-import with the right flags (the corrected
-line lands under a new fingerprint, since the amount or date changed), then discard the garbage one.
+line lands under a new fingerprint, since the amount or date changed), then void the garbage one.
 
 ### Transfers between your own accounts
 
@@ -556,7 +557,7 @@ cost and a partial one rounds to the cent without leaking.
 
 Internal transfers seen in both accounts' statements are recognised and booked once, as a
 deterministic fold over the lines and their categorization, so the money is not double-counted. A
-bad line is undone with `discard`, which supersedes the imported line without deleting it.
+bad line is undone with `void`, which supersedes the imported line without deleting it.
 
 Cash and accrual are the same log read through two lenses, chosen with `bk books -basis`. Cash is the
 default and every statement example is already it. Accrual also books the revenue recognized before
@@ -577,7 +578,7 @@ it records nothing twice. Importing a rent roll later, as context rather than as
 the money, is a natural next step and is not precluded.
 
 The surface an external model drives is in place: `review` prints the open decisions as JSON (the
-`Uncategorized` lines with their fingerprints), and `categorize`, `rules set`, and `discard` take an
+`Uncategorized` lines with their fingerprints), and `categorize`, `rules set`, and `void` take an
 `-actor`, so a model proposes through the same path a person uses and the log records who answered.
 bookkeeper never calls a model itself.
 

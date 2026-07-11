@@ -44,8 +44,8 @@ func main() {
 		err = ruleSet(os.Args[2:])
 	case "categorize":
 		err = categorize(os.Args[2:])
-	case "discard":
-		err = discard(os.Args[2:])
+	case "void":
+		err = voidCmd(os.Args[2:])
 	case "match":
 		err = match(os.Args[2:])
 	case "invoice":
@@ -89,7 +89,7 @@ usage:
   bookkeeper import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
   bookkeeper import       <file.ledger>
   bookkeeper categorize   -tx <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
-  bookkeeper discard      -tx <fingerprint> [-why <reason>] [-actor <name>]
+  bookkeeper void         -tx <fingerprint> [-why <reason>] [-actor <name>]
   bookkeeper match        -tx <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
   bookkeeper invoice raise   -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
   bookkeeper invoice settle  -id <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
@@ -153,10 +153,10 @@ BOOKKEEPING
       it disposed of with -sell and where the gain lands with -gain; the cost base, and so the
       gain, is folded from your purchases: -sell "Assets:Brokerage:AAPL=10 AAPL" -gain "Income:Capital Gains".
       -actor records who decided (default human), so a model driving this command is told
-      apart from a person in the log; rules set and discard take it too.
-  discard -tx <fingerprint> [-why <reason>] [-actor <name>]
-      Drop a bad line from the books. The imported fact stays in the log; a later fact
-      supersedes it.
+      apart from a person in the log; rules set and void take it too.
+  void -tx <fingerprint> [-why <reason>] [-actor <name>]
+      Annul a bad imported line. The imported fact stays in the log; a later fact supersedes
+      it. Voiding an invoice is the same verb on a different noun: invoice void.
   match -tx <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
       Override the automatic transfer fold, which pairs the two sightings of one movement
       only when each names the other's account. -with forces a pair it missed, dropping the
@@ -192,8 +192,8 @@ INVOICE  (revenue owed to you before its cash; only shown on -basis accrual)
       was raised). A deposit's memo does not reliably name which invoice it clears, so this
       pairing is recorded rather than guessed. -reopen unlinks it; a later settle supersedes.
   invoice void -id <fingerprint> [-why <reason>]
-      Drop an invoice that should not have been raised. Like discard, the raised fact stays in
-      the log; a later fact supersedes it.
+      Drop an invoice that should not have been raised. The same verb as voiding a bad import:
+      the raised fact stays in the log; a later fact supersedes it.
   invoice list
       List the open invoices with their fingerprints, date, party, amount, category, parked
       account, and the line that settled each, if any.
@@ -730,12 +730,12 @@ func categorize(args []string) error {
 	return nil
 }
 
-// discard removes a garbage line from the books, the way to undo a bad import.
-func discard(args []string) error {
-	fs := flag.NewFlagSet("discard", flag.ExitOnError)
-	txID := fs.String("tx", "", "the transaction fingerprint to discard")
-	why := fs.String("why", "", "why the line is garbage; recorded with the discard")
-	actor := fs.String("actor", "human", "who is discarding; the log records who decided")
+// voidCmd annuls a bad imported line, the way to undo a bad import.
+func voidCmd(args []string) error {
+	fs := flag.NewFlagSet("void", flag.ExitOnError)
+	txID := fs.String("tx", "", "the transaction fingerprint to void")
+	why := fs.String("why", "", "why the line is annulled; recorded with the void")
+	actor := fs.String("actor", "human", "who is voiding; the log records who decided")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -750,10 +750,10 @@ func discard(args []string) error {
 	}
 	defer s.Close()
 
-	if err := books.Discard(s.Log, *actor, *why, *txID); err != nil {
+	if err := books.VoidTransaction(s.Log, *actor, *why, *txID); err != nil {
 		return err
 	}
-	fmt.Printf("discarded %s\n", *txID)
+	fmt.Printf("voided %s\n", *txID)
 	return nil
 }
 
@@ -924,7 +924,7 @@ func invoiceVoid(args []string) error {
 	}
 	defer closeLog()
 
-	if err := books.Void(log, *actor, *why, *id); err != nil {
+	if err := books.VoidInvoice(log, *actor, *why, *id); err != nil {
 		return err
 	}
 	fmt.Printf("voided %s\n", *id)

@@ -125,13 +125,13 @@ func TestAnInvoiceMayNameItsReceivableAccount(t *testing.T) {
 	}
 }
 
-// Voiding an invoice drops it from the books, the way discard drops a bad import. The raised fact
-// stays in the log; the fold honours the later void.
+// Voiding an invoice drops it from the books, the same operation as voiding a bad import. The raised
+// fact stays in the log; the fold honours the later void.
 func TestVoidingAnInvoiceDropsIt(t *testing.T) {
 	log := newLog()
 	inv := raise(t, log, "J. Smith", 1, 160000, "Income:Consulting")
-	if err := books.Void(log, "human", "the client cancelled", inv.ID); err != nil {
-		t.Fatalf("Void: %v", err)
+	if err := books.VoidInvoice(log, "human", "the client cancelled", inv.ID); err != nil {
+		t.Fatalf("VoidInvoice: %v", err)
 	}
 
 	if txs, _ := booksOn(t, log, books.AccrualBasis); len(txs) != 0 {
@@ -203,7 +203,7 @@ func TestSettlingAnUnknownInvoiceIsRefused(t *testing.T) {
 	if err := books.Settle(log, "human", "nope", ""); err == nil {
 		t.Fatal("settled an invoice that was never raised")
 	}
-	if err := books.Void(log, "human", "", "nope"); err == nil {
+	if err := books.VoidInvoice(log, "human", "", "nope"); err == nil {
 		t.Fatal("voided an invoice that was never raised")
 	}
 }

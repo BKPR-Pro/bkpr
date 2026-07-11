@@ -85,14 +85,14 @@ func TestCategorizeDefaultsTheActorToHuman(t *testing.T) {
 	}
 }
 
-func TestDiscardRecordsTheActor(t *testing.T) {
+func TestVoidRecordsTheActor(t *testing.T) {
 	bookHere(t)
 	seedTx(t, "tx1")
 
-	if err := discard([]string{"-tx", "tx1", "-actor", "model:claude"}); err != nil {
-		t.Fatalf("discard: %v", err)
+	if err := voidCmd([]string{"-tx", "tx1", "-actor", "model:claude"}); err != nil {
+		t.Fatalf("void: %v", err)
 	}
-	if got := actorOf(t, "transaction", "discarded"); got != "model:claude" {
+	if got := actorOf(t, "transaction", "voided"); got != "model:claude" {
 		t.Errorf("actor = %q, want model:claude", got)
 	}
 }
