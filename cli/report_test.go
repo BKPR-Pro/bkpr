@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dallasread/bookkeeper/lib/books"
+	"github.com/dallasread/bookkeeper/lib/eventlog"
 	"github.com/dallasread/bookkeeper/lib/model"
 )
 
@@ -229,6 +231,36 @@ func TestRenderReportHTML(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Errorf("report HTML missing %q", want)
 		}
+	}
+}
+
+// The report reads the books on the chosen basis. An invoice earned but not yet paid is invisible on
+// cash (no money moved) and recognized on accrual (the day it was earned), which is the whole reason
+// a landlord or consultant wants the accrual view: revenue shows when billed, not when the cheque
+// clears. The report reuses the existing basis engine rather than re-deriving accrual of its own.
+func TestReportOnAccrualBasisRecognizesAnUnpaidInvoice(t *testing.T) {
+	log := eventlog.New(eventlog.NewMemory())
+	if _, _, err := books.Raise(log, "human", "", books.Invoice{
+		Date: on(5), Party: "Acme", Amount: cad2(100000), Category: "Income:Consulting",
+	}); err != nil {
+		t.Fatalf("Raise: %v", err)
+	}
+	from, to := on(1), on(28)
+
+	txs, entries, err := reportEntries(log, false)
+	if err != nil {
+		t.Fatalf("cash: %v", err)
+	}
+	if cash := buildReport(txs, entries, from, to, ""); len(cash.Income) != 0 {
+		t.Errorf("cash income = %+v, want none until the cash arrives", cash.Income)
+	}
+
+	txs, entries, err = reportEntries(log, true)
+	if err != nil {
+		t.Fatalf("accrual: %v", err)
+	}
+	if got := rowAmount(t, buildReport(txs, entries, from, to, "").Income, "Income:Consulting"); got != "1000.00 CAD" {
+		t.Errorf("accrual income = %q, want the earned 1000.00 CAD", got)
 	}
 }
 

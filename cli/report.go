@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dallasread/bookkeeper/lib/books"
+	"github.com/dallasread/bookkeeper/lib/eventlog"
 	"github.com/dallasread/bookkeeper/lib/model"
 	"github.com/dallasread/bookkeeper/lib/store"
 )
@@ -325,6 +326,18 @@ func plus(a, b model.Amount) model.Amount {
 	return a
 }
 
+// reportEntries folds the log for a report on the chosen basis. Cash reads only money that moved;
+// accrual also books revenue earned and costs incurred before their cash, so an unpaid invoice shows
+// on the day it was billed. It reuses the one basis engine (books.LedgerBasis) rather than re-deriving
+// accrual, so a report can never drift from what `bk books -basis accrual` shows.
+func reportEntries(log *eventlog.Log, accrual bool) ([]model.Transaction, []model.Entry, error) {
+	basis := books.CashBasis
+	if accrual {
+		basis = books.AccrualBasis
+	}
+	return books.LedgerBasis(log, basis)
+}
+
 // reportView is what a render is handed: a statement is nil when a flag narrowed it out.
 type reportView struct {
 	Income  *incomeStatement
@@ -334,7 +347,8 @@ type reportView struct {
 
 // reportCmd renders the full picture of the books: an income statement over the period and a balance
 // sheet as of its end. -income, -balance, or -gains narrows to one; -account narrows to a property,
-// client, or symbol; -format picks text (the default) or html; -out writes to a file.
+// client, or symbol; -basis reads it on cash (the default) or accrual; -format picks text (the
+// default) or html; -out writes to a file.
 func reportCmd(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
 	account := fs.String("account", "", "narrow to accounts whose path contains this text, e.g. a property, client, or symbol")
@@ -344,9 +358,13 @@ func reportCmd(args []string) error {
 	balanceOnly := fs.Bool("balance", false, "show only the balance sheet")
 	gainsOnly := fs.Bool("gains", false, "show only the capital-gains schedule")
 	format := fs.String("format", "text", "text or html")
+	basis := fs.String("basis", "cash", "cash or accrual: accrual recognizes invoices and bills when earned, before their cash")
 	out := fs.String("out", "", "write to this file instead of stdout")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *basis != "cash" && *basis != "accrual" {
+		return fmt.Errorf("-basis must be cash or accrual")
 	}
 	only := 0
 	for _, b := range []bool{*incomeOnly, *balanceOnly, *gainsOnly} {
@@ -375,7 +393,7 @@ func reportCmd(args []string) error {
 	}
 	defer s.Close()
 
-	txs, entries, err := books.Ledger(s.Log)
+	txs, entries, err := reportEntries(s.Log, *basis == "accrual")
 	if err != nil {
 		return err
 	}
