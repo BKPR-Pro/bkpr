@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -73,21 +74,113 @@ func renderBooks(args []string) error {
 		}
 	}
 
+	// The summary is computed once, here, and handed to whichever renderer runs. That is the
+	// mechanism that keeps the formats from drifting: no format computes its own numbers, so the
+	// table, the JSON, and the ledger cannot disagree about the same reading.
+	sum, err := summarize(txs, entries)
+	if err != nil {
+		return err
+	}
+
 	switch *format {
 	case "table":
-		return report(os.Stdout, txs, entries)
+		return report(os.Stdout, txs, entries, sum)
 	case "json":
-		return writeJSON(os.Stdout, txs, entries)
+		return writeJSON(os.Stdout, txs, entries, sum)
 	case "ledger":
 		// A filtered ledger is a reading and goes to stdout; the artifact in the store is only
 		// ever the whole books, so a partial one can never overwrite it.
 		if *stdout || len(accounts) > 0 {
-			return ledger.WriteAll(os.Stdout, txs, entries)
+			if err := ledger.WriteAll(os.Stdout, txs, entries); err != nil {
+				return err
+			}
+			return writeSummaryComments(os.Stdout, sum)
 		}
-		return writeLedger(s, txs, entries)
+		return writeLedger(s, txs, entries, sum)
 	default:
 		return fmt.Errorf("unknown format %q: want table, json, or ledger", *format)
 	}
+}
+
+// bookSummary is the one health reading of the books: what came in, what went out, what is left,
+// and how much money the rules could not even place a kind on. Every format renders this same
+// struct, so the reading cannot differ by format.
+type bookSummary struct {
+	Lines              int
+	UncategorizedLines int
+	Totals             []commodityTotals
+}
+
+// commodityTotals is the health line for one commodity. Amounts of different commodities cannot
+// be summed, so a mixed book carries one line per commodity rather than a total that lies.
+type commodityTotals struct {
+	Commodity     string
+	Income        model.Amount // money in, as a positive magnitude
+	Expenses      model.Amount // money out, as a positive magnitude
+	Net           model.Amount // income less expenses
+	Uncategorized model.Amount // money whose kind is unknown, in statement sign: money out reads negative
+}
+
+// summarize folds the (possibly filtered) reading into its health line. Income postings carry the
+// negation of the deposit, so they are negated back to a magnitude; a bare Uncategorized posting
+// is money whose kind is unknown and is reported in statement sign, because calling it income or
+// expense is exactly the guess the books refuse to make.
+func summarize(txs []model.Transaction, entries []model.Entry) (bookSummary, error) {
+	sum := bookSummary{Lines: len(txs)}
+	totals := map[string]*commodityTotals{}
+	forCommodity := func(commodity string) *commodityTotals {
+		t, ok := totals[commodity]
+		if !ok {
+			zero := model.Amount{Commodity: commodity}
+			t = &commodityTotals{Commodity: commodity, Income: zero, Expenses: zero, Net: zero, Uncategorized: zero}
+			totals[commodity] = t
+		}
+		return t
+	}
+
+	for i := range txs {
+		e := entries[i]
+		if e.Uncategorized() {
+			sum.UncategorizedLines++
+		}
+		for _, p := range e.Postings {
+			t := forCommodity(p.Amount.Commodity)
+			var err error
+			switch {
+			case p.Account == model.Uncategorized:
+				t.Uncategorized, err = t.Uncategorized.Add(p.Amount.Negate())
+			case topLevel(p.Account) == "Income":
+				t.Income, err = t.Income.Add(p.Amount.Negate())
+			case topLevel(p.Account) == "Expenses":
+				t.Expenses, err = t.Expenses.Add(p.Amount)
+			default:
+				continue // assets, liabilities, and priced share postings are not the income statement
+			}
+			if err != nil {
+				return bookSummary{}, err
+			}
+		}
+	}
+
+	for _, t := range totals {
+		net, err := t.Income.Add(t.Expenses.Negate())
+		if err != nil {
+			return bookSummary{}, err
+		}
+		t.Net = net
+		if !t.Income.IsZero() || !t.Expenses.IsZero() || !t.Uncategorized.IsZero() {
+			sum.Totals = append(sum.Totals, *t)
+		}
+	}
+	sort.Slice(sum.Totals, func(i, j int) bool { return sum.Totals[i].Commodity < sum.Totals[j].Commodity })
+	return sum, nil
+}
+
+func topLevel(account string) string {
+	if i := strings.Index(account, ":"); i >= 0 {
+		return account[:i]
+	}
+	return account
 }
 
 // filterByAccount keeps the lines with a posting whose account matches any of the patterns,
@@ -126,19 +219,13 @@ func postsToAny(e model.Entry, res []*regexp.Regexp) bool {
 }
 
 // report renders the books for a person: the fingerprint first, because it is the handle every
-// correction takes, then the line and where it posted.
-func report(out io.Writer, txs []model.Transaction, entries []model.Entry) error {
+// correction takes, then the line and where it posted, then the health line every format shares.
+func report(out io.Writer, txs []model.Transaction, entries []model.Entry, sum bookSummary) error {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "FINGERPRINT\tDATE\tPAYEE\tAMOUNT\tPOSTS TO")
-
-	var unknown int
 	for i, tx := range txs {
-		e := entries[i]
-		if e.Uncategorized() {
-			unknown++
-		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			tx.ID, tx.Date.Format("2006-01-02"), e.Payee, tx.Amount, accounts(e))
+			tx.ID, tx.Date.Format("2006-01-02"), entries[i].Payee, tx.Amount, accounts(entries[i]))
 	}
 	if err := w.Flush(); err != nil {
 		return err
@@ -146,12 +233,22 @@ func report(out io.Writer, txs []model.Transaction, entries []model.Entry) error
 
 	// Every line posts, so the only thing left to say is where the rules ran out, and how to see
 	// only those lines.
-	if unknown > 0 {
-		fmt.Fprintf(out, "\n%d lines posted, %d of them uncategorized (bk books -account Uncategorized shows only them)\n", len(txs), unknown)
+	if sum.UncategorizedLines > 0 {
+		fmt.Fprintf(out, "\n%d lines posted, %d of them uncategorized (bk books -account Uncategorized shows only them)\n", sum.Lines, sum.UncategorizedLines)
 	} else {
-		fmt.Fprintf(out, "\n%d lines posted, %d of them uncategorized\n", len(txs), unknown)
+		fmt.Fprintf(out, "\n%d lines posted, %d of them uncategorized\n", sum.Lines, sum.UncategorizedLines)
 	}
-	return nil
+
+	if len(sum.Totals) == 0 {
+		return nil
+	}
+	fmt.Fprintln(out)
+	t := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(t, "INCOME\tEXPENSES\tNET\tUNCATEGORIZED")
+	for _, row := range sum.Totals {
+		fmt.Fprintf(t, "%s\t%s\t%s\t%s\n", row.Income, row.Expenses, row.Net, row.Uncategorized)
+	}
+	return t.Flush()
 }
 
 // bookLine is one line of the books, machine-readable: the fingerprint a correction is keyed by,
@@ -190,23 +287,69 @@ func bookLines(txs []model.Transaction, entries []model.Entry) []bookLine {
 	return lines
 }
 
-func writeJSON(w io.Writer, txs []model.Transaction, entries []model.Entry) error {
+// jsonTotals is one commodity's health line, amounts as the same strings every format prints.
+type jsonTotals struct {
+	Commodity     string `json:"commodity"`
+	Income        string `json:"income"`
+	Expenses      string `json:"expenses"`
+	Net           string `json:"net"`
+	Uncategorized string `json:"uncategorized"`
+}
+
+type jsonSummary struct {
+	Lines              int          `json:"lines"`
+	UncategorizedLines int          `json:"uncategorized_lines"`
+	Totals             []jsonTotals `json:"totals"`
+}
+
+func writeJSON(w io.Writer, txs []model.Transaction, entries []model.Entry, sum bookSummary) error {
+	js := jsonSummary{Lines: sum.Lines, UncategorizedLines: sum.UncategorizedLines}
+	for _, t := range sum.Totals {
+		js.Totals = append(js.Totals, jsonTotals{
+			Commodity: t.Commodity, Income: t.Income.String(), Expenses: t.Expenses.String(),
+			Net: t.Net.String(), Uncategorized: t.Uncategorized.String(),
+		})
+	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(struct {
-		Lines []bookLine `json:"lines"`
-	}{bookLines(txs, entries)})
+		Lines   []bookLine  `json:"lines"`
+		Summary jsonSummary `json:"summary"`
+	}{bookLines(txs, entries), js})
+}
+
+// writeSummaryComments appends the health line to a ledger rendering as `;` comments, which
+// ledger tools and the import reader both ignore, so the artifact stays round-trippable while
+// carrying the same reading as every other format.
+func writeSummaryComments(w io.Writer, sum bookSummary) error {
+	if sum.Lines == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintf(w, "\n; %d lines posted, %d of them uncategorized\n", sum.Lines, sum.UncategorizedLines); err != nil {
+		return err
+	}
+	for _, t := range sum.Totals {
+		if _, err := fmt.Fprintf(w, "; income %s | expenses %s | net %s | uncategorized %s\n",
+			t.Income, t.Expenses, t.Net, t.Uncategorized); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // writeLedger regenerates the artifact in place. The books are a fold, so the ledger is derived
 // output: bookkeeper owns the file and rewrites it whole, and its git diff is the readable account
 // of what changed.
-func writeLedger(s *store.Store, txs []model.Transaction, entries []model.Entry) error {
+func writeLedger(s *store.Store, txs []model.Transaction, entries []model.Entry, sum bookSummary) error {
 	f, err := os.Create(s.Ledger())
 	if err != nil {
 		return err
 	}
 	if err := ledger.WriteAll(f, txs, entries); err != nil {
+		f.Close()
+		return err
+	}
+	if err := writeSummaryComments(f, sum); err != nil {
 		f.Close()
 		return err
 	}

@@ -397,9 +397,18 @@ a106c3b1d01636de-1  2026-03-05  J. Smith             1600.00  Income:Real Estate
 5f79d9a707bc433f-1  2026-03-12  UNKNOWN MERCHANT 88  -39.99   Uncategorized
 
 9 lines posted, 2 of them uncategorized (bk books -account Uncategorized shows only them)
+
+INCOME       EXPENSES    NET          UNCATEGORIZED
+1600.00 CAD  146.60 CAD  1453.40 CAD  -39.99 CAD
 ```
 
-The fingerprint is the handle every correction takes, which is why the table leads with it.
+The fingerprint is the handle every correction takes, which is why the table leads with it. The
+closing block is the health line: income, expenses, net, and money whose kind is unknown — kept in
+statement sign rather than guessed into either column — one row per commodity, since amounts of
+different commodities cannot honestly sum. Every format ends with this same line, computed once
+from the same fold (JSON carries it as a `summary` object, the ledger as a trailing comment that
+ledger tools ignore), so the formats cannot disagree; a filtered reading is summarized as
+filtered.
 
 ### Cash and accrual are one log read two ways
 

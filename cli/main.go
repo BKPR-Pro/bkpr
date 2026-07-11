@@ -225,6 +225,10 @@ var reference = []docGroup{
       and -format json is the same queue for an external model, which answers back through
       categorize and rules set. A filtered ledger is a reading and goes to stdout; the artifact
       in the store is only ever the whole books.
+      Every format ends with the same health line - income, expenses, net, and money whose kind
+      is unknown, one row per commodity - computed once from the same fold, so the formats
+      cannot disagree; a filtered reading is summarized as filtered. In the ledger form it is a
+      trailing comment, which ledger tools and the import reader both ignore.
       -basis chooses the lens: cash (the default) books only money that moved; accrual also
       books every open invoice and bill, and lets the line that pays one clear its receivable
       or payable. The basis is a read-time choice over one log, so the same books read either
