@@ -80,8 +80,38 @@ func TestReportFiltersByAccountSubstring(t *testing.T) {
 	}
 }
 
-// bs pairs a source account and amount with a date and categorized postings, which is what the
-// balance sheet folds.
+// A hand-kept entry can put its expense or income leg last, where the importer reads it as the
+// line's own account. The ledger artifact and ledger-cli count both sides, so the income
+// statement must match them.
+func TestReportCountsAnIncomeOrExpenseSourceAccount(t *testing.T) {
+	tx1, e1 := bs(1, "Expenses:Real Estate:Interest", cad2(151174), post("Assets:Bank:Chequing", cad2(-151174)))
+	tx2, e2 := bs(2, "Income:Rent:123 Main", cad2(-160000), post("Assets:Bank:Chequing", cad2(160000)))
+	stmt := buildReport([]model.Transaction{tx1, tx2}, []model.Entry{e1, e2}, time.Time{}, time.Time{}, "")
+
+	if got := rowAmount(t, stmt.Expenses, "Expenses:Real Estate:Interest"); got != "1511.74 CAD" {
+		t.Errorf("expense = %q, want the line's own account counted", got)
+	}
+	if got := rowAmount(t, stmt.Income, "Income:Rent:123 Main"); got != "1600.00 CAD" {
+		t.Errorf("income = %q, want it shown positive", got)
+	}
+	if len(stmt.Net) != 1 || stmt.Net[0].String() != "88.26 CAD" {
+		t.Errorf("net = %+v, want 88.26 CAD", stmt.Net)
+	}
+}
+
+// The -account filter reaches a source-account expense the same way it reaches a posting.
+func TestReportFilterReachesTheSourceAccount(t *testing.T) {
+	tx1, e1 := bs(1, "Expenses:Repairs:123 Main", cad2(4000), post("Assets:Bank:Chequing", cad2(-4000)))
+	tx2, e2 := bs(2, "Expenses:Fuel", cad2(6240), post("Assets:Bank:Chequing", cad2(-6240)))
+	stmt := buildReport([]model.Transaction{tx1, tx2}, []model.Entry{e1, e2}, time.Time{}, time.Time{}, "123 Main")
+
+	if len(stmt.Expenses) != 1 || stmt.Expenses[0].Account != "Expenses:Repairs:123 Main" {
+		t.Errorf("expenses = %+v, want only the filtered property's", stmt.Expenses)
+	}
+}
+
+// bs pairs a source account and amount with a date and categorized postings: the two sides every
+// statement folds.
 func bs(day int, account string, amount model.Amount, postings ...model.Posting) (model.Transaction, model.Entry) {
 	return model.Transaction{Date: on(day), Account: account, Amount: amount}, model.Entry{Postings: postings}
 }

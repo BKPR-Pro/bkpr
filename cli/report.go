@@ -36,31 +36,38 @@ type incomeStatement struct {
 
 // buildReport folds the entries into an income statement over [from, to] (a zero time is an open
 // bound), optionally narrowed to accounts whose path contains filter, so "123 Main" reaches a
-// property's income and expenses at once. It sums the Income and Expenses postings; the accounts a
-// P&L does not show (assets, liabilities, equity) are left out.
+// property's income and expenses at once. It sums the Income and Expenses sides wherever they sit:
+// usually a posting, but a hand-kept line can carry one as its own account (the importer reads the
+// last posting as the source), and both sides are the same money. The accounts a P&L does not show
+// (assets, liabilities, equity) are left out.
 func buildReport(txs []model.Transaction, entries []model.Entry, from, to time.Time, filter string) incomeStatement {
 	incomeRows := map[string]model.Amount{}
 	expenseRows := map[string]model.Amount{}
 	incomeTotal := map[string]model.Amount{}
 	expenseTotal := map[string]model.Amount{}
 
+	fold := func(account string, amount model.Amount) {
+		if !matches(account, filter) {
+			return
+		}
+		switch {
+		case isUnder(account, "Income"):
+			earned := amount.Negate() // income is negative-normal; a statement shows it positive
+			addAmount(incomeRows, account+"|"+earned.Commodity, earned)
+			addAmount(incomeTotal, earned.Commodity, earned)
+		case isUnder(account, "Expenses"):
+			addAmount(expenseRows, account+"|"+amount.Commodity, amount)
+			addAmount(expenseTotal, amount.Commodity, amount)
+		}
+	}
+
 	for i, tx := range txs {
 		if !inRange(tx.Date, from, to) {
 			continue
 		}
+		fold(tx.Account, tx.Amount)
 		for _, p := range entries[i].Postings {
-			if !matches(p.Account, filter) {
-				continue
-			}
-			switch {
-			case isUnder(p.Account, "Income"):
-				earned := p.Amount.Negate() // income is negative-normal; a statement shows it positive
-				addAmount(incomeRows, p.Account+"|"+earned.Commodity, earned)
-				addAmount(incomeTotal, earned.Commodity, earned)
-			case isUnder(p.Account, "Expenses"):
-				addAmount(expenseRows, p.Account+"|"+p.Amount.Commodity, p.Amount)
-				addAmount(expenseTotal, p.Amount.Commodity, p.Amount)
-			}
+			fold(p.Account, p.Amount)
 		}
 	}
 
@@ -111,9 +118,9 @@ type balanceSheet struct {
 }
 
 // buildBalanceSheet folds every movement up to asOf (a zero time means all of it) into account
-// balances. Unlike the income statement it counts the source-account posting too — the account the
-// statement came from, which the entries elide — because that is where cash and debt actually sit.
-// Liabilities and equity are credit-normal, so they are shown as the positive amount owed or held.
+// balances, counting the source-account side too — the account the statement came from, which the
+// entries elide — because that is where cash and debt actually sit. Liabilities and equity are
+// credit-normal, so they are shown as the positive amount owed or held.
 func buildBalanceSheet(txs []model.Transaction, entries []model.Entry, asOf time.Time, filter string) balanceSheet {
 	raw := map[string]model.Amount{}
 	for i, tx := range txs {

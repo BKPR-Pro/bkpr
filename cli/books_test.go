@@ -187,6 +187,30 @@ func TestSummarizeComputesTheHealthLine(t *testing.T) {
 	}
 }
 
+// A hand-kept line can carry its expense on the source-account side (the importer reads the last
+// posting as the line's own account); the health line counts it the same as a posting.
+func TestSummarizeCountsAnExpenseSourceAccount(t *testing.T) {
+	txs := []model.Transaction{{ID: "interest", Account: "Expenses:Mortgage:Interest",
+		Date:   time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+		Amount: model.Amount{Units: 151174, Scale: 2, Commodity: "CAD"}}}
+	entries := []model.Entry{{Postings: []model.Posting{{Account: "Assets:Bank:Chequing",
+		Amount: model.Amount{Units: -151174, Scale: 2, Commodity: "CAD"}}}}}
+
+	sum, err := summarize(txs, entries)
+	if err != nil {
+		t.Fatalf("summarize: %v", err)
+	}
+	if len(sum.Totals) != 1 {
+		t.Fatalf("totals = %+v, want one commodity", sum.Totals)
+	}
+	if got := sum.Totals[0].Expenses.String(); got != "1511.74 CAD" {
+		t.Errorf("expenses = %q, want the line's own account counted", got)
+	}
+	if got := sum.Totals[0].Net.String(); got != "-1511.74 CAD" {
+		t.Errorf("net = %q, want -1511.74 CAD", got)
+	}
+}
+
 // The drift guard: every format renders the one summary computed from the one fold, so the same
 // figures must appear in the table, the JSON, and the ledger. A format that computed its own
 // numbers would fail here the day it disagreed.
