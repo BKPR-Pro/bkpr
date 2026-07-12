@@ -1,6 +1,6 @@
 // Command bookkeeper turns bank and card statements into a set of books.
 //
-// A directory holds a set of books the way it holds a git repository, marked by `.bookkeeper` and
+// A directory holds a set of books the way it holds a git repository, marked by `.bkpr` and
 // found by walking up. `import` records what a statement said, once per line, into the append-only
 // log inside it. `books` folds that log back out through a rule set and renders it. Where the
 // rules run out of knowledge the account path stops at Uncategorized rather than guessing, and the
@@ -98,7 +98,7 @@ func main() {
 func usage() {
 	fmt.Fprint(os.Stderr, `bookkeeper (bkpr) - turn statements into books
 
-Every command finds the nearest .bookkeeper directory by walking up, as git does.
+Every command finds the nearest .bkpr directory by walking up, as git does.
 Run "bkpr help <command>" for one command, "bkpr docs" for the full reference.
 The thing a command acts on is its first argument; flags assert facts about it.
 Wherever a fingerprint is taken, a unique prefix is enough, as with a git hash.
@@ -161,7 +161,7 @@ type docGroup struct {
 
 const docsPreamble = `bookkeeper (bkpr) - turn bank and card statements into a plain-text double-entry ledger.
 
-A set of books lives in a .bookkeeper directory, found by walking up from the current
+A set of books lives in a .bkpr directory, found by walking up from the current
 directory the way git finds .git. The log inside it (log.jsonl) is the book of record;
 everything else, including the ledger artifact, is a fold over it and is regenerated.
 
@@ -186,7 +186,7 @@ var reference = []docGroup{
       without -confirm it is a dry run that says what would be lost. It is not how a mistake
       is corrected - a wrong line is void, a wrong rule is rules rm, a wrong settle is
       -reopen, each a later fact that supersedes - and not how a bad batch is unwound: every
-      write is a pure append, so git restore .bookkeeper/log.jsonl rolls the book back to any
+      write is a pure append, so git restore .bkpr/log.jsonl rolls the book back to any
       committed point. After a reset the old log is recoverable only from git.
 `},
 		{[]string{"connectors"}, `  connectors register <name> -kind <kind> -url <url> -token-env <ENV> -account <a> [-currency <c>]
@@ -281,7 +281,7 @@ var reference = []docGroup{
 		{[]string{"books"}, `  books [-format table|json|ledger] [-basis cash|accrual] [-since YYYY-MM-DD] [-account <re> ...]
         [-from YYYY-MM-DD] [-to YYYY-MM-DD] [-stdout]
       Fold the log into a table (default), machine-readable JSON, or regenerate
-      .bookkeeper/books.ledger (-stdout writes the ledger to standard output instead).
+      .bkpr/books.ledger (-stdout writes the ledger to standard output instead).
       -account narrows any of the three to the lines posting to a matching account, at any
       depth, the way ledger matches account names; repeat it to name several accounts, and a
       line posting to any of them is kept. -from and -to narrow by date, both ends inclusive,

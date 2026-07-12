@@ -9,6 +9,19 @@ import (
 	"github.com/dallasread/bookkeeper/lib/store"
 )
 
+// The marker directory is .bkpr, the short name the CLI goes by.
+func TestInitCreatesTheBkprMarker(t *testing.T) {
+	dir := t.TempDir()
+
+	path, err := store.Init(dir)
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if got := filepath.Base(path); got != ".bkpr" {
+		t.Errorf("marker = %q, want .bkpr", got)
+	}
+}
+
 func TestInitCreatesABookOfRecord(t *testing.T) {
 	dir := t.TempDir()
 

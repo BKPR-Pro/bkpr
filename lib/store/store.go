@@ -1,6 +1,6 @@
 // Package store locates the book of record.
 //
-// A directory holds a set of books the way it holds a git repository: a `.bookkeeper` marker at
+// A directory holds a set of books the way it holds a git repository: a `.bkpr` marker at
 // its root, found by walking up from wherever you happen to be standing.
 //
 // Everything inside it is committed. The log is the truth, one JSON object per line, so its git
@@ -20,7 +20,7 @@ import (
 
 const (
 	// Dir marks a directory as holding a set of books.
-	Dir = ".bookkeeper"
+	Dir = ".bkpr"
 
 	// LogFile is the book of record: append-only, one JSON object per line.
 	LogFile = "log.jsonl"
@@ -30,11 +30,11 @@ const (
 )
 
 // ErrNotFound reports that no book of record was found. It is never resolved by creating one.
-var ErrNotFound = errors.New("no .bookkeeper here or in any parent directory; run `bookkeeper init`")
+var ErrNotFound = errors.New("no .bkpr here or in any parent directory; run `bkpr init`")
 
 // Store is an open book of record.
 type Store struct {
-	Path string // the .bookkeeper directory
+	Path string // the .bkpr directory
 	Log  *eventlog.Log
 
 	close func() error

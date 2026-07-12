@@ -22,7 +22,7 @@ func TestImportAnotherBooksLog(t *testing.T) {
 	if err := ruleSetOne([]string{"coffee", "-category", "Expenses:Meals", "-payee", "Coffee House"}); err != nil {
 		t.Fatalf("rules set: %v", err)
 	}
-	theirLog, err := filepath.Abs(filepath.Join(".bookkeeper", "log.jsonl"))
+	theirLog, err := filepath.Abs(filepath.Join(".bkpr", "log.jsonl"))
 	if err != nil {
 		t.Fatalf("Abs: %v", err)
 	}

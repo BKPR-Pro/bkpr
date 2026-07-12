@@ -305,13 +305,13 @@ response is the part that gets lost. It is designed for and not built.)
 `bkpr` is the command-line wrapper; `go build -o bkpr ./cli` builds it, or run it from a checkout with
 `go run ./cli`.
 
-`init` creates a set of books in the current directory, marked by a `.bookkeeper` directory the way
+`init` creates a set of books in the current directory, marked by a `.bkpr` directory the way
 a git repository is marked by `.git`. Every other command finds it by walking up, so you can run
 them from anywhere inside your project.
 
 ```sh
 bkpr init
-# Initialized a book of record in /your/project/.bookkeeper
+# Initialized a book of record in /your/project/.bkpr
 ```
 
 `import` records what a file said, and it is safe to run twice. A file is a one-time input, so its
@@ -361,7 +361,7 @@ artifact into an empty book regenerates the same fingerprints, and the same rule
 same books — which is exactly what the round-trip test drives, end to end, on every run.
 
 What the artifact deliberately does not carry is the rules, corrections, invoices, and connectors
-themselves. Those are facts, and facts live in the log: `.bookkeeper/log.jsonl` is the complete
+themselves. Those are facts, and facts live in the log: `.bkpr/log.jsonl` is the complete
 backup — one committable file holding everything the books cannot recompute — and restoring is
 copying it back (or `git checkout`). Encoding facts into artifact comments would be a second copy
 that could drift from the first, which is the one thing the design refuses.
@@ -371,7 +371,7 @@ that could drift from the first, which is the one thing the design refuses.
 The log is its own interchange format, so combining two books is an import, not a new adapter:
 
 ```sh
-bkpr import ../business/.bookkeeper/log.jsonl
+bkpr import ../business/.bkpr/log.jsonl
 ```
 
 The other book's events replay here in their order. Statement lines, invoices, bills, and exports
@@ -445,7 +445,7 @@ bkpr books -account Uncategorized           # only the lines the rules could not
 bkpr books -account Fuel -account Water     # several accounts, one reading
 bkpr books -from 2026-03-01 -to 2026-03-31  # exactly March: that month's lines and health line
 bkpr books -format json                     # the same reading for a machine
-bkpr books -format ledger                   # regenerates .bookkeeper/books.ledger
+bkpr books -format ledger                   # regenerates .bkpr/books.ledger
 bkpr books -account Fuel -format ledger     # a filtered ledger, to stdout; the artifact stays whole
 ```
 
@@ -674,7 +674,7 @@ Three different itches, three different tools, only one of them new:
 - **A wrong fact** is superseded, never erased: a bad line is `void`, a wrong rule is `rules rm`,
   a wrong settlement is `-reopen`. The mistake and its correction both stay in the log.
 - **A wrong batch** — an import with the wrong flags, a merge you regret — is git's job: every
-  write is a pure append, so `git restore .bookkeeper/log.jsonl` rolls the book back to any
+  write is a pure append, so `git restore .bkpr/log.jsonl` rolls the book back to any
   committed point, and the diff you are discarding is readable before you discard it.
 - **Starting over** is `bkpr reset`: the log emptied, the artifact removed, the directory still a
   book. It is the one verb in the tool that destroys history, so without `-confirm` it is a dry
@@ -735,7 +735,7 @@ out to the world.
 
 ## Books
 
-`-format ledger` regenerates `.bookkeeper/books.ledger`, the plain-text double-entry artifact.
+`-format ledger` regenerates `.bkpr/books.ledger`, the plain-text double-entry artifact.
 
 ```sh
 bkpr books -format ledger           # into the store
@@ -791,7 +791,7 @@ statement line already knows which account it came from, and a line no rule matc
 
 ## Status
 
-Everything lives in a `.bookkeeper` directory found by walking up, the way git finds `.git`. The
+Everything lives in a `.bkpr` directory found by walking up, the way git finds `.git`. The
 log is `log.jsonl`, committed, one event per line; the ledger is its committed artifact.
 Re-importing an overlapping statement is a proven no-op, two renders of the same log are
 byte-identical, changing a rule reclassifies history in one appended event, correcting a single
@@ -950,7 +950,7 @@ lib/books/            the commands and folds: Import, AddRule, Categorize, Raise
 lib/rules/            the deterministic categorization engine
 lib/costbasis/        folds acquisitions and disposals into a cost base (ACB, FIFO)
 lib/eventlog/         the append-only log and its storage
-lib/store/            locating and opening a .bookkeeper book of record
+lib/store/            locating and opening a .bkpr book of record
 lib/adapters/source/  imports statements: CSV, ledger files, and banks (via a Playwright script)
 lib/adapters/ledger/  renders the books as a plain-text double-entry artifact
 lib/adapters/rentapp/ the rent app connector: exports recorded rent payments
