@@ -130,10 +130,31 @@ func stripComment(s string) string {
 }
 
 // posting is one line of an entry: an account, and an amount unless it is the elided (balancing) one.
+// A cross-commodity leg also carries the total price the "@@" form gave it, the cost basis a later
+// sale reads.
 type posting struct {
 	account string
 	amount  model.Amount
+	cost    *model.Amount
 	priced  bool
+}
+
+// value is what the posting contributes toward balancing the line. A plain posting contributes its
+// own amount; a priced posting contributes its total cost, signed to follow the quantity, so shares
+// acquired add the cash they cost and shares disposed subtract the cash they raised. It mirrors
+// model.Posting's own valuation, the two kept in step.
+func (p posting) value() model.Amount {
+	if p.cost == nil {
+		return p.amount
+	}
+	c := *p.cost
+	if c.Units < 0 {
+		c = c.Negate()
+	}
+	if p.amount.Units < 0 {
+		return c.Negate()
+	}
+	return c
 }
 
 func parseHeader(s string) (time.Time, string, error) {
@@ -155,11 +176,11 @@ func parsePosting(s string) (posting, error) {
 	// ledger separates the account from the amount by two or more spaces, or a tab.
 	if i := twoSpaceGap(s); i >= 0 {
 		account := strings.TrimSpace(s[:i])
-		amount, err := model.ParseAmount(strings.TrimSpace(s[i:]))
+		amount, cost, err := model.ParsePosting(strings.TrimSpace(s[i:]), "")
 		if err != nil {
 			return posting{}, err
 		}
-		return posting{account: account, amount: amount, priced: true}, nil
+		return posting{account: account, amount: amount, cost: cost, priced: true}, nil
 	}
 	return posting{account: s}, nil
 }
@@ -189,17 +210,22 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 			continue
 		}
 		priced = append(priced, p)
-		prev, ok := sums[p.amount.Commodity]
+		// A priced leg balances at its value in the line's own commodity: a plain leg is its amount,
+		// a cross-commodity leg is its cost. Summing the cost, not the share quantity, is what lets a
+		// share or property leg cancel against the cash that funded it instead of standing as its own
+		// unbalanced commodity.
+		v := p.value()
+		prev, ok := sums[v.Commodity]
 		if !ok {
-			sums[p.amount.Commodity] = p.amount
-			commodities = append(commodities, p.amount.Commodity)
+			sums[v.Commodity] = v
+			commodities = append(commodities, v.Commodity)
 			continue
 		}
-		next, err := prev.Add(p.amount)
+		next, err := prev.Add(v)
 		if err != nil {
 			return model.Transaction{}, nil, err
 		}
-		sums[p.amount.Commodity] = next
+		sums[v.Commodity] = next
 	}
 	if len(sums) == 0 {
 		return model.Transaction{}, nil, fmt.Errorf("entry has no priced postings")
@@ -250,7 +276,7 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 	}
 	side := make([]model.Posting, 0, len(categorized))
 	for _, p := range categorized {
-		side = append(side, model.Posting{Account: p.account, Amount: p.amount})
+		side = append(side, model.Posting{Account: p.account, Amount: p.amount, Cost: p.cost})
 	}
 	return tx, side, nil
 }

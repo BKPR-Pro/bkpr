@@ -278,3 +278,87 @@ func TestReadLedgerPrefersTheMemoNoteOverThePayee(t *testing.T) {
 		t.Errorf("description = %q, want the memo, not the payee", txs[0].Description)
 	}
 }
+
+// A posting priced with "@@" — the very form the ledger writer emits for a cross-commodity leg —
+// reads back carrying its cost, so a book bookkeeper wrote re-imports instead of being refused.
+func TestReadLedgerReadsAnAtAtPricedPosting(t *testing.T) {
+	txs, entries, err := source.ReadLedger(strings.NewReader(`2026/03/01  * Broker
+  Assets:Brokerage:AAPL  10 AAPL @@ 1000.00 USD
+  Assets:Bank  -1000.00 USD
+`))
+	if err != nil {
+		t.Fatalf("ReadLedger: %v", err)
+	}
+	if len(txs) != 1 || len(entries) != 1 {
+		t.Fatalf("got %d txs / %d entries, want 1 each", len(txs), len(entries))
+	}
+	if len(entries[0].Postings) != 1 {
+		t.Fatalf("postings = %+v, want the single AAPL leg", entries[0].Postings)
+	}
+	got := entries[0].Postings[0]
+	if got.Account != "Assets:Brokerage:AAPL" || got.Amount.String() != "10 AAPL" {
+		t.Errorf("posting = %+v, want 10 AAPL at Assets:Brokerage:AAPL", got)
+	}
+	if got.Cost == nil || got.Cost.String() != "1000.00 USD" {
+		t.Errorf("cost = %v, want 1000.00 USD carried from the @@ price", got.Cost)
+	}
+	// The share leg is valued through its cost, so the line balances against the cash it took.
+	if !entries[0].Balances(txs[0]) {
+		t.Error("the priced categorization does not balance its line")
+	}
+}
+
+// A property purchase mixes a Property commodity (its two legs cancelling) with a cash split. Priced
+// with @@, the Property legs cancel in cash too, so the entry balances on the financing alone and
+// nothing is left uncategorized — the round trip that a bare commodity unit could not make.
+func TestReadLedgerRoundTripsAPricedPropertyPurchase(t *testing.T) {
+	txs, entries, err := source.ReadLedger(strings.NewReader(`2024/10/10  * Vendor
+  Equity:Real Estate:9 Schoodic Street  -1 Property @@ 50000.00 CAD
+  Assets:Real Estate:9 Schoodic Street   1 Property @@ 50000.00 CAD
+  Expenses:Real Estate:Legal:9 Schoodic Street  5000.00 CAD
+  Liabilities:Simplii LOC:9 Schoodic Street
+`))
+	if err != nil {
+		t.Fatalf("ReadLedger: %v", err)
+	}
+	tx := txs[0]
+	if tx.Account != "Liabilities:Simplii LOC:9 Schoodic Street" {
+		t.Errorf("source account = %q, want the amountless Simplii LOC plug", tx.Account)
+	}
+	if tx.Amount.String() != "-5000.00 CAD" {
+		t.Errorf("line amount = %q, want -5000.00 CAD (the financing the split did not cover)", tx.Amount)
+	}
+	if len(entries[0].Postings) != 3 {
+		t.Fatalf("postings = %+v, want both Property legs and the Legal leg", entries[0].Postings)
+	}
+	var pricedLegs int
+	for _, p := range entries[0].Postings {
+		if p.Amount.Commodity == "Property" {
+			if p.Cost == nil || p.Cost.String() != "50000.00 CAD" {
+				t.Errorf("Property leg %q has cost %v, want 50000.00 CAD", p.Account, p.Cost)
+			}
+			pricedLegs++
+		}
+	}
+	if pricedLegs != 2 {
+		t.Errorf("carried %d priced Property legs, want 2", pricedLegs)
+	}
+	if entries[0].Uncategorized() {
+		t.Error("a fully priced purchase left an uncategorized leg")
+	}
+	if !entries[0].Balances(tx) {
+		t.Error("the carried categorization does not balance its line")
+	}
+}
+
+// A per-unit "@" is refused on read exactly as it is on the -post path: a total is the exact cash
+// paid, a per-unit price is not.
+func TestReadLedgerRefusesAPerUnitPrice(t *testing.T) {
+	_, _, err := source.ReadLedger(strings.NewReader(`2026/03/01  * Broker
+  Assets:Brokerage:AAPL  10 AAPL @ 100.00 USD
+  Assets:Bank  -1000.00 USD
+`))
+	if err == nil {
+		t.Fatal("a per-unit @ price should be refused on read")
+	}
+}
