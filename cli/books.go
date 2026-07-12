@@ -130,10 +130,11 @@ type commodityTotals struct {
 	Uncategorized model.Amount // money whose kind is unknown, in statement sign: money out reads negative
 }
 
-// summarize folds the (possibly filtered) reading into its health line. Income postings carry the
-// negation of the deposit, so they are negated back to a magnitude; a bare Uncategorized posting
-// is money whose kind is unknown and is reported in statement sign, because calling it income or
-// expense is exactly the guess the books refuse to make.
+// summarize folds the (possibly filtered) reading into its health line, counting each line's own
+// account alongside its postings: a hand-kept line can carry its expense or income there. Income
+// carries the negation of the deposit, so it is negated back to a magnitude; a bare Uncategorized
+// posting is money whose kind is unknown and is reported in statement sign, because calling it
+// income or expense is exactly the guess the books refuse to make.
 func summarize(txs []model.Transaction, entries []model.Entry) (bookSummary, error) {
 	sum := bookSummary{Lines: len(txs)}
 	totals := map[string]*commodityTotals{}
@@ -146,26 +147,32 @@ func summarize(txs []model.Transaction, entries []model.Entry) (bookSummary, err
 		}
 		return t
 	}
+	fold := func(account string, amount model.Amount) error {
+		t := forCommodity(amount.Commodity)
+		var err error
+		switch {
+		case account == model.Uncategorized:
+			t.Uncategorized, err = t.Uncategorized.Add(amount.Negate())
+		case topLevel(account) == "Income":
+			t.Income, err = t.Income.Add(amount.Negate())
+		case topLevel(account) == "Expenses":
+			t.Expenses, err = t.Expenses.Add(amount)
+		default:
+			// assets, liabilities, and priced share postings are not the income statement
+		}
+		return err
+	}
 
 	for i := range txs {
 		e := entries[i]
 		if e.Uncategorized() {
 			sum.UncategorizedLines++
 		}
+		if err := fold(txs[i].Account, txs[i].Amount); err != nil {
+			return bookSummary{}, err
+		}
 		for _, p := range e.Postings {
-			t := forCommodity(p.Amount.Commodity)
-			var err error
-			switch {
-			case p.Account == model.Uncategorized:
-				t.Uncategorized, err = t.Uncategorized.Add(p.Amount.Negate())
-			case topLevel(p.Account) == "Income":
-				t.Income, err = t.Income.Add(p.Amount.Negate())
-			case topLevel(p.Account) == "Expenses":
-				t.Expenses, err = t.Expenses.Add(p.Amount)
-			default:
-				continue // assets, liabilities, and priced share postings are not the income statement
-			}
-			if err != nil {
+			if err := fold(p.Account, p.Amount); err != nil {
 				return bookSummary{}, err
 			}
 		}
