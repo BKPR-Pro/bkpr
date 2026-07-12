@@ -426,33 +426,50 @@ func helpTopic(w io.Writer, name string) error {
 	return nil
 }
 
-// versionCmd prints what build this is, from the info the Go toolchain embeds: the module version
-// when installed by tag, or the VCS revision when built from a checkout.
+// version is empty in an ordinary build and set by the release build via
+// -ldflags "-X main.version=<tag>". When set it names the release; otherwise the
+// toolchain's own record (the module version, or (devel) for a plain checkout build)
+// is used.
+var version string
+
+// versionCmd prints what build this is. It prefers the injected release tag, and
+// otherwise reports the info the Go toolchain embeds: the module version when
+// installed by tag, or the VCS revision when built from a checkout.
 func versionCmd(w io.Writer) {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		fmt.Fprintln(w, "bk (unknown build)")
-		return
-	}
-	line := "bk " + info.Main.Version
+	mainVersion := version
 	var revision, modified string
-	for _, s := range info.Settings {
-		switch s.Key {
-		case "vcs.revision":
-			revision = s.Value
-		case "vcs.modified":
-			if s.Value == "true" {
-				modified = ", modified"
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if mainVersion == "" {
+			mainVersion = info.Main.Version
+		}
+		for _, s := range info.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				revision = s.Value
+			case "vcs.modified":
+				if s.Value == "true" {
+					modified = ", modified"
+				}
 			}
 		}
 	}
+	if mainVersion == "" {
+		mainVersion = "(unknown build)"
+	}
+	fmt.Fprintln(w, versionLine(mainVersion, revision, modified))
+}
+
+// versionLine assembles the display string, abbreviating the revision to a
+// git-short length and omitting the parenthetical when there is no revision.
+func versionLine(mainVersion, revision, modified string) string {
+	line := "bk " + mainVersion
 	if len(revision) > 12 {
 		revision = revision[:12]
 	}
 	if revision != "" {
 		line += fmt.Sprintf(" (%s%s)", revision, modified)
 	}
-	fmt.Fprintln(w, line)
+	return line
 }
 
 func initStore(args []string) error {

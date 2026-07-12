@@ -12,6 +12,26 @@ it imports statements, writes rules, and answers the `Uncategorized` lines the s
 trace of who is `-actor`, stamped on each authoring command (default `human`; e.g. `-actor claude`
 when an agent runs it), so the log records the hand without the tool caring whose it is.
 
+## Install
+
+Each tagged release ships a prebuilt `bk` for macOS and Linux, so another machine
+runs bookkeeper without a Go toolchain. Download the binary for your system, mark it
+executable, and put it on your `PATH`:
+
+```sh
+# pick your os/arch: darwin-arm64, darwin-amd64, linux-arm64, linux-amd64
+os_arch="darwin-arm64"
+curl -fsSL -o bk "https://github.com/dallasread/bookkeeper/releases/latest/download/bk-${os_arch}"
+chmod +x bk
+sudo mv bk /usr/local/bin/     # anywhere on your PATH
+
+bk version                     # confirms which release you have
+```
+
+Each release also carries a `checksums.txt`; verify the download against it before
+trusting the binary if you like. To build from a checkout instead, see
+[Quickstart](#quickstart) below or [Usage](#usage).
+
 ## Quickstart
 
 ```sh
