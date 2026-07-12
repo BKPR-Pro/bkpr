@@ -145,6 +145,57 @@ func TestInvalidRegexIsRejected(t *testing.T) {
 	}
 }
 
+// A charge on a card already includes its sales tax, so a vendor known to be taxed splits into two
+// postings: the pre-tax amount to the category, and the tax extracted from the same total to the
+// tax account. The rate is tax-inclusive, exactly as apply-hst.rb did: net = total / (1 + rate).
+func TestATaxedRuleSplitsTheTaxOutOfTheTotal(t *testing.T) {
+	e := engine(t, rules.Rule{
+		Match: `acme`, Category: "Expenses:Repairs:Materials",
+		TaxRate: "15%", TaxAccount: "Assets:HST ITC",
+	})
+
+	line := taxable("ACME HARDWARE", -11500) // 115.00 out, tax included
+	got := e.Apply(line)
+
+	if len(got.Postings) != 2 {
+		t.Fatalf("want two postings, got %d: %+v", len(got.Postings), got.Postings)
+	}
+	net, tax := got.Postings[0], got.Postings[1]
+	if net.Account != "Expenses:Repairs:Materials" || net.Amount.String() != "100.00 CAD" {
+		t.Errorf("net posting = %s %s, want Expenses:Repairs:Materials 100.00 CAD", net.Account, net.Amount)
+	}
+	if tax.Account != "Assets:HST ITC" || tax.Amount.String() != "15.00 CAD" {
+		t.Errorf("tax posting = %s %s, want Assets:HST ITC 15.00 CAD", tax.Account, tax.Amount)
+	}
+}
+
+// However the rate rounds, the two postings must still account for the whole line: the entry stays
+// balanced by construction, because the tax posting takes exactly what the net posting left.
+func TestATaxSplitStillBalancesTheTransaction(t *testing.T) {
+	e := engine(t, rules.Rule{
+		Match: `acme`, Category: "Expenses:Repairs", TaxRate: "13%", TaxAccount: "Assets:HST ITC",
+	})
+
+	line := taxable("ACME HARDWARE", -8420) // 84.20 out; 13% does not divide evenly
+	if got := e.Apply(line); !got.Balances(line) {
+		t.Errorf("taxed entry does not balance: %+v", got.Postings)
+	}
+}
+
+// A tax rate is meaningless without somewhere to post the tax, so the pair is required together.
+func TestATaxRateWithoutAnAccountIsRejected(t *testing.T) {
+	if _, err := rules.New([]rules.Rule{{Match: `acme`, Category: "Expenses:Repairs", TaxRate: "15%"}}); err == nil {
+		t.Fatal("expected an error for a tax rate with no account")
+	}
+}
+
+func taxable(description string, units int64) model.Transaction {
+	return model.Transaction{
+		Description: description, Account: "Liabilities:Card:Visa",
+		Amount: model.Amount{Units: units, Scale: 2, Commodity: "CAD"},
+	}
+}
+
 // A rule carries an opaque metadata bag the engine neither reads nor validates, and Apply lands it
 // on the entry. It is the seam a connector (e.g. the rent app) reads its own keys from, so a
 // deposit categorized to a property can also name the lease it should be exported against.

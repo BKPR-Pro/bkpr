@@ -63,6 +63,33 @@ func TestUpsertRuleChangesOnlyNamedFields(t *testing.T) {
 	}
 }
 
+// A vendor known to be taxed is authored with a rate and the account the tax posts to, and both
+// survive onto the rule so every line it matches splits the tax out of the total.
+func TestUpsertRuleSetsTax(t *testing.T) {
+	log := ruleLog(t)
+	r := rules.Rule{Match: "acme", Category: "Expenses:Repairs:Materials", TaxRate: "15%", TaxAccount: "Assets:HST ITC"}
+
+	err := upsertRule(log, r, map[string]bool{"category": true, "tax-rate": true, "tax-account": true}, "", "", "human")
+	if err != nil {
+		t.Fatalf("upsertRule: %v", err)
+	}
+	got := find(t, log, "acme")
+	if got.TaxRate != "15%" || got.TaxAccount != "Assets:HST ITC" {
+		t.Errorf("taxed rule = %+v, want 15%% to Assets:HST ITC", got)
+	}
+}
+
+// A rate with nowhere to post the tax is refused at authoring, so a poison rule never reaches the
+// log to break every later read of the books.
+func TestUpsertRuleRejectsTaxRateWithoutAccount(t *testing.T) {
+	log := ruleLog(t)
+	r := rules.Rule{Match: "acme", Category: "Expenses:Repairs", TaxRate: "15%"}
+
+	if err := upsertRule(log, r, map[string]bool{"category": true, "tax-rate": true}, "", "", "human"); err == nil {
+		t.Fatal("expected an error for a tax rate with no account")
+	}
+}
+
 // Metadata merges per key on a change, so naming one key does not drop the others.
 func TestUpsertRuleMergesMetadata(t *testing.T) {
 	log := ruleLog(t)

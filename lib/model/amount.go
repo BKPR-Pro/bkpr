@@ -123,6 +123,43 @@ func parseDecimal(s string) (int64, uint8, error) {
 	return units, uint8(len(fracPart)), nil
 }
 
+// ParsePercent reads a tax rate written as a percentage, e.g. "15%" or "13.5%", into an exact
+// numerator and denominator (15% is 15, 100). The percent sign is required, so a rate is never
+// mistaken for a bare decimal: "0.15" would read as 0.15%, not 15%, so it is refused.
+func ParsePercent(s string) (numer, denom int64, err error) {
+	s = strings.TrimSpace(s)
+	if !strings.HasSuffix(s, "%") {
+		return 0, 0, fmt.Errorf("rate %q must be a percentage like %q", s, "15%")
+	}
+	units, scale, err := parseDecimal(strings.TrimSuffix(s, "%"))
+	if err != nil {
+		return 0, 0, err
+	}
+	if units < 0 {
+		return 0, 0, fmt.Errorf("rate %q cannot be negative", s)
+	}
+	return units, 100 * pow10(scale), nil
+}
+
+// SplitInclusive divides a tax-inclusive amount into its pre-tax base and the tax itself, for a rate
+// given as numer/denom (15% is 15, 100). The base is a / (1 + rate) = a*denom/(denom+numer), rounded
+// half up to the amount's own scale; the tax takes exactly the remainder, so base and tax always sum
+// back to a and an entry built from the two cannot be unbalanced by rounding.
+func (a Amount) SplitInclusive(numer, denom int64) (base, tax Amount) {
+	whole := denom + numer
+	mag := a.Units
+	if mag < 0 {
+		mag = -mag
+	}
+	b := (mag*denom + whole/2) / whole
+	if a.Units < 0 {
+		b = -b
+	}
+	base = Amount{Units: b, Scale: a.Scale, Commodity: a.Commodity}
+	tax = Amount{Units: a.Units - b, Scale: a.Scale, Commodity: a.Commodity}
+	return base, tax
+}
+
 // String renders the canonical ledger form.
 func (a Amount) String() string {
 	if a.Scale == 0 {

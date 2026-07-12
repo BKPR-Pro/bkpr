@@ -25,12 +25,20 @@ type Rule struct {
 	Payee    string `json:"payee,omitempty"`
 	Category string `json:"category,omitempty"`
 
+	// TaxRate and TaxAccount make a vendor a taxed one: its charge already includes sales tax, so
+	// Apply extracts the tax from the total (tax-inclusive, net = total / (1 + rate)) and posts it
+	// to TaxAccount, leaving the pre-tax amount on the category. The rate is a percentage string
+	// ("15%"); the two are required together, since a rate has nowhere to go without an account.
+	TaxRate    string `json:"tax_rate,omitempty"`
+	TaxAccount string `json:"tax_account,omitempty"`
+
 	// Metadata is an opaque bag the engine neither reads nor validates. Apply carries it onto the
 	// entry, first-wins per key, so a connector can read its own namespaced keys (e.g.
 	// rentapp.lease) off a categorized line without the core knowing what they mean.
 	Metadata map[string]string `json:"metadata,omitempty"`
 
-	re *regexp.Regexp
+	re             *regexp.Regexp
+	taxNum, taxDen int64
 }
 
 // Engine applies an ordered rule set.
@@ -50,6 +58,19 @@ func New(rs []Rule) (*Engine, error) {
 			return nil, fmt.Errorf("rule %d (%q): %w", i, r.Match, err)
 		}
 		r.re = re
+		if r.TaxRate != "" || r.TaxAccount != "" {
+			if r.TaxRate == "" {
+				return nil, fmt.Errorf("rule %d (%q): a tax account needs a tax rate", i, r.Match)
+			}
+			if r.TaxAccount == "" {
+				return nil, fmt.Errorf("rule %d (%q): a tax rate needs a tax account", i, r.Match)
+			}
+			num, den, err := model.ParsePercent(r.TaxRate)
+			if err != nil {
+				return nil, fmt.Errorf("rule %d (%q): %w", i, r.Match, err)
+			}
+			r.taxNum, r.taxDen = num, den
+		}
 		compiled[i] = r
 	}
 	return &Engine{rules: compiled}, nil
@@ -59,11 +80,12 @@ func New(rs []Rule) (*Engine, error) {
 // it, and turns the result into an entry. Every line posts: one no rule matches goes to
 // Uncategorized rather than being withheld, or guessed into Expenses or Income.
 func (e *Engine) Apply(tx model.Transaction) model.Entry {
-	var payee, category string
+	var payee, category, taxAccount string
+	var taxNum, taxDen int64
 	var metadata map[string]string
 
 	// Every field is first-wins, so the walk cannot stop early: a later matching rule may still be
-	// the first to supply a payee, a category, or a metadata key an earlier match left empty.
+	// the first to supply a payee, a category, a tax, or a metadata key an earlier match left empty.
 	for _, r := range e.rules {
 		if !r.re.MatchString(tx.Description) {
 			continue
@@ -73,6 +95,9 @@ func (e *Engine) Apply(tx model.Transaction) model.Entry {
 		}
 		if category == "" {
 			category = r.Category
+		}
+		if taxDen == 0 && r.taxDen != 0 {
+			taxAccount, taxNum, taxDen = r.TaxAccount, r.taxNum, r.taxDen
 		}
 		for k, v := range r.Metadata {
 			if _, taken := metadata[k]; taken {
@@ -92,9 +117,19 @@ func (e *Engine) Apply(tx model.Transaction) model.Entry {
 		category = model.Uncategorized
 	}
 
+	// The statement's sign is from the source account's point of view, so the categorized side takes
+	// the opposite one. A taxed vendor splits that total into the pre-tax amount on the category and
+	// the tax on its own account; both sum back to the line, so the entry stays balanced.
+	full := tx.Amount.Negate()
+	postings := []model.Posting{{Account: category, Amount: full}}
+	if taxDen != 0 {
+		net, tax := full.SplitInclusive(taxNum, taxDen)
+		postings = []model.Posting{{Account: category, Amount: net}, {Account: taxAccount, Amount: tax}}
+	}
+
 	return model.Entry{
 		Payee:    payee,
-		Postings: []model.Posting{{Account: category, Amount: tx.Amount.Negate()}},
+		Postings: postings,
 		Metadata: metadata,
 	}
 }

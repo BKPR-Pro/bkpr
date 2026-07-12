@@ -73,6 +73,20 @@ func TestUsageStylesEveryCommandUnderASection(t *testing.T) {
 	}
 }
 
+// The rules help topic documents the tax split, so a person authoring a taxed vendor learns the two
+// flags from the tool itself, not only the README.
+func TestRulesHelpDocumentsTax(t *testing.T) {
+	var buf bytes.Buffer
+	if err := helpTopic(&buf, "rules"); err != nil {
+		t.Fatalf("helpTopic: %v", err)
+	}
+	for _, want := range []string{"-tax-rate", "-tax-account"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("rules help should mention %q", want)
+		}
+	}
+}
+
 // A plain palette leaves the text bare, so a pipe, a redirect, or an agent reading the screen never
 // sees an escape code.
 func TestUsagePlainPaletteEmitsNoAnsi(t *testing.T) {

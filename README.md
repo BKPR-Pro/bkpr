@@ -435,6 +435,19 @@ bkpr rules set "city water"  -category "Expenses:Utilities:Water" -before "water
 bkpr rules list
 ```
 
+A vendor whose charge already includes sales tax carries `-tax-rate` and `-tax-account`. The rate is
+what the total includes (`15%`), and the tax is extracted from it, not added on top: `net = total /
+(1 + rate)`, the remainder posts to the tax account, and the pre-tax amount stays on the category, so
+the two postings still account for the whole line. Both flags are required together. Like every rule
+this is a read-time fold, so setting a vendor's rate splits every line it has ever matched, not only
+new imports, and clearing the rate un-splits them just as retroactively.
+
+```sh
+bkpr rules set "acme hardware" -category "Expenses:Repairs:Materials" \
+  -tax-rate "15%" -tax-account "Assets:HST ITC"
+# a $115.00 charge now posts 100.00 to Materials and 15.00 to the ITC account
+```
+
 `books` folds the log and renders it: a table or JSON to read, or the ledger artifact. `-account`
 narrows any of the three to the lines posting to a matching account — repeat it to name several —
 so there is no separate review command: the decision queue is just the books, filtered:
@@ -935,10 +948,13 @@ first, a monthly mortgage) and a `project` fold that carries it forward to show 
 and balances, with expected-vs-actual reconciliation ("which rent has not landed") as its follow-on.
 Like every other view it is a fold over the log, so it adds a projection, not stored state.
 
-Backlog, until asked: remembered CSV import profiles (so a file's account and columns need not be
-retyped each month), an aggregator or FDX official-API adapter if a free one appears (realistically
-2027), reading the share quantity straight off a brokerage statement so a trade need not be typed,
-and out-of-tree connectors as installable plugins.
+Backlog, until asked: **rules scoped to a source account**, so a rule can fire only on lines imported
+under a given `-account` and the same memo can mean different things on different cards (today a rule
+matches on the description alone, which forces a payee-only workaround when two cards share a memo);
+remembered CSV import profiles (so a file's account and columns need not be retyped each month), an
+aggregator or FDX official-API adapter if a free one appears (realistically 2027), reading the share
+quantity straight off a brokerage statement so a trade need not be typed, and out-of-tree connectors
+as installable plugins.
 
 ## Layout
 

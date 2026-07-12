@@ -66,6 +66,53 @@ func TestARulesMetadataSurvivesTheLog(t *testing.T) {
 	}
 }
 
+// A rule's tax rate and account are part of the rule, so they must survive the round trip: the
+// event stores them and the fold rebuilds them, which is what makes the split retroactive — set a
+// vendor's rate today and every past line it matched re-splits on the next read.
+func TestARulesTaxSurvivesTheLog(t *testing.T) {
+	log := newLog()
+	r := rule("acme", "Expenses:Repairs:Materials")
+	r.TaxRate, r.TaxAccount = "15%", "Assets:HST ITC"
+	loaded(t, log, r)
+
+	set, err := books.Rules(log)
+	if err != nil {
+		t.Fatalf("Rules: %v", err)
+	}
+	if len(set) != 1 || set[0].TaxRate != "15%" || set[0].TaxAccount != "Assets:HST ITC" {
+		t.Errorf("folded rule = %+v, want 15%% to Assets:HST ITC intact", set[0])
+	}
+}
+
+// End to end: a taxed vendor's imported line splits in the rendered books — the pre-tax amount on
+// the category, the tax extracted from the same total on its own account — and the two still
+// balance the statement line. Nothing about the split is stored; it re-derives from the rule.
+func TestLedgerSplitsTaxOnATaxedVendor(t *testing.T) {
+	log := newLog()
+	r := rule("acme", "Expenses:Repairs:Materials")
+	r.TaxRate, r.TaxAccount = "15%", "Assets:HST ITC"
+	loaded(t, log, r)
+	importOne(t, log, line("acme", 3, -11500, "ACME HARDWARE #4471")) // 115.00 out, tax included
+
+	txs, entries := ledger(t, log)
+	if len(entries) != 1 {
+		t.Fatalf("want one entry, got %d", len(entries))
+	}
+	if !entries[0].Balances(txs[0]) {
+		t.Fatalf("split entry does not balance: %+v", entries[0].Postings)
+	}
+	got := map[string]string{}
+	for _, p := range entries[0].Postings {
+		got[p.Account] = p.Amount.String()
+	}
+	if got["Expenses:Repairs:Materials"] != "100.00 CAD" {
+		t.Errorf("net posting = %q, want 100.00 CAD", got["Expenses:Repairs:Materials"])
+	}
+	if got["Assets:HST ITC"] != "15.00 CAD" {
+		t.Errorf("tax posting = %q, want 15.00 CAD", got["Assets:HST ITC"])
+	}
+}
+
 // End to end: a rule's metadata rides the fold onto the entry the export reads, so a categorized rent
 // deposit names the lease it should be recorded against.
 func TestLedgerCarriesRuleMetadataOntoTheEntry(t *testing.T) {

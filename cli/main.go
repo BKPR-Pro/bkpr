@@ -147,7 +147,7 @@ var usageSections = []usageSection{
 		{"connectors list", ""},
 	}},
 	{"RULES", []usageLine{
-		{"rules set", "<re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]"},
+		{"rules set", "<re> [-category <account>] [-payee <name>] [-tax-rate <pct> -tax-account <account>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]"},
 		{"rules rm", "<re>"},
 		{"rules mv", "<re> [-before <re>]"},
 		{"rules list", ""},
@@ -328,11 +328,14 @@ var reference = []docGroup{
 `},
 	}},
 	{"RULES  (deterministic categorization; first matching rule wins per field)", []docTopic{
-		{[]string{"rules"}, `  rules set <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>]
+		{[]string{"rules"}, `  rules set <re> [-category <account>] [-payee <name>] [-tax-rate <pct> -tax-account <account>] [-meta <k=v> ...] [-before <re>] [-why <reason>]
       Add a rule, or change one already matching this pattern. On an existing rule only the
       fields you name change, and since that reclassifies every past line it matched, it
       takes a -why. A new rule lands last unless -before places it ahead of another. Account
-      paths are free-form and may stop at Uncategorized wherever knowledge runs out. -meta
+      paths are free-form and may stop at Uncategorized wherever knowledge runs out. -tax-rate
+      and -tax-account (required together) mark a vendor whose charge already includes sales
+      tax: the rate is extracted from the total (net = total / (1 + rate)) onto the category,
+      the tax onto its account, e.g. -tax-rate 15% -tax-account "Assets:HST ITC". -meta
       attaches opaque key=value pairs (repeatable) that a connector reads by name, e.g.
       -meta rentapp.lease=31 tells the export which lease a matching rent deposit belongs to.
       Either way it reports how many lines the books reclassified, so a pattern that catches
@@ -1090,6 +1093,8 @@ func ruleSetOne(args []string) error {
 	r.Match = pattern
 	fs.StringVar(&r.Category, "category", "", "account to post the line to")
 	fs.StringVar(&r.Payee, "payee", "", "payee to record on the entry")
+	fs.StringVar(&r.TaxRate, "tax-rate", "", "sales tax the total already includes, e.g. 15%; splits the tax onto -tax-account")
+	fs.StringVar(&r.TaxAccount, "tax-account", "", "account the extracted tax posts to, e.g. \"Assets:HST ITC\"")
 	fs.Var(&meta, "meta", "key=value carried onto the entry, repeatable, e.g. rentapp.lease=31")
 	before := fs.String("before", "", "on a new rule, place it ahead of the one matching this pattern")
 	why := fs.String("why", "", "why the rule changed; changing one reclassifies every line it matched")
@@ -1180,12 +1185,32 @@ func upsertRule(log *eventlog.Log, r rules.Rule, provided map[string]bool, befor
 		if provided["payee"] {
 			merged.Payee = r.Payee
 		}
+		if provided["tax-rate"] {
+			merged.TaxRate = r.TaxRate
+		}
+		if provided["tax-account"] {
+			merged.TaxAccount = r.TaxAccount
+		}
 		if provided["meta"] {
 			merged.Metadata = mergeMeta(merged.Metadata, r.Metadata)
 		}
+		if err := validRule(merged); err != nil {
+			return err
+		}
 		return books.SetRule(log, actor, why, merged)
 	}
+	if err := validRule(r); err != nil {
+		return err
+	}
 	return books.AddRule(log, actor, r, before)
+}
+
+// validRule refuses a rule the engine could not run, so an invalid pattern or a half-specified tax
+// (a rate with no account, or the reverse) is caught at authoring rather than breaking every later
+// read of the books. rules.New is the one authority on what a valid rule is.
+func validRule(r rules.Rule) error {
+	_, err := rules.New([]rules.Rule{r})
+	return err
 }
 
 // mergeMeta overlays new keys onto the existing bag without dropping the untouched ones.
