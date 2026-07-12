@@ -727,9 +727,10 @@ func importLog(log *eventlog.Log, path string) error {
 }
 
 // importLedger reads a plain-text ledger file: each entry's amountless posting is the account its
-// statement line came from, and the line's amount is the negation of the priced postings. The
-// categorization in the file is not carried in; the line is imported raw and the rules place it, so
-// the books stay a fold rather than a set of frozen assertions.
+// statement line came from, and the line's amount is the negation of the priced postings. A ledger
+// file already names its own accounts, so the categorization it carries is asserted per line as the
+// file wrote it, rather than dropped for the rules to re-derive. An entry the books cannot balance
+// (a mixed-commodity placeholder) is left to the rules instead.
 func importLedger(log *eventlog.Log, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -737,15 +738,21 @@ func importLedger(log *eventlog.Log, path string) error {
 	}
 	defer f.Close()
 
-	txs, err := source.ReadLedger(f)
+	txs, entries, err := source.ReadLedger(f)
 	if err != nil {
 		return err
 	}
-	result, err := books.Import(log, "statement:"+filepath.Base(path), txs)
+	actor := "statement:" + filepath.Base(path)
+	result, err := books.Import(log, actor, txs)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%d entries read: %d imported, %d already in the log\n", len(txs), result.Imported, result.Skipped)
+	carried, skipped, err := books.CarryCategorizations(log, actor, "imported from "+filepath.Base(path), txs, entries)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%d entries read: %d imported, %d already in the log; %d categorized from the file, %d left to the rules\n",
+		len(txs), result.Imported, result.Skipped, carried, skipped)
 	uncategorizedHint(log)
 	return nil
 }

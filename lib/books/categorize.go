@@ -39,16 +39,49 @@ func Categorize(log *eventlog.Log, actor, why, txID, payee string, postings []mo
 		return fmt.Errorf("books: the postings do not account for %s", tx.Amount.Negate())
 	}
 
+	// tx.ID, not txID: the caller may have quoted a prefix, and the assertion must key to the line.
+	return assertCategorized(log, actor, why, tx.ID, payee, postings)
+}
+
+// assertCategorized records one categorization event, keyed by the transaction's fingerprint. It
+// is the shared tail of a hand correction and a carried-in categorization: both are the same fact
+// about one line, an assertion that overrides whatever the rules would have said.
+func assertCategorized(log *eventlog.Log, actor, why, txID, payee string, postings []model.Posting) error {
 	data, err := json.Marshal(categorizedData{Payee: payee, Postings: postings, Why: why})
 	if err != nil {
 		return err
 	}
-	// tx.ID, not txID: the caller may have quoted a prefix, and the assertion must key to the line.
 	_, err = log.Track(eventlog.Event{
-		Collection: CollectionTransaction, RecordID: tx.ID, Action: ActionCategorized,
+		Collection: CollectionTransaction, RecordID: txID, Action: ActionCategorized,
 		Version: version, Actor: actor, Data: data,
 	})
 	return err
+}
+
+// CarryCategorizations records the categorization each transaction arrived with, so a source that
+// already names its accounts — a ledger file, not a raw statement — needs no manual categorize per
+// line. The transactions must already be imported, and txs[i] is categorized by entries[i].
+//
+// An entry with no postings, or one that does not account for its line (a mixed-commodity
+// placeholder the books cannot post), is left to the rules and counted as skipped rather than
+// asserted: the import carries what it faithfully can and never writes a broken entry. The carried
+// facts are ordinary assertions, so a later human correction still wins over them.
+func CarryCategorizations(log *eventlog.Log, actor, why string, txs []model.Transaction, entries []model.Entry) (carried, skipped int, err error) {
+	if len(txs) != len(entries) {
+		return 0, 0, fmt.Errorf("books: %d transactions but %d categorizations", len(txs), len(entries))
+	}
+	for i, tx := range txs {
+		entry := entries[i]
+		if len(entry.Postings) == 0 || !entry.Balances(tx) {
+			skipped++
+			continue
+		}
+		if err := assertCategorized(log, actor, why, tx.ID, entry.Payee, entry.Postings); err != nil {
+			return carried, skipped, err
+		}
+		carried++
+	}
+	return carried, skipped, nil
 }
 
 // Ledger folds the whole log into transactions and their final entries, in date order, on the cash
