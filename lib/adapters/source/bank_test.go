@@ -36,10 +36,11 @@ func TestReadBankNormalizesRows(t *testing.T) {
 		{"date":"2026-03-02","description":"USD CHARGE","amount":"-10.00","currency":"USD"}
 	]`), nil)
 
-	txs, err := ReadBank(Bank{Institution: "rbc", Account: "Liabilities:Card:RBC", DefaultCurrency: "CAD"})
+	res, err := ReadBank(Bank{Institution: "rbc", Account: "Liabilities:Card:RBC", DefaultCurrency: "CAD"})
 	if err != nil {
 		t.Fatalf("ReadBank: %v", err)
 	}
+	txs := res.Transactions
 	if len(txs) != 2 {
 		t.Fatalf("got %d transactions, want 2", len(txs))
 	}
@@ -48,6 +49,26 @@ func TestReadBankNormalizesRows(t *testing.T) {
 	}
 	if txs[1].Amount.String() != "-10.00 USD" { // a row's own currency wins over the default
 		t.Errorf("row 1 currency = %q, want the row's own USD", txs[1].Amount.String())
+	}
+	if res.HasBalance {
+		t.Errorf("a bare array has no balance, got %s", res.Balance)
+	}
+}
+
+// A script may wrap its rows with the account's current balance; ReadBank carries it in the account's
+// currency for reconciliation.
+func TestReadBankCarriesTheScrapedBalance(t *testing.T) {
+	stubBank(t, []byte(`{"rows":[{"date":"2026-03-01","description":"SHELL","amount":"-62.40"}],"balance":"1842.00"}`), nil)
+
+	res, err := ReadBank(Bank{Institution: "rbc", Account: "Assets:Bank:RBC", DefaultCurrency: "CAD"})
+	if err != nil {
+		t.Fatalf("ReadBank: %v", err)
+	}
+	if len(res.Transactions) != 1 {
+		t.Fatalf("got %d transactions, want 1", len(res.Transactions))
+	}
+	if !res.HasBalance || res.Balance.String() != "1842.00 CAD" {
+		t.Errorf("balance = %s (has=%v), want 1842.00 CAD", res.Balance, res.HasBalance)
 	}
 }
 

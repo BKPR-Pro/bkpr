@@ -109,15 +109,16 @@ func TestTwoRealTransfersOfTheSameSizeBothSurvive(t *testing.T) {
 	}
 }
 
-// The automatic fold pairs on mutual naming, so a real transfer it cannot recognise books twice.
-// Forcing the match tells it the two sightings are one movement, and the later one is suppressed.
+// A real transfer whose two sightings fall outside the pairing window books twice, because the fold
+// will not assume two lines a fortnight apart are one movement. Forcing the match tells it they are,
+// and the later one is suppressed.
 func TestForcingAMatchSuppressesTheLaterSighting(t *testing.T) {
 	log := newLog()
 	importOne(t, log, line("a", 1, -50000, "MOVED OUT"))
-	importOne(t, log, lineIn("b", "Assets:Bank:Savings", 2, 50000, "MOVED IN"))
+	importOne(t, log, lineIn("b", "Assets:Bank:Savings", 15, 50000, "MOVED IN"))
 
 	if txs, _ := ledger(t, log); len(txs) != 2 {
-		t.Fatalf("precondition: unmatched lines book twice, got %d", len(txs))
+		t.Fatalf("precondition: sightings 14 days apart book twice, got %d", len(txs))
 	}
 
 	if err := books.Match(log, "human", "a", "b", true); err != nil {
@@ -126,6 +127,43 @@ func TestForcingAMatchSuppressesTheLaterSighting(t *testing.T) {
 	txs, _ := ledger(t, log)
 	if len(txs) != 1 || txs[0].ID != "a" {
 		t.Fatalf("want only the earlier sighting a, got %d entries", len(txs))
+	}
+}
+
+// The hands-off case: two unclaimed sightings, the same amount moving the other way between two of
+// your accounts inside the window, pair by themselves with no rule and no naming. The kept leg is
+// booked as the transfer, so both accounts' balances are right.
+func TestUnclaimedOppositeSightingsAutoPair(t *testing.T) {
+	log := newLog()
+	importOne(t, log, line("a", 1, -50000, "E-TRANSFER"))
+	importOne(t, log, lineIn("b", "Assets:Bank:Savings", 2, 50000, "E-TRANSFER"))
+
+	txs, entries := ledger(t, log)
+	if len(txs) != 1 || txs[0].ID != "a" {
+		t.Fatalf("want the pair collapsed to the earlier leg, got %d entries", len(txs))
+	}
+	if !entries[0].Balances(txs[0]) {
+		t.Errorf("the kept entry does not balance: %+v", entries[0])
+	}
+	if len(entries[0].Postings) != 1 || entries[0].Postings[0].Account != "Assets:Bank:Savings" {
+		t.Errorf("the kept leg should book to the other account, got %+v", entries[0].Postings)
+	}
+}
+
+// Breaking the automatic pairing keeps both unclaimed sightings, each booking on its own.
+func TestBreakingAnAutoPairKeepsBothUnclaimedSightings(t *testing.T) {
+	log := newLog()
+	importOne(t, log, line("a", 1, -50000, "E-TRANSFER"))
+	importOne(t, log, lineIn("b", "Assets:Bank:Savings", 2, 50000, "E-TRANSFER"))
+
+	if txs, _ := ledger(t, log); len(txs) != 1 {
+		t.Fatalf("precondition: the fold auto-pairs these, got %d", len(txs))
+	}
+	if err := books.Match(log, "human", "b", "", false); err != nil {
+		t.Fatalf("Match break: %v", err)
+	}
+	if txs, _ := ledger(t, log); len(txs) != 2 {
+		t.Fatalf("a broken auto-pair should keep both, got %d", len(txs))
 	}
 }
 

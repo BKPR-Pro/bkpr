@@ -38,6 +38,32 @@ func SetAccountMeta(log *eventlog.Log, actor, account string, meta map[string]st
 	return err
 }
 
+// OwnedAccounts is the set of accounts you hold -- the real bank, card, and loan accounts money is
+// read from -- as opposed to the income, expense, and equity categories money is assigned to. An
+// account is yours if a statement was ever imported against it (it is some transaction's source
+// account) or a connector posts to it. This is what tells an internal transfer between two of your
+// accounts from a coincidental deposit, and what the account list and reconciliation iterate over.
+func OwnedAccounts(log *eventlog.Log) (map[string]bool, error) {
+	txs, err := Transactions(log)
+	if err != nil {
+		return nil, err
+	}
+	owned := map[string]bool{}
+	for _, tx := range txs {
+		owned[tx.Account] = true
+	}
+	conns, err := Connectors(log)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range conns {
+		if c.Account != "" {
+			owned[c.Account] = true
+		}
+	}
+	return owned, nil
+}
+
 // AccountMeta folds the log into each account's merged metadata. Keys merge across events and the
 // latest value of a key wins, so metadata accretes the way corrections do.
 func AccountMeta(log *eventlog.Log) (map[string]map[string]string, error) {

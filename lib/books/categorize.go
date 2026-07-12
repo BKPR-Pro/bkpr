@@ -121,8 +121,13 @@ func cashLedger(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) {
 	}
 
 	// The duplicate sighting of an internal transfer must not book a second entry, so it is dropped
-	// from the books entirely rather than rendered.
-	dup := suppressed(txs, entries, overrides)
+	// from the books entirely rather than rendered. Every source account is one you own, which is what
+	// lets a transfer between two of them be told from a coincidental deposit.
+	owned := make(map[string]bool, len(txs))
+	for _, tx := range txs {
+		owned[tx.Account] = true
+	}
+	dup := suppressed(txs, entries, overrides, owned)
 	keptTxs := make([]model.Transaction, 0, len(txs))
 	keptEntries := make([]model.Entry, 0, len(entries))
 	for i, tx := range txs {

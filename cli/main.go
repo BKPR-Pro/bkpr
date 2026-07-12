@@ -64,6 +64,8 @@ func main() {
 		err = policyCmd(os.Args[2:])
 	case "accounts":
 		err = accountCmd(os.Args[2:])
+	case "reconcile":
+		err = reconcileCmd(os.Args[2:])
 	case "receipt":
 		err = receiptCmd(os.Args[2:])
 	case "report":
@@ -132,6 +134,7 @@ usage:
   bk policy  list
   bk accounts set  <account> -meta <k=v> ... [-actor <name>]
   bk accounts list
+  bk reconcile
   bk receipt      -tx <fingerprint> [-as invoice|receipt] [-format text|html] [-out <file>]
   bk report       [-income | -balance | -gains] [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
   bk export       <connector> [-confirm]
@@ -230,7 +233,9 @@ var reference = []docGroup{
       expired it opens a browser for you to sign in again (your password and 2FA are entered
       there and never stored -- only the resulting session is kept). With no terminal present
       it does not open a browser, it fails with a message to sign in from one. -relogin signs
-      in fresh, ignoring any saved session.
+      in fresh, ignoring any saved session. The account's balance is read at the same time and
+      recorded, so reconcile can check the books against the bank. A transfer between two of
+      your accounts, seen in both, is paired automatically and booked once (undo it with match).
   import <book.jsonl>
       Merge another book: the log is its own interchange format, so its events replay here in
       their order. Statement lines, invoices, bills, and exports dedupe by fingerprint, so a
@@ -256,9 +261,11 @@ var reference = []docGroup{
       it. Voiding an invoice is the same verb on a different noun: invoice void.
 `},
 		{[]string{"match"}, `  match <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
-      Override the automatic transfer fold, which pairs the two sightings of one movement
-      only when each names the other's account. -with forces a pair it missed, dropping the
-      later sighting; -break keeps a line the fold wrongly paired. A later match supersedes.
+      Override the automatic transfer fold. On its own the fold pairs the two sightings of one
+      movement -- the same amount moving the other way between two of your accounts, within a
+      few days -- and books it once, unless a side is already a categorized expense or deposit
+      (that is a coincidence, not a transfer). -with forces a pair it missed (say, one dated
+      further apart); -break keeps a line it wrongly paired. A later match supersedes.
 `},
 		{[]string{"export"}, `  export <connector> [-confirm]
       Write rent the books already booked out to a registered connector (see connectors register),
@@ -345,10 +352,19 @@ var reference = []docGroup{
       rather than restating anything. list shows what stands.
 `},
 		{[]string{"accounts"}, `  accounts set <account> -meta <k=v> ... [-actor <name>]
-  accounts list
       Attach metadata to an account: a letterhead address, a display name, a customer's mailing
-      address. A document like an invoice reads it when it renders. list shows every key that
-      stands, one row per account and key.
+      address. A document like an invoice reads it when it renders.
+  accounts list
+      The account folder: every account you hold -- the bank, card, and loan accounts money is read
+      from -- with its display name, what it holds now, and where it stands against the bank. An
+      account is yours once a statement imports against it or a connector posts to it.
+`},
+		{[]string{"reconcile"}, `  reconcile
+      Check the books against the bank, to the penny. Every import records the balance the bank
+      showed for the account; reconcile folds the books to that date and reports the difference. The
+      first balance for an account anchors it (deriving the opening balance the imports do not reach);
+      every one after is a real check that no movement since was missed, duplicated, or mispaired. A
+      nonzero delta is exactly that gap.
 `},
 		{[]string{"receipt"}, `  receipt -tx <fingerprint> [-as invoice|receipt] [-format text|html] [-out <file>]
       Render one settled transaction as a printable document: the account's letterhead, the payee
@@ -610,11 +626,28 @@ func importConnector(log *eventlog.Log, c books.Connector, o fetchOpts) error {
 	if err != nil {
 		return err
 	}
-	err = importFrom(log, "connector:"+c.Name, func() ([]model.Transaction, error) { return fetch(c) })
+	label := "connector:" + c.Name
+	var got fetchResult
+	err = importFrom(log, label, func() ([]model.Transaction, error) {
+		r, ferr := fetch(c)
+		got = r
+		return r.txs, ferr
+	})
 	if errors.Is(err, source.ErrSessionExpired) {
 		return fmt.Errorf("%s: its sign-in has expired; run `bk import %s` from a terminal to sign in again", c.Name, c.Name)
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	// The scraped balance anchors reconciliation: record what the bank showed, as of now, so the next
+	// `reconcile` can check the books against it to the penny.
+	if got.hasBalance {
+		if err := books.AssertBalance(log, label, c.Account, time.Now(), got.balance); err != nil {
+			return err
+		}
+		fmt.Printf("bank balance recorded: %s reconciles %s\n", got.balance, c.Account)
+	}
+	return nil
 }
 
 // importLog merges another book: the log is its own interchange format, so combining two books is
@@ -1810,6 +1843,9 @@ func accountSetMeta(args []string) error {
 	return nil
 }
 
+// accountList is the account folder: every account you hold, its display name if one is set, what it
+// holds now, and where it stands against the bank. It folds the owned-account set, the per-account
+// balances, and reconciliation into one list, so "what are my accounts" is one command.
 func accountList(args []string) error {
 	log, closeLog, err := open()
 	if err != nil {
@@ -1817,27 +1853,110 @@ func accountList(args []string) error {
 	}
 	defer closeLog()
 
-	all, err := books.AccountMeta(log)
+	owned, err := books.OwnedAccounts(log)
 	if err != nil {
 		return err
 	}
-	accounts := make([]string, 0, len(all))
-	for a := range all {
+	balances, err := books.Balances(log)
+	if err != nil {
+		return err
+	}
+	meta, err := books.AccountMeta(log)
+	if err != nil {
+		return err
+	}
+	recs, err := books.Reconcile(log)
+	if err != nil {
+		return err
+	}
+	recByAccount := map[string]books.Reconciliation{}
+	for _, r := range recs {
+		recByAccount[r.Account] = r
+	}
+
+	accounts := make([]string, 0, len(owned))
+	for a := range owned {
 		accounts = append(accounts, a)
 	}
 	sort.Strings(accounts)
 
+	if len(accounts) == 0 {
+		fmt.Println("no accounts yet; import a statement or register a connector")
+		return nil
+	}
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ACCOUNT\tKEY\tVALUE")
+	fmt.Fprintln(w, "ACCOUNT\tNAME\tBALANCE\tRECONCILED")
 	for _, a := range accounts {
-		keys := make([]string, 0, len(all[a]))
-		for k := range all[a] {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			fmt.Fprintf(w, "%s\t%s\t%s\n", a, k, strings.ReplaceAll(all[a][k], "\n", " / "))
-		}
+		name := meta[a]["name"]
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", a, name, balanceCell(balances[a]), reconciledCell(recByAccount[a]))
 	}
 	return w.Flush()
+}
+
+// balanceCell renders an account's holdings, one amount per commodity (a USD fee beside CAD rent do
+// not sum), or a dash when it holds nothing yet.
+func balanceCell(per map[string]model.Amount) string {
+	if len(per) == 0 {
+		return "-"
+	}
+	commodities := make([]string, 0, len(per))
+	for c := range per {
+		commodities = append(commodities, c)
+	}
+	sort.Strings(commodities)
+	parts := make([]string, 0, len(commodities))
+	for _, c := range commodities {
+		parts = append(parts, per[c].String())
+	}
+	return strings.Join(parts, ", ")
+}
+
+// reconciledCell says where an account stands against the bank: matched to the penny as of a date, off
+// by a stated amount, or unchecked when no balance has been scraped yet.
+func reconciledCell(r books.Reconciliation) string {
+	if r.Account == "" {
+		return "-" // no bank balance recorded for this account yet
+	}
+	if r.Reconciled {
+		return "yes, as of " + r.AsOf.Format("2006-01-02")
+	}
+	return fmt.Sprintf("off by %s (as of %s)", r.Delta, r.AsOf.Format("2006-01-02"))
+}
+
+// reconcileCmd shows every account with a scraped balance against the books: what the bank last said
+// it held, what the books fold to on that date, and the difference. It writes nothing; it is a fold.
+func reconcileCmd(args []string) error {
+	log, closeLog, err := open()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	recs, err := books.Reconcile(log)
+	if err != nil {
+		return err
+	}
+	if len(recs) == 0 {
+		fmt.Println("no bank balances recorded yet; import a bank connector to record one")
+		return nil
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ACCOUNT\tAS OF\tBANK\tBOOKS\tDELTA")
+	allReconciled := true
+	for _, r := range recs {
+		status := r.Delta.String()
+		if r.Reconciled {
+			status = "0 (reconciled)"
+		} else {
+			allReconciled = false
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.Account, r.AsOf.Format("2006-01-02"), r.Bank, r.Books, status)
+	}
+	w.Flush()
+	if allReconciled {
+		fmt.Println("\nall accounts reconcile to the penny")
+	}
+	return nil
 }

@@ -74,17 +74,27 @@ var ErrSessionExpired = errors.New("bank session expired")
 // so tests can drive ReadBank without Node or a browser.
 var runBank = execBankScript
 
+// BankResult is what one account's import yields: its transactions, and -- when the site showed it --
+// the account's current balance, ground truth for reconciliation. HasBalance is false when the script
+// returned rows only.
+type BankResult struct {
+	Transactions []model.Transaction
+	Balance      model.Amount
+	HasBalance   bool
+}
+
 // ReadBank imports one account's transactions from its bank, normalized and fingerprinted the same
-// way ReadCSV is, so a bank import and a CSV of one account are interchangeable and idempotent.
-func ReadBank(b Bank) ([]model.Transaction, error) {
+// way ReadCSV is, so a bank import and a CSV of one account are interchangeable and idempotent. It
+// also carries the account's scraped balance when the script reported one.
+func ReadBank(b Bank) (BankResult, error) {
 	if !SupportsBank(b.Institution) {
-		return nil, fmt.Errorf("import: no bank importer for %q; known: %v", b.Institution, Banks())
+		return BankResult{}, fmt.Errorf("import: no bank importer for %q; known: %v", b.Institution, Banks())
 	}
 	out, err := runBank(b)
 	if err != nil {
-		return nil, err
+		return BankResult{}, err
 	}
-	return parseBankRows(out, b.Account, b.DefaultCurrency)
+	return parseBankOutput(out, b.Account, b.DefaultCurrency)
 }
 
 // exitSessionExpired is the script's EX_TEMPFAIL exit: a real session that has expired, with no
@@ -182,18 +192,31 @@ type bankRow struct {
 	Currency    string `json:"currency,omitempty"`
 }
 
-// parseBankRows turns the script's JSON into normalized, fingerprinted transactions.
-func parseBankRows(data []byte, account, defaultCurrency string) ([]model.Transaction, error) {
-	var rows []bankRow
-	if err := json.Unmarshal(bytes.TrimSpace(data), &rows); err != nil {
-		return nil, fmt.Errorf("import: reading the bank script's output: %w", err)
+// bankOutput is what a script prints: the account's rows and, optionally, its current balance. For a
+// script that reports rows only, a bare JSON array is also accepted and taken as the rows.
+type bankOutput struct {
+	Rows    []bankRow `json:"rows"`
+	Balance string    `json:"balance"`
+}
+
+// parseBankOutput turns the script's JSON into normalized, fingerprinted transactions and, when the
+// script reported one, the account's current balance in the account's currency.
+func parseBankOutput(data []byte, account, defaultCurrency string) (BankResult, error) {
+	data = bytes.TrimSpace(data)
+	var out bankOutput
+	if len(data) > 0 && data[0] == '[' { // a bare array: rows only, no balance
+		if err := json.Unmarshal(data, &out.Rows); err != nil {
+			return BankResult{}, fmt.Errorf("import: reading the bank script's output: %w", err)
+		}
+	} else if err := json.Unmarshal(data, &out); err != nil {
+		return BankResult{}, fmt.Errorf("import: reading the bank script's output: %w", err)
 	}
 
-	txs := make([]model.Transaction, 0, len(rows))
-	for i, r := range rows {
+	txs := make([]model.Transaction, 0, len(out.Rows))
+	for i, r := range out.Rows {
 		date, err := time.Parse("2006-01-02", r.Date)
 		if err != nil {
-			return nil, fmt.Errorf("import: row %d: date %q must be YYYY-MM-DD", i+1, r.Date)
+			return BankResult{}, fmt.Errorf("import: row %d: date %q must be YYYY-MM-DD", i+1, r.Date)
 		}
 		currency := r.Currency
 		if currency == "" {
@@ -201,12 +224,21 @@ func parseBankRows(data []byte, account, defaultCurrency string) ([]model.Transa
 		}
 		amount, err := model.NewAmount(r.Amount, currency)
 		if err != nil {
-			return nil, fmt.Errorf("import: row %d: %w", i+1, err)
+			return BankResult{}, fmt.Errorf("import: row %d: %w", i+1, err)
 		}
 		txs = append(txs, model.Transaction{
 			Account: account, Date: date, Amount: amount, Description: r.Description,
 		})
 	}
 	Identify(txs)
-	return txs, nil
+
+	res := BankResult{Transactions: txs}
+	if bal := strings.TrimSpace(out.Balance); bal != "" {
+		amount, err := model.NewAmount(bal, defaultCurrency)
+		if err != nil {
+			return BankResult{}, fmt.Errorf("import: reading the balance %q: %w", bal, err)
+		}
+		res.Balance, res.HasBalance = amount, true
+	}
+	return res, nil
 }

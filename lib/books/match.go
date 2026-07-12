@@ -3,6 +3,7 @@ package books
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/dallasread/bookkeeper/lib/eventlog"
@@ -29,7 +30,16 @@ const transferDays = 5
 // Pairing is greedy in date order. When several sightings of the same size sit in one window they
 // are interchangeable, so any valid pairing suppresses the same number, and the count of real
 // movements always survives.
-func suppressed(txs []model.Transaction, entries []model.Entry, overrides map[string]matchedData) map[string]bool {
+//
+// Beyond mutual naming, two sightings also pair when they are simply the same amount moving the other
+// way between two accounts you own, within the window, and neither side has been given a real income
+// or expense identity (both are Uncategorized, or already point at an owned account). This is the
+// hands-off case: an ordinary transfer the rules never named still pairs by itself. The "neither is
+// claimed" guard is load-bearing -- without it a categorized grocery bill and a categorized paycheck
+// of the same size would be mistaken for a transfer and one would vanish. When such a pair is found
+// the kept (earlier) leg is booked as the transfer to the other account, so both accounts' balances
+// stay right even though neither statement named the other. A wrong pairing is undone with `match`.
+func suppressed(txs []model.Transaction, entries []model.Entry, overrides map[string]matchedData, owned map[string]bool) map[string]bool {
 	dup := map[string]bool{}
 	consumed := make([]bool, len(txs))
 	pos := make(map[string]int, len(txs))
@@ -73,15 +83,60 @@ func suppressed(txs []model.Transaction, entries []model.Entry, overrides map[st
 			if consumed[j] {
 				continue
 			}
-			if isTransferPair(txs[i], entries[i], txs[j], entries[j]) ||
-				isCrossTransferPair(txs[i], entries[i], txs[j], entries[j]) {
-				dup[txs[j].ID] = true // txs are date-ordered, so j is the later sighting
-				consumed[i], consumed[j] = true, true
-				break
+			named := isTransferPair(txs[i], entries[i], txs[j], entries[j]) ||
+				isCrossTransferPair(txs[i], entries[i], txs[j], entries[j])
+			loose := !named && isOwnedTransferPair(txs[i], entries[i], txs[j], entries[j], owned)
+			if !named && !loose {
+				continue
 			}
+			if loose {
+				// Neither statement named the other, so book the kept leg as the transfer: a single
+				// posting of the movement to the other account, so both accounts' balances are right.
+				entries[i] = model.Entry{Postings: []model.Posting{
+					{Account: txs[j].Account, Amount: txs[i].Amount.Negate()},
+				}}
+			}
+			dup[txs[j].ID] = true // txs are date-ordered, so j is the later sighting
+			consumed[i], consumed[j] = true, true
+			break
 		}
 	}
 	return dup
+}
+
+// isOwnedTransferPair reports whether two sightings are the same movement between two accounts you own,
+// recognized without either statement naming the other. Both are some transaction's source account, so
+// both are owned; the checks that remain are equal-and-opposite, within the window, and -- the guard
+// that keeps a real expense and a coincidental deposit apart -- that neither leg carries a real income
+// or expense category. A leg that is Uncategorized, or already points only at accounts you own, is
+// fair game; a leg the rules placed in Expenses or Income is not.
+func isOwnedTransferPair(a model.Transaction, ea model.Entry, b model.Transaction, eb model.Entry, owned map[string]bool) bool {
+	if a.Account == b.Account {
+		return false
+	}
+	if !a.Amount.Equal(b.Amount.Negate()) {
+		return false
+	}
+	if daysApart(a.Date, b.Date) > transferDays {
+		return false
+	}
+	return !claimed(ea, owned) && !claimed(eb, owned)
+}
+
+// claimed reports whether an entry has been given a real spending identity: a posting to an account
+// that is neither Uncategorized nor one you own. Such an entry is a categorized expense or deposit,
+// not an unclaimed line free to be read as one side of a transfer.
+func claimed(e model.Entry, owned map[string]bool) bool {
+	for _, p := range e.Postings {
+		if p.Account == model.Uncategorized || strings.HasSuffix(p.Account, ":"+model.Uncategorized) {
+			continue
+		}
+		if owned[p.Account] {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // ActionMatched records a manual override of the automatic transfer fold: a pairing the fold could

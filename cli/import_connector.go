@@ -9,10 +9,18 @@ import (
 	"github.com/dallasread/bookkeeper/lib/model"
 )
 
+// fetchResult is what a connector fetch yields: the lines to import, and -- for a bank that showed it
+// -- the account's current balance, recorded as a reconciliation anchor after the lines land.
+type fetchResult struct {
+	txs        []model.Transaction
+	balance    model.Amount
+	hasBalance bool
+}
+
 // connectorFetch pulls normalized transactions from one registered connector. The bytes come from
 // the outside world (a bank's site), so a fetch lives in the driving adapter and the core never sees
 // it, exactly as export does. Bound to a connector it becomes a Source, the input port import runs.
-type connectorFetch func(books.Connector) ([]model.Transaction, error)
+type connectorFetch func(books.Connector) (fetchResult, error)
 
 // fetchOpts carries what a bank fetch needs beyond the connector itself: where its browser session is
 // kept, whether a person is present to sign in again, and whether to force a fresh sign-in.
@@ -32,8 +40,8 @@ type fetchOpts struct {
 func fetcherFor(kind string, o fetchOpts) (connectorFetch, error) {
 	switch {
 	case source.SupportsBank(kind):
-		return func(c books.Connector) ([]model.Transaction, error) {
-			return source.ReadBank(source.Bank{
+		return func(c books.Connector) (fetchResult, error) {
+			res, err := source.ReadBank(source.Bank{
 				Institution:     c.Kind,
 				Account:         c.Account,
 				DefaultCurrency: c.Currency,
@@ -42,6 +50,10 @@ func fetcherFor(kind string, o fetchOpts) (connectorFetch, error) {
 				Interactive:     o.interactive,
 				Relogin:         o.relogin,
 			})
+			if err != nil {
+				return fetchResult{}, err
+			}
+			return fetchResult{txs: res.Transactions, balance: res.Balance, hasBalance: res.HasBalance}, nil
 		}, nil
 	case kind == "rentapp":
 		return nil, fmt.Errorf("import: connector kind %q is export-only; it cannot be imported from", kind)

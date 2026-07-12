@@ -513,10 +513,10 @@ bk invoice settle 9617607456a06619 -tx 6afa3719db1eb739-1
 The receivable now nets to zero (debited when the invoice was raised, credited when the cash cleared
 it), and `Income:Consulting` is booked exactly once.
 
-The pairing is **recorded, not guessed**. An internal transfer pairs automatically because each
-sighting names the other's account with certainty; a deposit's memo does not reliably name which
-invoice it clears, so settling is an asserted fact rather than a fold, in keeping with *say only what
-is known*. A wrong invoice is dropped with `invoice void` — the same verb as voiding a bad import,
+Settling is **asserted, not guessed**. An internal transfer pairs automatically from the shape of the
+movement — the same amount the other way between two of your accounts — but a deposit's memo does not
+reliably name which invoice it clears, so settling is an asserted fact rather than a fold, in keeping
+with *say only what is known*. A wrong invoice is dropped with `invoice void` — the same verb as voiding a bad import,
 one operation on a different noun.
 
 You do not have to hunt the fingerprint, though. `bk invoice list` (and `bk bill list`) prints, for
@@ -664,17 +664,20 @@ arriving in savings. Each sighting, categorized to the other account, is a compl
 on its own, so booking both would move the money out and then back and net it to zero, losing the
 movement.
 
-So the second sighting is suppressed. Two sightings pair when each names the other's account, their
-amounts are equal and opposite, and their dates fall within a few days; the earlier one is kept and
-books the transfer, the later is dropped. Import a statement that has not been paired yet and the
-transfer books normally on its own; import its other half later and the duplicate is recognised and
-dropped.
+So the second sighting is suppressed. Two sightings pair when they are the same amount moving the
+other way between two accounts you own, within a few days; the earlier one is kept and books the
+transfer (a single posting to the other account, so both balances stay right), the later is dropped.
+It happens by itself on import — no rule, no command — which is the point: a transfer is the last
+thing you should have to hand-categorize. Import a statement that has not been paired yet and it
+books normally on its own; import its other half later and the duplicate is recognised and dropped.
 
-This is a pure fold, so no event records a pairing: it is recomputed from the lines and their
-categorization every time the books are built. The mutual-naming check is what keeps it honest. A
-$500 expense and a coincidental $500 deposit are not a transfer, because neither names the other's
-account, so both are booked. Suppression only ever happens when two accounts you own each point at
-the other.
+This is a pure fold, so no event records a pairing: it is recomputed every time the books are built.
+One guard keeps it honest. A $500 expense and a coincidental $500 deposit are **not** a transfer, so
+a sighting that already carries a real income or expense category is left alone — only unclaimed
+lines (Uncategorized, or already pointing at an account you own) are ever paired. When the fold gets
+one wrong, `match -break` keeps both; when a real transfer falls outside the window, `match -with`
+forces it. Both accounts are yours by construction: an account is one you own once a statement
+imports against it, which is what tells an internal move from a payment to the outside world.
 
 A **cross-currency** move — $1000 CAD out of chequing, $740 USD into a US account — is the same one
 movement, but the two sightings are not equal and opposite, so the amount check cannot pair them.
@@ -690,6 +693,22 @@ that left — which is the cross-currency stand-in for mutual naming, so the USD
 as the duplicate and dropped. The kept entry books both accounts, and because the received currency
 is acquired at a stated cost, the USD holding picks up a cost base in CAD for free (the same fold
 that prices a stock purchase), so a later conversion back realizes the exchange gain or loss.
+
+### Reconciliation, to the penny
+
+A bank import reads the account's balance at the same time as its lines and records it — ground truth
+to check the books against. `bk reconcile` folds the books to that date and reports the difference per
+account. The first balance for an account **anchors** it: imports rarely reach the day it was opened,
+so the anchor derives that opening balance (the bank's figure less what the books fold to on that
+date) and the account matches by definition. Every balance after is a real check — with the opening
+figure fixed, the books at the later date must equal the bank's number exactly, and any delta is
+precisely a movement that was missed, duplicated, or mispaired since. It is a fold; it records
+nothing, and it needs nothing typed in — the scrape supplies the truth.
+
+`bk accounts list` is the **account folder**: every account you hold, its display name, what it holds
+now, and where it stands against the bank. An account is yours once a statement imports against it or
+a connector posts to it — the same owned-account set that tells an internal transfer from a payment
+out to the world.
 
 ## Books
 
