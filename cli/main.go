@@ -116,6 +116,7 @@ usage:
   bk import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
   bk import       <file.ledger>
   bk import       <book.jsonl>
+  bk import       <file> -format csv|ledger|jsonl
   bk import       <connector> [-relogin]
   bk categorize   <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
   bk void         <fingerprint> [-why <reason>] [-actor <name>]
@@ -218,12 +219,15 @@ var reference = []docGroup{
 		{[]string{"import"}, `  import <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>)
                     [-date <col>] [-description <col>] [-date-format <layout>]
   import <file.ledger>
+  import <file> -format csv|ledger|jsonl
       Read transactions in. A file is a one-time input: a CSV does not name its own account,
       currency, or columns, so you supply them inline; a ledger file names all of that itself
       (an entry's amountless posting is the account it came from; with every leg priced, its
       last posting is). Directives, periodic (~) templates, and comments are skipped. The line
       is imported raw and the rules place it, so a ledger file's own categorization is not
-      carried in. A registered connector is imported by name: it already carries its account
+      carried in. The extension says which reader a file gets; -format overrides it, so
+      hand-kept books in a .txt file import as a ledger without renaming. A registered
+      connector is imported by name: it already carries its account
       and currency (from connectors register) and fetches its own lines, through the same
       deduped import every file takes.
       -date-format is a Go layout: the reference date Jan 2, 2006 written the way the column
@@ -540,6 +544,10 @@ func importCmd(args []string) error {
 	if err != nil {
 		return err
 	}
+	format, rest, err := peelFormat(rest)
+	if err != nil {
+		return err
+	}
 
 	s, err := store.Open(".")
 	if err != nil {
@@ -547,36 +555,59 @@ func importCmd(args []string) error {
 	}
 	defer s.Close()
 
-	switch ext := strings.ToLower(filepath.Ext(arg)); ext {
-	case ".csv":
-		return importCSV(s.Log, arg, rest)
-	case ".ledger":
-		return importLedger(s.Log, arg)
-	case ".jsonl":
-		return importLog(s.Log, arg)
-	default:
-		c, ok, err := books.ConnectorByName(s.Log, arg)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("import: I do not know how to read %q; .csv, .ledger, and .jsonl are supported, or a registered connector's name (see `connectors list`)", arg)
-		}
-		fs := flag.NewFlagSet("import (connector)", flag.ExitOnError)
-		relogin := fs.Bool("relogin", false, "ignore any saved sign-in and sign in fresh")
-		if err := fs.Parse(rest); err != nil {
-			return err
-		}
-		dir, err := sessionsDir()
-		if err != nil {
-			return err
-		}
-		return importConnector(s.Log, c, fetchOpts{
-			sessionDir:  dir,
-			interactive: interactiveTerminal(),
-			relogin:     *relogin,
-		})
+	named := format != ""
+	if !named {
+		format = strings.TrimPrefix(strings.ToLower(filepath.Ext(arg)), ".")
 	}
+	switch format {
+	case "csv":
+		return importCSV(s.Log, arg, rest)
+	case "ledger":
+		return importLedger(s.Log, arg)
+	case "jsonl":
+		return importLog(s.Log, arg)
+	}
+	if named {
+		return fmt.Errorf("import: I do not know the format %q; -format takes csv, ledger, or jsonl", format)
+	}
+	c, ok, err := books.ConnectorByName(s.Log, arg)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("import: I do not know how to read %q; .csv, .ledger, and .jsonl are supported (-format names one when the extension does not), or a registered connector's name (see `connectors list`)", arg)
+	}
+	fs := flag.NewFlagSet("import (connector)", flag.ExitOnError)
+	relogin := fs.Bool("relogin", false, "ignore any saved sign-in and sign in fresh")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	dir, err := sessionsDir()
+	if err != nil {
+		return err
+	}
+	return importConnector(s.Log, c, fetchOpts{
+		sessionDir:  dir,
+		interactive: interactiveTerminal(),
+		relogin:     *relogin,
+	})
+}
+
+// peelFormat pulls -format out of the flags before dispatch, because which reader parses the rest
+// of them depends on its answer. Empty means the file's extension decides, as it always has.
+func peelFormat(args []string) (string, []string, error) {
+	for i, a := range args {
+		if v, ok := strings.CutPrefix(a, "-format="); ok {
+			return v, append(append([]string{}, args[:i]...), args[i+1:]...), nil
+		}
+		if a == "-format" {
+			if i+1 == len(args) {
+				return "", nil, fmt.Errorf("-format needs a value: csv, ledger, or jsonl")
+			}
+			return args[i+1], append(append([]string{}, args[:i]...), args[i+2:]...), nil
+		}
+	}
+	return "", args, nil
 }
 
 // sessionsDir is where bank browser sessions are kept: machine-local, keyed by a connector's

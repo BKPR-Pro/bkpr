@@ -296,7 +296,9 @@ bk init
 
 `import` records what a file said, and it is safe to run twice. A file is a one-time input, so its
 details are supplied inline. A CSV does not name its own account, currency, or columns, so you give
-them; a ledger file names all of that itself and takes no options.
+them; a ledger file names all of that itself and takes no options. The extension says which
+reader a file gets; `-format csv|ledger|jsonl` overrides it, so hand-kept books in a `.txt` file
+import as a ledger without renaming.
 
 ```sh
 bk import statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
@@ -327,7 +329,8 @@ Each line is stored already normalized, so the books never re-parse the file.
 #### Ledger files
 
 The plain-text ledger format is both a door and the artifact. `import` reads a ledger file with no
-flags: each entry's single amountless posting names the account its line came from, and the file's
+flags (`-format ledger` when the extension does not say so): each entry's single amountless
+posting names the account its line came from, and the file's
 own categorization is deliberately not carried in — the rules place every line, so the books stay
 a fold. `bk books -format ledger` writes the same format back out as the committed artifact,
 read-only and regenerated whole.
