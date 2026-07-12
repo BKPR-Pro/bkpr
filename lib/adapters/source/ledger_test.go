@@ -10,11 +10,76 @@ import (
 
 func readLedger(t *testing.T, text string) []model.Transaction {
 	t.Helper()
-	txs, err := source.ReadLedger(strings.NewReader(text))
+	txs, _, err := source.ReadLedger(strings.NewReader(text))
 	if err != nil {
 		t.Fatalf("ReadLedger: %v", err)
 	}
 	return txs
+}
+
+// The categorization the file already carries is read back alongside the line, so an import can
+// assert it rather than making the rules re-derive what the file plainly says.
+func TestReadLedgerCarriesTheCategorization(t *testing.T) {
+	txs, entries, err := source.ReadLedger(strings.NewReader(`2026/03/01  * Acme Hardware
+  Expenses:Materials  84.20 CAD
+  Assets:Bank:Chequing
+`))
+	if err != nil {
+		t.Fatalf("ReadLedger: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	got := entries[0]
+	if len(got.Postings) != 1 || got.Postings[0].Account != "Expenses:Materials" {
+		t.Fatalf("postings = %+v, want the file's Expenses:Materials", got.Postings)
+	}
+	if got.Postings[0].Amount.String() != "84.20 CAD" {
+		t.Errorf("amount = %q, want 84.20 CAD, the file's categorized side", got.Postings[0].Amount)
+	}
+	if got.Payee != "Acme Hardware" {
+		t.Errorf("payee = %q, want Acme Hardware", got.Payee)
+	}
+	// The carried categorization must account for the reconstructed line, or it could not be asserted.
+	if !got.Balances(txs[0]) {
+		t.Error("the carried categorization does not balance its line")
+	}
+}
+
+// A split entry carries every categorized posting, not just the first.
+func TestReadLedgerCarriesEveryLegOfASplit(t *testing.T) {
+	_, entries, err := source.ReadLedger(strings.NewReader(`2026/03/05  * Hardware
+  Expenses:A  10.00 CAD
+  Expenses:B  15.00 CAD
+  Assets:Bank:Chequing
+`))
+	if err != nil {
+		t.Fatalf("ReadLedger: %v", err)
+	}
+	if len(entries[0].Postings) != 2 {
+		t.Fatalf("postings = %+v, want both legs of the split", entries[0].Postings)
+	}
+	if entries[0].Postings[0].Account != "Expenses:A" || entries[0].Postings[1].Account != "Expenses:B" {
+		t.Errorf("postings = %+v, want Expenses:A and Expenses:B", entries[0].Postings)
+	}
+}
+
+// When every posting is priced, the source account is the last one; the categorization it carries is
+// every other posting, not the source itself.
+func TestReadLedgerCategorizationExcludesTheSourceWhenFullyPriced(t *testing.T) {
+	txs, entries, err := source.ReadLedger(strings.NewReader(`2026/03/01  * X
+  Expenses:A  10.00 CAD
+  Assets:Bank:Chequing  -10.00 CAD
+`))
+	if err != nil {
+		t.Fatalf("ReadLedger: %v", err)
+	}
+	if len(entries[0].Postings) != 1 || entries[0].Postings[0].Account != "Expenses:A" {
+		t.Fatalf("postings = %+v, want only Expenses:A, not the source account", entries[0].Postings)
+	}
+	if !entries[0].Balances(txs[0]) {
+		t.Error("the carried categorization does not balance its line")
+	}
 }
 
 // The statement line is reconstructed from the entry: the account it came from is the single posting
@@ -112,7 +177,7 @@ func TestReadLedgerTakesTheLastPostingAsStatementWhenFullyPriced(t *testing.T) {
 
 // A fully priced entry that does not sum to zero is a broken book, refused rather than guessed.
 func TestReadLedgerRefusesAFullyPricedEntryThatDoesNotBalance(t *testing.T) {
-	_, err := source.ReadLedger(strings.NewReader(`2026/03/01  * X
+	_, _, err := source.ReadLedger(strings.NewReader(`2026/03/01  * X
   Expenses:A  10.00 CAD
   Assets:Bank:Chequing  -9.00 CAD
 `))
@@ -173,7 +238,7 @@ func TestReadLedgerDropsASelfBalancingCommodity(t *testing.T) {
 
 // Two commodities that both leave a remainder cannot be summed onto one statement line.
 func TestReadLedgerRefusesTwoUnbalancedCommodities(t *testing.T) {
-	_, err := source.ReadLedger(strings.NewReader(`2026/03/01  * X
+	_, _, err := source.ReadLedger(strings.NewReader(`2026/03/01  * X
   Income:Contract  -9000.00 USD
   Expenses:Fees  10.00 CAD
   Assets:Bank:Chequing
@@ -184,7 +249,7 @@ func TestReadLedgerRefusesTwoUnbalancedCommodities(t *testing.T) {
 }
 
 func TestReadLedgerRefusesTwoElidedAccounts(t *testing.T) {
-	_, err := source.ReadLedger(strings.NewReader(`2026/03/01  * X
+	_, _, err := source.ReadLedger(strings.NewReader(`2026/03/01  * X
   Expenses:A  10.00 CAD
   Assets:Bank:Chequing
   Assets:Bank:Savings
@@ -198,7 +263,7 @@ func TestReadLedgerRefusesTwoElidedAccounts(t *testing.T) {
 // it back is what makes an exported ledger regenerate the same fingerprints, so rules keyed on
 // the description fire the same on a re-import.
 func TestReadLedgerPrefersTheMemoNoteOverThePayee(t *testing.T) {
-	txs, err := source.ReadLedger(strings.NewReader(`2026/03/02  * Acme Hardware
+	txs, _, err := source.ReadLedger(strings.NewReader(`2026/03/02  * Acme Hardware
   ; memo: ACME HARDWARE #4471
   Expenses:Repairs:Materials  84.20 CAD
   Assets:Bank:Chequing

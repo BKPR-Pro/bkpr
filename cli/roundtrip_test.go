@@ -17,9 +17,11 @@ import (
 // over and over. CSV in (every messy amount shape banks emit, duplicate lines included), rules
 // placing almost everything, a ledger-file statement joining it, the artifact rendered, and the
 // artifact imported into a second, empty book with the same rules — which must fold to the same
-// books: same fingerprints, same health line. That equality only holds because the artifact
-// carries each line's raw description as a memo note; the rules and corrections themselves are
-// deliberately NOT in the artifact — they live in the log, which is the backup.
+// books: same fingerprints, same health line. Two things carry that equality: the artifact keeps
+// each line's raw description as a memo note, so the fingerprints regenerate, and a ledger file's
+// own categorization is carried in as an assertion, so a line no rule matches lands where the file
+// put it rather than in Uncategorized. The rule patterns themselves are still NOT in the artifact —
+// they live in the log, which is the backup.
 
 // lengthyCSV writes fourMonths of statement lines: ten a month, every amount shape the parser
 // accepts, and an identical pair on one day so the -1/-2 fingerprint suffixes are exercised.
@@ -45,6 +47,7 @@ func lengthyCSV(t *testing.T, path string) {
 }
 
 // visaLedger is a statement that arrives in ledger form: one line a rule knows, one it does not.
+// The line no rule matches still carries its own category from the file, so it is not uncategorized.
 const visaLedger = `2026/02/10  * INTEREST CHARGE
   Expenses:Interest  10.00 CAD
   Liabilities:Card:Visa
@@ -127,7 +130,9 @@ func TestRoundTripLengthyBooks(t *testing.T) {
 	}
 
 	txs1, _, sum1 := foldStore(t)
-	want := "lines 42, uncategorized 5 | income 16400.00 CAD | expenses 1747.32 CAD | net 14652.68 CAD | unknown -179.96 CAD"
+	// The mystery visa line carries Expenses:Whatever from the file, so only the four UNKNOWN
+	// MERCHANT lines (which arrived by CSV, with no category) are left uncategorized.
+	want := "lines 42, uncategorized 4 | income 16400.00 CAD | expenses 1767.32 CAD | net 14632.68 CAD | unknown -159.96 CAD"
 	if got := healthLine(t, sum1); got != want {
 		t.Fatalf("book one folded to\n  %s\nwant\n  %s", got, want)
 	}
@@ -208,7 +213,7 @@ func TestRoundTripLengthyBooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("summarize february: %v", err)
 	}
-	febWant := "lines 12, uncategorized 2 | income 4100.00 CAD | expenses 444.33 CAD | net 3655.67 CAD | unknown -59.99 CAD"
+	febWant := "lines 12, uncategorized 1 | income 4100.00 CAD | expenses 464.33 CAD | net 3635.67 CAD | unknown -39.99 CAD"
 	if got := healthLine(t, febSum); got != febWant {
 		t.Fatalf("february folded to\n  %s\nwant\n  %s", got, febWant)
 	}

@@ -16,13 +16,17 @@ import (
 // the source account last). The line's amount is the negation of what the other postings account
 // for, summed per commodity; a commodity whose legs cancel among themselves needs no price, and an
 // entry where two commodities both leave a remainder is refused. Account directives, periodic (~)
-// templates, and comments — whole-line or inline — are not statement lines and are dropped. The
-// categorization itself is not carried in: import records the raw line, and the rules place it,
-// keeping the books a fold rather than a pile of frozen assertions. Fingerprints are regenerated
-// from the reconstructed line, so this is not a byte-identical round trip with the original import.
-func ReadLedger(r io.Reader) ([]model.Transaction, error) {
+// templates, and comments — whole-line or inline — are not statement lines and are dropped.
+//
+// Alongside each line it returns the categorization the file already names: the entry's postings
+// with the source account excluded, as a model.Entry parallel to the transaction. A file is
+// categorized data, not a raw statement, so an import can assert that categorization rather than
+// making the rules re-derive what the file plainly says. Fingerprints are regenerated from the
+// reconstructed line, so this is not a byte-identical round trip with the original import.
+func ReadLedger(r io.Reader) ([]model.Transaction, []model.Entry, error) {
 	var txs []model.Transaction
-	seen := map[string]int{} // fingerprint -> times seen, so identical lines stay distinct
+	var entries []model.Entry // entries[i] is the categorization the file gave txs[i]
+	seen := map[string]int{}  // fingerprint -> times seen, so identical lines stay distinct
 
 	var (
 		haveEntry bool
@@ -45,11 +49,14 @@ func ReadLedger(r io.Reader) ([]model.Transaction, error) {
 		if memo != "" {
 			description = memo
 		}
-		tx, err := reconstruct(date, description, postings, seen)
+		tx, side, err := reconstruct(date, description, postings, seen)
 		if err != nil {
 			return fmt.Errorf("ledger entry at line %d (%s): %w", entryLine, payee, err)
 		}
 		txs = append(txs, tx)
+		// The entry title is the payee the file names, kept distinct from the memo the line
+		// fingerprints on, so a carried assertion reads as the file wrote it.
+		entries = append(entries, model.Entry{Payee: payee, Postings: side})
 		haveEntry, memo, postings = false, "", nil
 		return nil
 	}
@@ -63,7 +70,7 @@ func ReadLedger(r io.Reader) ([]model.Transaction, error) {
 		case trimmed == "":
 			skipBlock = false
 			if err := flush(); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		case strings.HasPrefix(trimmed, ";") || strings.HasPrefix(trimmed, "#"):
 			// A comment, except the one note the writer uses to carry a line's raw description.
@@ -78,39 +85,39 @@ func ReadLedger(r io.Reader) ([]model.Transaction, error) {
 				continue
 			}
 			if !haveEntry {
-				return nil, fmt.Errorf("ledger line %d: a posting before any entry", n)
+				return nil, nil, fmt.Errorf("ledger line %d: a posting before any entry", n)
 			}
 			p, err := parsePosting(stripComment(trimmed))
 			if err != nil {
-				return nil, fmt.Errorf("ledger line %d: %w", n, err)
+				return nil, nil, fmt.Errorf("ledger line %d: %w", n, err)
 			}
 			postings = append(postings, p)
 		case strings.HasPrefix(line, "account ") || strings.HasPrefix(line, "~"):
 			// a directive or a periodic template, not a statement line
 			if err := flush(); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			skipBlock = true
 		default:
 			// a new entry header; the previous entry ends here
 			skipBlock = false
 			if err := flush(); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			d, pay, err := parseHeader(stripComment(trimmed))
 			if err != nil {
-				return nil, fmt.Errorf("ledger line %d: %w", n, err)
+				return nil, nil, fmt.Errorf("ledger line %d: %w", n, err)
 			}
 			haveEntry, date, payee, entryLine = true, d, pay, n
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := flush(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return txs, nil
+	return txs, entries, nil
 }
 
 // stripComment drops an inline "; ..." note from a header or posting line: everything after the
@@ -171,8 +178,9 @@ func twoSpaceGap(s string) int {
 	return -1
 }
 
-func reconstruct(date time.Time, description string, postings []posting, seen map[string]int) (model.Transaction, error) {
+func reconstruct(date time.Time, description string, postings []posting, seen map[string]int) (model.Transaction, []model.Posting, error) {
 	var elided []string
+	var priced []posting // every posting that carries an amount, i.e. the categorized side
 	sums := map[string]model.Amount{}
 	var commodities []string // map iteration order is random; remainders must be reported stably
 	for _, p := range postings {
@@ -180,6 +188,7 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 			elided = append(elided, p.account)
 			continue
 		}
+		priced = append(priced, p)
 		prev, ok := sums[p.amount.Commodity]
 		if !ok {
 			sums[p.amount.Commodity] = p.amount
@@ -188,12 +197,12 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 		}
 		next, err := prev.Add(p.amount)
 		if err != nil {
-			return model.Transaction{}, err
+			return model.Transaction{}, nil, err
 		}
 		sums[p.amount.Commodity] = next
 	}
 	if len(sums) == 0 {
-		return model.Transaction{}, fmt.Errorf("entry has no priced postings")
+		return model.Transaction{}, nil, fmt.Errorf("entry has no priced postings")
 	}
 
 	// a commodity whose legs cancel among themselves asks nothing of the statement account
@@ -206,32 +215,42 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 
 	var account string
 	var amount model.Amount
+	var categorized []posting // the postings the file categorized the line into, the source excluded
 	switch {
 	case len(elided) > 1:
-		return model.Transaction{}, fmt.Errorf("need at most one amountless posting for the statement account, found %d", len(elided))
+		return model.Transaction{}, nil, fmt.Errorf("need at most one amountless posting for the statement account, found %d", len(elided))
 	case len(remainders) > 1:
-		return model.Transaction{}, fmt.Errorf("cannot add %s and %s in one entry without a price", remainders[0].Commodity, remainders[1].Commodity)
+		return model.Transaction{}, nil, fmt.Errorf("cannot add %s and %s in one entry without a price", remainders[0].Commodity, remainders[1].Commodity)
 	case len(elided) == 1:
+		// the source is the amountless posting, so every priced posting is categorization
 		account = elided[0]
 		amount = sums[commodities[0]].Negate()
 		if len(remainders) == 1 {
 			amount = remainders[0].Negate()
 		}
+		categorized = priced
 	case len(remainders) != 0:
-		return model.Transaction{}, fmt.Errorf("entry with every posting priced sums to %s, not zero", remainders[0])
+		return model.Transaction{}, nil, fmt.Errorf("entry with every posting priced sums to %s, not zero", remainders[0])
 	default:
-		// fully priced and balanced: ledger's convention writes the source account last
+		// fully priced and balanced: ledger's convention writes the source account last, so every
+		// posting before it is categorization
 		last := postings[len(postings)-1]
 		account, amount = last.account, last.amount
+		categorized = postings[:len(postings)-1]
 	}
 	fp := Fingerprint(account, date, amount, description)
 	seen[fp]++
 
-	return model.Transaction{
+	tx := model.Transaction{
 		ID:          fmt.Sprintf("%s-%d", fp, seen[fp]),
 		Account:     account,
 		Date:        date,
 		Amount:      amount,
 		Description: description,
-	}, nil
+	}
+	side := make([]model.Posting, 0, len(categorized))
+	for _, p := range categorized {
+		side = append(side, model.Posting{Account: p.account, Amount: p.amount})
+	}
+	return tx, side, nil
 }

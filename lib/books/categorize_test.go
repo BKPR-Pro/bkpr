@@ -357,3 +357,73 @@ func TestAnAssertionSurvivesARuleChange(t *testing.T) {
 		t.Errorf("account = %q, want the human's assertion to still hold", got)
 	}
 }
+
+// A line that arrived already categorized (a ledger file names its own postings) carries that
+// categorization in as an assertion, so folding shows the file's account with no rule and no manual
+// categorize step. Without the carry, and with no rule, the line would fall to Uncategorized.
+func TestCarryCategorizationsAssertsTheFilesCategorization(t *testing.T) {
+	log := newLog()
+	tx := line("a", 1, -8420, "ACME HARDWARE")
+	importOne(t, log, tx)
+
+	entry := model.Entry{Payee: "Acme Hardware", Postings: whole("Expenses:Materials", -8420)}
+	carried, skipped, err := books.CarryCategorizations(log, "import:acct.txt", "from the ledger file",
+		[]model.Transaction{tx}, []model.Entry{entry})
+	if err != nil {
+		t.Fatalf("CarryCategorizations: %v", err)
+	}
+	if carried != 1 || skipped != 0 {
+		t.Errorf("got carried=%d skipped=%d, want 1 and 0", carried, skipped)
+	}
+
+	got := entryFor(t, log, "a")
+	if got.Postings[0].Account != "Expenses:Materials" {
+		t.Errorf("account = %q, want the file's category, not Uncategorized", got.Postings[0].Account)
+	}
+	if got.Payee != "Acme Hardware" {
+		t.Errorf("payee = %q, want the file's payee", got.Payee)
+	}
+}
+
+// A carried categorization is an ordinary assertion, so a later human correction still wins over it,
+// exactly as it would over a rule.
+func TestACarriedCategorizationIsOverriddenByAHuman(t *testing.T) {
+	log := newLog()
+	tx := line("a", 1, -8420, "ACME HARDWARE")
+	importOne(t, log, tx)
+	books.CarryCategorizations(log, "import:acct.txt", "", []model.Transaction{tx},
+		[]model.Entry{{Payee: "Acme", Postings: whole("Expenses:Materials", -8420)}})
+
+	if err := books.Categorize(log, "human", "receipt was Unit 1", "a", "Acme",
+		whole("Expenses:Materials:Unit 1", -8420)); err != nil {
+		t.Fatalf("Categorize: %v", err)
+	}
+
+	if got := entryFor(t, log, "a").Postings[0].Account; got != "Expenses:Materials:Unit 1" {
+		t.Errorf("account = %q, want the human's correction over the carried one", got)
+	}
+}
+
+// A categorization that cannot post against the line — a mixed-commodity placeholder the books
+// cannot balance — is left to the rules rather than asserted, so the import records what it can and
+// the line stays honestly Uncategorized instead of carrying a broken entry.
+func TestCarryCategorizationsSkipsAnEntryThatDoesNotBalance(t *testing.T) {
+	log := newLog()
+	tx := line("a", 1, -10000, "PROPERTY PURCHASE")
+	importOne(t, log, tx)
+
+	entry := model.Entry{Postings: []model.Posting{
+		{Account: "Assets:Prop", Amount: model.Amount{Units: 1, Commodity: "Property"}},
+	}}
+	carried, skipped, err := books.CarryCategorizations(log, "import:acct.txt", "",
+		[]model.Transaction{tx}, []model.Entry{entry})
+	if err != nil {
+		t.Fatalf("CarryCategorizations: %v", err)
+	}
+	if carried != 0 || skipped != 1 {
+		t.Errorf("got carried=%d skipped=%d, want 0 and 1", carried, skipped)
+	}
+	if !entryFor(t, log, "a").Uncategorized() {
+		t.Error("the unbalanced entry should be left uncategorized, not asserted")
+	}
+}
