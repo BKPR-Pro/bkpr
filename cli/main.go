@@ -166,8 +166,9 @@ BOOKKEEPING
   import <connector>
       Read transactions in. A file is a one-time input: a CSV does not name its own account,
       currency, or columns, so you supply them inline; a ledger file names all of that itself
-      (each entry's single amountless posting is the account it came from). The line is
-      imported raw and the rules place it, so a ledger file's own categorization is not
+      (an entry's amountless posting is the account it came from; with every leg priced, its
+      last posting is). Directives, periodic (~) templates, and comments are skipped. The line
+      is imported raw and the rules place it, so a ledger file's own categorization is not
       carried in. A connector is named instead of a file: it already carries its account and
       currency (from connectors register) and fetches its own lines. All three land through the
       same import, deduped by fingerprint, so re-running is safe. A bank connector (kind rbc,

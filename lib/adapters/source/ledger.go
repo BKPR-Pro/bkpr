@@ -10,18 +10,23 @@ import (
 	"github.com/dallasread/bookkeeper/lib/model"
 )
 
-// ReadLedger parses the plain-text ledger form bookkeeper writes back into statement lines. Each
-// entry names the account it came from as its single amountless posting (the one the writer elided),
-// and the line's amount is the negation of what the priced postings account for. The categorization
-// itself is not carried in: import records the raw line, and the rules place it, keeping the books a
-// fold rather than a pile of frozen assertions. Fingerprints are regenerated from the reconstructed
-// line, so this is not a byte-identical round trip with the original import.
+// ReadLedger parses plain-text ledger — the form bookkeeper writes back, or a hand-kept file —
+// into statement lines. Each entry names the account it came from: its single amountless posting
+// when one leg was elided, or its last posting when every leg is priced (ledger's convention puts
+// the source account last). The line's amount is the negation of what the other postings account
+// for, summed per commodity; a commodity whose legs cancel among themselves needs no price, and an
+// entry where two commodities both leave a remainder is refused. Account directives, periodic (~)
+// templates, and comments — whole-line or inline — are not statement lines and are dropped. The
+// categorization itself is not carried in: import records the raw line, and the rules place it,
+// keeping the books a fold rather than a pile of frozen assertions. Fingerprints are regenerated
+// from the reconstructed line, so this is not a byte-identical round trip with the original import.
 func ReadLedger(r io.Reader) ([]model.Transaction, error) {
 	var txs []model.Transaction
 	seen := map[string]int{} // fingerprint -> times seen, so identical lines stay distinct
 
 	var (
 		haveEntry bool
+		skipBlock bool
 		date      time.Time
 		payee     string
 		postings  []posting
@@ -48,27 +53,38 @@ func ReadLedger(r io.Reader) ([]model.Transaction, error) {
 
 		switch {
 		case trimmed == "":
+			skipBlock = false
 			if err := flush(); err != nil {
 				return nil, err
 			}
 		case strings.HasPrefix(trimmed, ";") || strings.HasPrefix(trimmed, "#"):
 			// a comment
 		case line[0] == ' ' || line[0] == '\t':
-			// a posting under the current entry
+			// a posting under the current entry, or a sub-line of a skipped block
+			if skipBlock {
+				continue
+			}
 			if !haveEntry {
 				return nil, fmt.Errorf("ledger line %d: a posting before any entry", n)
 			}
-			p, err := parsePosting(trimmed)
+			p, err := parsePosting(stripComment(trimmed))
 			if err != nil {
 				return nil, fmt.Errorf("ledger line %d: %w", n, err)
 			}
 			postings = append(postings, p)
-		default:
-			// a new entry header; the previous entry ends here
+		case strings.HasPrefix(line, "account ") || strings.HasPrefix(line, "~"):
+			// a directive or a periodic template, not a statement line
 			if err := flush(); err != nil {
 				return nil, err
 			}
-			d, pay, err := parseHeader(trimmed)
+			skipBlock = true
+		default:
+			// a new entry header; the previous entry ends here
+			skipBlock = false
+			if err := flush(); err != nil {
+				return nil, err
+			}
+			d, pay, err := parseHeader(stripComment(trimmed))
 			if err != nil {
 				return nil, fmt.Errorf("ledger line %d: %w", n, err)
 			}
@@ -82,6 +98,15 @@ func ReadLedger(r io.Reader) ([]model.Transaction, error) {
 		return nil, err
 	}
 	return txs, nil
+}
+
+// stripComment drops an inline "; ..." note from a header or posting line: everything after the
+// amount (or the payee) is commentary, never data.
+func stripComment(s string) string {
+	if i := strings.IndexByte(s, ';'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimRight(s, " \t")
 }
 
 // posting is one line of an entry: an account, and an amount unless it is the elided (balancing) one.
@@ -135,33 +160,57 @@ func twoSpaceGap(s string) int {
 
 func reconstruct(date time.Time, payee string, postings []posting, seen map[string]int) (model.Transaction, error) {
 	var elided []string
-	sum := model.Amount{}
-	first := true
+	sums := map[string]model.Amount{}
+	var commodities []string // map iteration order is random; remainders must be reported stably
 	for _, p := range postings {
 		if !p.priced {
 			elided = append(elided, p.account)
 			continue
 		}
-		if first {
-			sum = model.Amount{Commodity: p.amount.Commodity}
-			first = false
+		prev, ok := sums[p.amount.Commodity]
+		if !ok {
+			sums[p.amount.Commodity] = p.amount
+			commodities = append(commodities, p.amount.Commodity)
+			continue
 		}
-		next, err := sum.Add(p.amount)
+		next, err := prev.Add(p.amount)
 		if err != nil {
 			return model.Transaction{}, err
 		}
-		sum = next
+		sums[p.amount.Commodity] = next
 	}
-
-	switch {
-	case len(elided) != 1:
-		return model.Transaction{}, fmt.Errorf("need exactly one amountless posting for the statement account, found %d", len(elided))
-	case first:
+	if len(sums) == 0 {
 		return model.Transaction{}, fmt.Errorf("entry has no priced postings")
 	}
 
-	account := elided[0]
-	amount := sum.Negate()
+	// a commodity whose legs cancel among themselves asks nothing of the statement account
+	var remainders []model.Amount
+	for _, c := range commodities {
+		if !sums[c].IsZero() {
+			remainders = append(remainders, sums[c])
+		}
+	}
+
+	var account string
+	var amount model.Amount
+	switch {
+	case len(elided) > 1:
+		return model.Transaction{}, fmt.Errorf("need at most one amountless posting for the statement account, found %d", len(elided))
+	case len(remainders) > 1:
+		return model.Transaction{}, fmt.Errorf("cannot add %s and %s in one entry without a price", remainders[0].Commodity, remainders[1].Commodity)
+	case len(elided) == 1:
+		account = elided[0]
+		amount = sums[commodities[0]].Negate()
+		if len(remainders) == 1 {
+			amount = remainders[0].Negate()
+		}
+	case len(remainders) != 0:
+		return model.Transaction{}, fmt.Errorf("entry with every posting priced sums to %s, not zero", remainders[0])
+	default:
+		// fully priced and balanced: ledger's convention writes the source account last
+		last := postings[len(postings)-1]
+		account, amount = last.account, last.amount
+	}
 	fp := Fingerprint(account, date, amount, payee)
 	seen[fp]++
 

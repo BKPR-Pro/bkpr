@@ -97,15 +97,89 @@ func TestReadLedgerKeepsIdenticalEntriesDistinct(t *testing.T) {
 	}
 }
 
-// Without exactly one amountless posting, the account the statement came from cannot be told, so
-// the file is refused rather than guessed.
-func TestReadLedgerRefusesAnEntryWithNoElidedAccount(t *testing.T) {
+// A hand-written entry may price every posting. When it balances, the last posting is the
+// statement account, following ledger's convention of writing the source account last.
+func TestReadLedgerTakesTheLastPostingAsStatementWhenFullyPriced(t *testing.T) {
+	txs := readLedger(t, `2026/03/01  * X
+  Expenses:A  10.00 CAD
+  Assets:Bank:Chequing  -10.00 CAD
+`)
+	tx := txs[0]
+	if tx.Account != "Assets:Bank:Chequing" || tx.Amount.String() != "-10.00 CAD" {
+		t.Errorf("got %q %q, want the last posting as the statement account", tx.Account, tx.Amount)
+	}
+}
+
+// A fully priced entry that does not sum to zero is a broken book, refused rather than guessed.
+func TestReadLedgerRefusesAFullyPricedEntryThatDoesNotBalance(t *testing.T) {
 	_, err := source.ReadLedger(strings.NewReader(`2026/03/01  * X
   Expenses:A  10.00 CAD
-  Expenses:B  -10.00 CAD
+  Assets:Bank:Chequing  -9.00 CAD
 `))
 	if err == nil {
-		t.Fatal("an entry with every posting priced has no statement account; want an error")
+		t.Fatal("a fully priced entry that does not balance; want an error")
+	}
+}
+
+// Ledger allows a comment after an amount or a payee; the note is dropped, not parsed as data.
+func TestReadLedgerStripsInlineComments(t *testing.T) {
+	txs := readLedger(t, `2026/03/01  * Acme Hardware  ; paid in person
+  Expenses:Materials  84.20 CAD  ; two boxes of screws
+  Assets:Bank:Chequing
+`)
+	tx := txs[0]
+	if tx.Description != "Acme Hardware" {
+		t.Errorf("description = %q, want the inline comment stripped", tx.Description)
+	}
+	if tx.Amount.String() != "-84.20 CAD" {
+		t.Errorf("amount = %q, want -84.20 CAD", tx.Amount)
+	}
+}
+
+// A real ledger file opens with account directives and periodic (~) templates. They are not
+// statement lines, so they are skipped, sub-lines and all.
+func TestReadLedgerSkipsDirectivesAndPeriodicEntries(t *testing.T) {
+	txs := readLedger(t, `account Assets:Bank:Chequing
+  address 90 King Street
+  address St. Stephen
+
+~ Monthly
+  Income:Rent  -1300.00 CAD
+  Assets:Bank:Chequing
+
+2026/03/01  * One
+  Expenses:A  1.00 CAD
+  Assets:Bank:Chequing
+`)
+	if len(txs) != 1 || txs[0].Description != "One" {
+		t.Fatalf("got %+v, want just the dated entry", txs)
+	}
+}
+
+// A commodity whose postings cancel among themselves (a unit placeholder moved between accounts)
+// needs no price: only a commodity that leaves a remainder must be the statement line's own.
+func TestReadLedgerDropsASelfBalancingCommodity(t *testing.T) {
+	txs := readLedger(t, `2026/03/01  * Purchase
+  Equity:Prop  -1 Property
+  Assets:Prop  1 Property
+  Expenses:Legal  100.00 CAD
+  Assets:Bank:Chequing
+`)
+	tx := txs[0]
+	if tx.Account != "Assets:Bank:Chequing" || tx.Amount.String() != "-100.00 CAD" {
+		t.Errorf("got %q %q, want the CAD remainder on the elided account", tx.Account, tx.Amount)
+	}
+}
+
+// Two commodities that both leave a remainder cannot be summed onto one statement line.
+func TestReadLedgerRefusesTwoUnbalancedCommodities(t *testing.T) {
+	_, err := source.ReadLedger(strings.NewReader(`2026/03/01  * X
+  Income:Contract  -9000.00 USD
+  Expenses:Fees  10.00 CAD
+  Assets:Bank:Chequing
+`))
+	if err == nil {
+		t.Fatal("two commodities with remainders; want an error")
 	}
 }
 
