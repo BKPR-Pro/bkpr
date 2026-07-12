@@ -803,10 +803,16 @@ is a new case, not a rewrite. A bank connector (kind `rbc`, `simplii`, or `pcfin
 Canadian banks that expose no free transaction API) drives a headless-browser **Playwright** script
 to read the account: Go runs the per-institution script with the connector's details in the
 environment, and the script prints the lines as JSON, which Go normalizes and fingerprints like a
-CSV. The automation lives in Node so the Go binary stays stdlib-only. The scripts are stubs today, so
-an import fails loudly until one is written and a CSV export is the way in; which mechanism it grows
-into (the browser import, or an FDX-shaped official API once Canada designates one, realistically
-2027) is written up in `docs/importing-from-banks.md`.
+CSV. The automation lives in Node so the Go binary stays stdlib-only. The credential is a saved
+browser **session**, never a stored password: the person signs in themselves the first time (and
+whenever it expires) in a headed browser, and bookkeeper keeps only the session that results, reused
+headless after. Sign-in is folded into `import` and self-heals — a live session imports silently; an
+expired one re-opens the browser when a person is present, or fails fast with a "sign in again" hint
+when one is not, so an agent is never left staring at a browser it cannot answer. `TokenEnv` keys the
+session, so accounts on one login (every RBC account) share it. The shared session-and-sign-in logic
+is one harness; each institution script is just its selectors, and pinning those to the real site is
+all that remains per bank. The design — and the FDX-shaped official API this grows into once Canada
+designates one, realistically 2027 — is written up in `docs/importing-from-banks.md`.
 
 A connector is bidirectional in principle, and `export` was the direction built first. The rent app
 is the first connector: `export` records rent the books already booked back to it so its paid/unpaid
@@ -854,20 +860,27 @@ follows the same shape (see below), so it is the same convention, not a special 
 
 In order:
 
-1. **The RBC bank import.** Fill in `scripts/rbc.js`: drive the login and read the account into the
-   JSON the importer already expects (`BK_IMPORT_*` in, `[{date, description, amount}]` out). The
-   login itself lives in the web layer (below) or, standalone, in an encrypted `.env`, and reaches
-   the script as `BK_IMPORT_SECRET` at run time, so the engine never stores a plaintext credential —
-   `Connector.TokenEnv` is the handoff. Simplii and PC Financial follow the same shape. Until each is
-   written, a CSV export is the way in.
+1. **Pin each bank's selectors.** The browser import itself is built: `import <connector>` drives a
+   Playwright harness that reuses a saved browser session, signs in again in a headed browser when it
+   has expired, saves the fresh session, and prints the account's lines as the JSON the importer
+   expects (`BK_IMPORT_*` in, `[{date, description, amount}]` out). The credential is that session,
+   never a stored password — the person enters their password and 2FA in the browser themselves, and
+   only the session is kept, reused headless after, keyed by `Connector.TokenEnv` so accounts on one
+   login share it. What remains per bank is the three selectors that differ by site — `isLoginWall`,
+   `signIn`, `readRows`, marked `TODO` in each of `scripts/rbc.js`, `simplii.js`, `pcfinancial.js`;
+   `npx playwright codegen <bank url>` records them. Start with RBC: one login reaches all five of its
+   accounts. Until a bank's selectors are pinned, a CSV export is the way in.
 
 Around the engine, the product is a **web layer** that wraps it, and it owns two things this tool
 deliberately does not: the **human surface**, so a person never sees a fingerprint (chat over the
 books, and the `report` and `receipt` views to read and print), and the **secret store** a live
 connection needs. bookkeeper's job is to stay a clean thing to drive and to keep secrets out of the
 committed log: the web layer holds them and injects them at run time through the `TokenEnv` /
-`BK_IMPORT_*` contract. Standalone, the bare CLI reads the same secrets from an **encrypted `.env`**,
-decrypting it at run time with a key held in the **OS keychain** — no plaintext secret on disk, no
+`BK_IMPORT_*` contract. A bank is the softer case already handled — its credential is not a stored
+secret at all but a saved browser session, kept machine-local outside the book and re-earned by
+signing in when it expires. For a genuine token (an FDX bearer, say), and to encrypt that session at
+rest, the same store applies: standalone, the bare CLI reads it from an **encrypted `.env`**,
+decrypting at run time with a key held in the **OS keychain** — no plaintext secret on disk, no
 passphrase, and no new build dependency: AES-GCM decryption is standard-library, and the keychain is
 reached through an adapter (the way the browser import reaches Node), so the binary stays stdlib-only
 and the tool works without the web layer too. Either way the book of record stays plain, committable,

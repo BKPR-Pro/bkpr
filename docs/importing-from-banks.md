@@ -43,39 +43,57 @@ stubbed direction.
 - **Shape the internal model like FDX.** `model.Transaction` (account, date, signed amount,
   description, raw) already lines up with FDX's transaction shape. Do not build against any Canadian
   "official" schema until the Minister's order designates one.
-- **Secrets stay out of the books.** A connector names an environment variable
-  (`Connector.TokenEnv`) that holds its secret (a bearer token, or bank login credentials); the
-  value is read at fetch time and never written to the log. Storing bank login credentials anywhere
-  is a real risk to weigh before the scraper is built; prefer an aggregator/official token flow if a
-  free one appears.
+- **The credential is a saved session, not a stored password.** No bank login is ever stored. The
+  person signs in themselves, once, in a headed browser (password and 2FA included); bookkeeper keeps
+  only the resulting browser session (Playwright `storageState`) and reuses it headless afterward. A
+  session expires, which is the whole reason to prefer it to a password. `Connector.TokenEnv` is no
+  longer an env var the person sets — it is the *key* under which that session is stored, so several
+  connectors that share a login (every RBC account) share one session by sharing a token-env. The
+  session lives outside the book of record (machine-local, under the OS config dir), because it is a
+  live credential, not committed history.
+- **Sign-in is folded into import, and self-heals.** There is no separate `login` verb. `import`
+  tries the saved session headless; if it lands on the sign-in wall, and a person is present (a real
+  terminal, detected with isatty), it opens a headed browser to sign in again and saves the fresh
+  session. With no person present (a pipe, a redirect, an agent, cron) it fails fast with a "run it
+  from a terminal to sign in again" hint (exit `EX_TEMPFAIL`) rather than opening a browser nobody is
+  watching — keeping the tool drivable by an agent. `-relogin` forces a fresh sign-in.
 - **Automation lives in Node, not Go.** A browser needs Playwright, which Go has no stdlib for, so
   the bank importer runs a per-institution Node script via `os/exec` and reads its JSON output.
   The Go binary stays stdlib-only; the runtime dependency (Node + Playwright) is the scraper's, and
-  only when you actually scrape.
-- **Fail loudly while stubbed.** A stub script exits non-zero with a message, and `source.ReadBank`
-  surfaces it, so a not-built import never reads as "imported nothing".
+  only when you actually scrape. `NODE_PATH` is set so the script finds the customer's Playwright.
+- **One harness, thin per-institution scripts.** `scripts/harness.js` owns everything common —
+  loading the session, the headed re-sign-in, saving the session, printing JSON. Each institution
+  script (`rbc.js`, `simplii.js`, `pcfinancial.js`) is just a profile: the three selectors that
+  differ by site. Go materializes the whole `scripts/` dir to a temp dir so a script can
+  `require('./harness.js')`.
+- **Fail loudly.** A script that cannot read rows exits non-zero, and `source.ReadBank` surfaces the
+  message, so a not-yet-pinned import never reads as "imported nothing".
 
-## What is built, and what is stubbed
+## What is built, and what remains
 
-The Go plumbing is **done** (`lib/adapters/source`):
+The Go plumbing and the harness are **done** (`lib/adapters/source`):
 
 - A connector's kind selects the institution: `rbc`, `simplii`, `pcfinancial`. `import <name>` →
   `fetcherFor` → `source.ReadBank`, which runs `scripts/<kind>.js` with Node, passing the connector's
-  URL, account, currency, and secret in the environment (`BK_IMPORT_*`; the secret never on the
-  command line). The script prints `[{date, description, amount, currency?}]` to stdout; Go
+  URL, account, currency, session-file path, and whether a person is present in the environment
+  (`BK_IMPORT_*`). The script prints `[{date, description, amount, currency?}]` to stdout; Go
   normalizes it and fingerprints via `source.Identify`, so a bank import and a CSV of one account are
-  interchangeable and idempotent. Several accounts at one bank share its script and differ only by
-  URL and account.
+  interchangeable and idempotent. Several accounts at one bank share its script — and, when they share
+  a login, its session — differing only by URL and account.
+- The session lifecycle (reuse headless, re-sign-in headed when expired, save, and fail fast when no
+  one is present) is implemented in `scripts/harness.js` and verified end to end against a local
+  fake-bank fixture with a real browser.
 
-The **Playwright scripts are stubs** (`lib/adapters/source/scripts/*.js`): each carries the intended
-structure and TODO sketch, and exits non-zero so an import fails clearly until the login-and-scrape
-steps are written.
+What remains is **per institution**: pinning the three selectors in each script — `isLoginWall`,
+`signIn`, and `readRows` — to the real site. Each is marked `TODO(<institution>)` and the fastest way
+to capture them is `npx playwright codegen <bank url>`: sign in, open an account, and read the
+selectors it records into the three functions.
 
 ## What to build next
 
-1. Fill in a script's Playwright steps: launch a browser, sign in with `BK_IMPORT_SECRET`, open the
-   account at `BK_IMPORT_URL`, read the transaction rows, print them as JSON. **Decide the credential
-   model first** (see the secrets note) — storing bank logins is the real risk here.
+1. Pin one institution's three selectors against its real site (start with RBC — one login reaches
+   all five of its accounts). Until then that import fails loudly, and a manual CSV export is the way
+   in.
 2. Or, if a free token flow appears, an `fdx`/aggregator adapter as another `fetcherFor` case,
    leaving the seam and the rest of the tool unchanged.
 

@@ -68,14 +68,17 @@ func TestReadBankUnknownInstitution(t *testing.T) {
 	}
 }
 
-// The embedded stub scripts exist and, run for real, fail loudly (they are not implemented). Skipped
-// where Node is not installed.
-func TestStubScriptsFailLoudly(t *testing.T) {
-	_, err := execBankScript(Bank{Institution: "rbc"})
+// The embedded scripts run for real through Node and the harness. Without Playwright installed (or
+// with an unreachable site) an import fails loudly rather than silently recording nothing. Skipped
+// where Node itself is not installed.
+func TestScriptsFailLoudlyWithoutABrowser(t *testing.T) {
+	// An unreachable URL so the run fails quickly even where Playwright happens to be installed, and
+	// non-interactive so it never tries to open a browser.
+	_, err := execBankScript(Bank{Institution: "rbc", LoginURL: "http://127.0.0.1:0/"})
 	if err != nil && strings.Contains(err.Error(), "node not found") {
 		t.Skip("Node not installed")
 	}
-	if err == nil || !strings.Contains(err.Error(), "stub") {
-		t.Fatalf("the RBC stub should fail with a 'stub' message, got %v", err)
+	if err == nil {
+		t.Fatal("without a reachable browser/site the RBC import should fail, not record nothing")
 	}
 }

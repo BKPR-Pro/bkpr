@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -107,12 +108,13 @@ usage:
   bk rules   rm   <re>
   bk rules   mv   <re> [-before <re>]
   bk rules   list
-  bk connectors register <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
+  bk connectors register <name> -kind <rentapp|rbc|simplii|pcfinancial> -url <url> -token-env <ENV> -account <a> [-currency <c>]
   bk connectors rm   <name>
   bk connectors list
   bk import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
   bk import       <file.ledger>
   bk import       <book.jsonl>
+  bk import       <connector> [-relogin]
   bk categorize   <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
   bk void         <fingerprint> [-why <reason>] [-actor <name>]
   bk match        <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
@@ -184,10 +186,12 @@ var reference = []docGroup{
       committed point. After a reset the old log is recoverable only from git.
 `},
 		{[]string{"connectors"}, `  connectors register <name> -kind <kind> -url <url> -token-env <ENV> -account <a> [-currency <c>]
-      Register a live connector. The bearer token is never stored: -token-env names the
-      environment variable that holds it, read when the connector is used. A connector is
-      bidirectional in principle: export writes to it today, and importing from it by name
-      is the same registry, built later. Registering one does not itself move any data.
+      Register a live connector. Kinds: rentapp (export), and the banks imported from --
+      rbc, simplii, pcfinancial. No secret is stored: -token-env names where the credential
+      lives, read when the connector is used. For a bank that credential is a saved browser
+      session rather than a token, so connectors that share a login share a -token-env and
+      thus one sign-in (every RBC account, say). A connector is bidirectional in principle:
+      export writes to it, import reads from it. Registering one does not itself move data.
   connectors rm <name>            Forget a connector.
   connectors list                 Show the registered connectors.
 `},
@@ -221,6 +225,12 @@ var reference = []docGroup{
       deduped import every file takes.
       -date-format is a Go layout: the reference date Jan 2, 2006 written the way the column
       writes dates, so MM/DD/YYYY is -date-format 01/02/2006 (the default is 2006-01-02).
+  import <connector> [-relogin]
+      Import a bank connector's lines. It reuses a saved browser session; when that has
+      expired it opens a browser for you to sign in again (your password and 2FA are entered
+      there and never stored -- only the resulting session is kept). With no terminal present
+      it does not open a browser, it fails with a message to sign in from one. -relogin signs
+      in fresh, ignoring any saved session.
   import <book.jsonl>
       Merge another book: the log is its own interchange format, so its events replay here in
       their order. Statement lines, invoices, bills, and exports dedupe by fingerprint, so a
@@ -536,8 +546,40 @@ func importCmd(args []string) error {
 		if !ok {
 			return fmt.Errorf("import: I do not know how to read %q; .csv, .ledger, and .jsonl are supported, or a registered connector's name (see `connectors list`)", arg)
 		}
-		return importConnector(s.Log, c)
+		fs := flag.NewFlagSet("import (connector)", flag.ExitOnError)
+		relogin := fs.Bool("relogin", false, "ignore any saved sign-in and sign in fresh")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		dir, err := sessionsDir()
+		if err != nil {
+			return err
+		}
+		return importConnector(s.Log, c, fetchOpts{
+			sessionDir:  dir,
+			interactive: interactiveTerminal(),
+			relogin:     *relogin,
+		})
 	}
+}
+
+// sessionsDir is where bank browser sessions are kept: machine-local, keyed by a connector's
+// token-env, and deliberately outside the book of record -- a session is a live credential, not
+// committed history. Two connectors that share a login share a session because they share a
+// token-env.
+func sessionsDir() (string, error) {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, "bookkeeper", "sessions"), nil
+}
+
+// interactiveTerminal reports whether a person is at the keyboard, so a bank import whose session has
+// expired may open a browser to sign in again. Without one -- a pipe, a redirect, an agent, cron --
+// it fails fast with a clear message instead of opening a browser nobody is watching.
+func interactiveTerminal() bool {
+	return isTerminal(os.Stdin)
 }
 
 // Source is the input port every import runs: any producer of normalized transactions, a file
@@ -561,13 +603,18 @@ func importFrom(log *eventlog.Log, label string, src Source) error {
 }
 
 // importConnector fetches a registered connector's lines and lands them through the same import
-// every file takes, deduped by fingerprint.
-func importConnector(log *eventlog.Log, c books.Connector) error {
-	fetch, err := fetcherFor(c.Kind)
+// every file takes, deduped by fingerprint. A bank whose session has expired with no one present to
+// sign in again is reported as an actionable hint rather than a raw error.
+func importConnector(log *eventlog.Log, c books.Connector, o fetchOpts) error {
+	fetch, err := fetcherFor(c.Kind, o)
 	if err != nil {
 		return err
 	}
-	return importFrom(log, "connector:"+c.Name, func() ([]model.Transaction, error) { return fetch(c) })
+	err = importFrom(log, "connector:"+c.Name, func() ([]model.Transaction, error) { return fetch(c) })
+	if errors.Is(err, source.ErrSessionExpired) {
+		return fmt.Errorf("%s: its sign-in has expired; run `bk import %s` from a terminal to sign in again", c.Name, c.Name)
+	}
+	return err
 }
 
 // importLog merges another book: the log is its own interchange format, so combining two books is

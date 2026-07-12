@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"os"
+	"path/filepath"
 
 	"github.com/dallasread/bookkeeper/lib/adapters/source"
 	"github.com/dallasread/bookkeeper/lib/books"
@@ -14,11 +14,22 @@ import (
 // it, exactly as export does. Bound to a connector it becomes a Source, the input port import runs.
 type connectorFetch func(books.Connector) ([]model.Transaction, error)
 
+// fetchOpts carries what a bank fetch needs beyond the connector itself: where its browser session is
+// kept, whether a person is present to sign in again, and whether to force a fresh sign-in.
+type fetchOpts struct {
+	sessionDir  string
+	interactive bool
+	relogin     bool
+}
+
 // fetcherFor maps a connector kind to how its transactions are read. A bank (rbc, simplii,
 // pcfinancial) is imported through its browser script; rentapp is export-only, so importing from it
 // is refused rather than half-attempted. A kind with no reader is a clear error, so `import <name>`
 // never silently records nothing.
-func fetcherFor(kind string) (connectorFetch, error) {
+//
+// A bank's session file is keyed by the connector's token-env, not its name, so connectors that share
+// a login (every RBC account) share one session: signing in through any of them signs in all.
+func fetcherFor(kind string, o fetchOpts) (connectorFetch, error) {
 	switch {
 	case source.SupportsBank(kind):
 		return func(c books.Connector) ([]model.Transaction, error) {
@@ -27,7 +38,9 @@ func fetcherFor(kind string) (connectorFetch, error) {
 				Account:         c.Account,
 				DefaultCurrency: c.Currency,
 				LoginURL:        c.URL,
-				Secret:          os.Getenv(c.TokenEnv),
+				SessionFile:     filepath.Join(o.sessionDir, c.TokenEnv+".json"),
+				Interactive:     o.interactive,
+				Relogin:         o.relogin,
 			})
 		}, nil
 	case kind == "rentapp":

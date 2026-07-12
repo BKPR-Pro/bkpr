@@ -81,7 +81,7 @@ var errFetch = fetchErr{}
 // A bank kind has an importer wired, so `import <name>` reaches its fetch.
 func TestFetcherForBankIsWired(t *testing.T) {
 	for _, kind := range []string{"rbc", "simplii", "pcfinancial"} {
-		fetch, err := fetcherFor(kind)
+		fetch, err := fetcherFor(kind, fetchOpts{})
 		if err != nil || fetch == nil {
 			t.Errorf("%s should have an importer: fetch=%v err=%v", kind, fetch, err)
 		}
@@ -91,7 +91,7 @@ func TestFetcherForBankIsWired(t *testing.T) {
 // rentapp is the export direction; importing from it is refused with a message that says why, not a
 // generic failure.
 func TestFetcherForRentappIsExportOnly(t *testing.T) {
-	_, err := fetcherFor("rentapp")
+	_, err := fetcherFor("rentapp", fetchOpts{})
 	if err == nil {
 		t.Fatal("rentapp is export-only; importing from it should be refused")
 	}
@@ -102,7 +102,7 @@ func TestFetcherForRentappIsExportOnly(t *testing.T) {
 
 // A kind with no importer is a clear error rather than a silent no-op import.
 func TestFetcherForUnknownKind(t *testing.T) {
-	if _, err := fetcherFor("mystery"); err == nil {
+	if _, err := fetcherFor("mystery", fetchOpts{}); err == nil {
 		t.Fatal("an unknown connector kind should have no importer")
 	}
 }
