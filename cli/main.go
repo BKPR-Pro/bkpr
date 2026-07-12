@@ -95,55 +95,158 @@ func main() {
 	}
 }
 
-func usage() {
-	fmt.Fprint(os.Stderr, `bookkeeper (bkpr) - turn statements into books
+// palette carries the ANSI styles the usage screen paints with, or empty strings when color is off,
+// so the same render runs to a terminal in color and to a pipe in bare text. It is comparable, so an
+// off palette is exactly the zero value.
+type palette struct {
+	title   string // the tool name
+	heading string // a section header
+	command string // a command's verb
+	dim     string // the [ optional ] groups, and the bkpr prefix
+	reset   string
+}
 
-Every command finds the nearest .bkpr directory by walking up, as git does.
+// colorPalette is the styling a real terminal gets: a bold title, bold-cyan section headers, cyan
+// verbs, and dimmed optionals so the required arguments are what stands out.
+var colorPalette = palette{
+	title:   "\x1b[1m",
+	heading: "\x1b[1;36m",
+	command: "\x1b[36m",
+	dim:     "\x1b[2m",
+	reset:   "\x1b[0m",
+}
+
+// paletteFor chooses styling for f: none when NO_COLOR is set (the honored opt-out) or when f is not
+// a terminal (a pipe, a redirect, an agent reading the screen), color otherwise.
+func paletteFor(f *os.File) palette {
+	if os.Getenv("NO_COLOR") != "" || !isTerminal(f) {
+		return palette{}
+	}
+	return colorPalette
+}
+
+// usageLine is one invocation: the verb to run (styled) and the arguments it takes.
+type usageLine struct {
+	verb string
+	args string
+}
+
+// usageSection is a titled run of commands, so the usage screen carries the reference's shape rather
+// than one flat wall of lines.
+type usageSection struct {
+	title string
+	lines []usageLine
+}
+
+var usageSections = []usageSection{
+	{"SETUP", []usageLine{
+		{"init", "[dir]"},
+		{"reset", "[-confirm]"},
+		{"connectors register", "<name> -kind <rentapp|rbc|simplii|pcfinancial> -url <url> -token-env <ENV> -account <a> [-currency <c>]"},
+		{"connectors rm", "<name>"},
+		{"connectors list", ""},
+	}},
+	{"RULES", []usageLine{
+		{"rules set", "<re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]"},
+		{"rules rm", "<re>"},
+		{"rules mv", "<re> [-before <re>]"},
+		{"rules list", ""},
+	}},
+	{"BOOKKEEPING", []usageLine{
+		{"import", "<file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]"},
+		{"import", "<file.ledger>"},
+		{"import", "<book.jsonl>"},
+		{"import", "<file> -format csv|ledger|jsonl"},
+		{"import", "<connector> [-relogin]"},
+		{"categorize", "<fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]"},
+		{"void", "<fingerprint> [-why <reason>] [-actor <name>]"},
+		{"match", "<fingerprint> (-with <fingerprint> | -break) [-actor <name>]"},
+		{"export", "<connector> [-confirm]"},
+		{"books", "[-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re> ...] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-stdout]"},
+	}},
+	{"INVOICES AND BILLS", []usageLine{
+		{"invoice raise", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]"},
+		{"invoice settle", "<fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]"},
+		{"invoice void", "<fingerprint> [-why <reason>] [-actor <name>]"},
+		{"invoice list", ""},
+		{"invoice aging", "[-as-of <YYYY-MM-DD>]"},
+		{"bill receive", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]"},
+		{"bill settle", "<fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]"},
+		{"bill void", "<fingerprint> [-why <reason>] [-actor <name>]"},
+		{"bill list", ""},
+		{"bill aging", "[-as-of <YYYY-MM-DD>]"},
+	}},
+	{"POLICIES AND DOCUMENTS", []usageLine{
+		{"policy set", "-method <acb|fifo> [-account <a>] [-actor <name>]"},
+		{"policy list", ""},
+		{"accounts set", "<account> -meta <k=v> ... [-actor <name>]"},
+		{"accounts list", ""},
+		{"reconcile", ""},
+		{"receipt", "-tx <fingerprint> [-as invoice|receipt] [-format text|html] [-out <file>]"},
+		{"report", "[-income | -balance | -gains] [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
+	}},
+	{"MORE", []usageLine{
+		{"help", "[command]"},
+		{"docs", ""},
+		{"version", ""},
+	}},
+}
+
+const usageIntro = `Every command finds the nearest .bkpr directory by walking up, as git does.
 Run "bkpr help <command>" for one command, "bkpr docs" for the full reference.
 The thing a command acts on is its first argument; flags assert facts about it.
 Wherever a fingerprint is taken, a unique prefix is enough, as with a git hash.
+`
 
-usage:
-  bkpr init         [dir]
-  bkpr reset        [-confirm]
-  bkpr rules   set  <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]
-  bkpr rules   rm   <re>
-  bkpr rules   mv   <re> [-before <re>]
-  bkpr rules   list
-  bkpr connectors register <name> -kind <rentapp|rbc|simplii|pcfinancial> -url <url> -token-env <ENV> -account <a> [-currency <c>]
-  bkpr connectors rm   <name>
-  bkpr connectors list
-  bkpr import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
-  bkpr import       <file.ledger>
-  bkpr import       <book.jsonl>
-  bkpr import       <file> -format csv|ledger|jsonl
-  bkpr import       <connector> [-relogin]
-  bkpr categorize   <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
-  bkpr void         <fingerprint> [-why <reason>] [-actor <name>]
-  bkpr match        <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
-  bkpr invoice raise   -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
-  bkpr invoice settle  <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
-  bkpr invoice void    <fingerprint> [-why <reason>] [-actor <name>]
-  bkpr invoice list
-  bkpr invoice aging   [-as-of <YYYY-MM-DD>]
-  bkpr bill    receive -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
-  bkpr bill    settle  <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
-  bkpr bill    void    <fingerprint> [-why <reason>] [-actor <name>]
-  bkpr bill    list
-  bkpr bill    aging   [-as-of <YYYY-MM-DD>]
-  bkpr policy  set  -method <acb|fifo> [-account <a>] [-actor <name>]
-  bkpr policy  list
-  bkpr accounts set  <account> -meta <k=v> ... [-actor <name>]
-  bkpr accounts list
-  bkpr reconcile
-  bkpr receipt      -tx <fingerprint> [-as invoice|receipt] [-format text|html] [-out <file>]
-  bkpr report       [-income | -balance | -gains] [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
-  bkpr export       <connector> [-confirm]
-  bkpr books        [-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re> ...] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-stdout]
-  bkpr help         [command]
-  bkpr docs
-  bkpr version
-`)
+// dimOptionals wraps each [ ... ] group in the dim style, so the optional flags recede and the
+// required arguments are what the eye lands on. Brackets do not nest in these synopses.
+func dimOptionals(s string, p palette) string {
+	if p.dim == "" {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '[':
+			b.WriteString(p.dim)
+			b.WriteRune(r)
+		case ']':
+			b.WriteRune(r)
+			b.WriteString(p.reset)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// writeUsage renders the grouped command list to w in the given palette: bold title, one section
+// header per group, and every verb aligned into a column so its arguments line up.
+func writeUsage(w io.Writer, p palette) {
+	fmt.Fprintf(w, "%sbookkeeper (bkpr)%s - turn statements into books\n\n", p.title, p.reset)
+	fmt.Fprint(w, usageIntro)
+
+	var width int
+	for _, s := range usageSections {
+		for _, l := range s.lines {
+			if len(l.verb) > width {
+				width = len(l.verb)
+			}
+		}
+	}
+
+	for _, s := range usageSections {
+		fmt.Fprintf(w, "\n%s%s%s\n", p.heading, s.title, p.reset)
+		for _, l := range s.lines {
+			line := fmt.Sprintf("  %sbkpr%s %s%-*s%s %s",
+				p.dim, p.reset, p.command, width, l.verb, p.reset, dimOptionals(l.args, p))
+			fmt.Fprintln(w, strings.TrimRight(line, " "))
+		}
+	}
+}
+
+func usage() {
+	writeUsage(os.Stderr, paletteFor(os.Stderr))
 }
 
 // docTopic is one command's block of the reference: the names `help` answers to, and the text

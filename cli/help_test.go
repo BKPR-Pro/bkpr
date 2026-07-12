@@ -3,9 +3,66 @@ package main
 import (
 	"bytes"
 	"io"
+	"os"
 	"strings"
 	"testing"
 )
+
+// The styled usage screen groups every command under a section heading and paints the verb, so a
+// person scanning it lands on the right command without reading prose.
+func TestUsageStylesEveryCommandUnderASection(t *testing.T) {
+	var buf bytes.Buffer
+	writeUsage(&buf, colorPalette)
+	out := buf.String()
+	if !strings.Contains(out, "\x1b[") {
+		t.Fatal("a color palette should paint the usage screen with ANSI styling")
+	}
+	for _, name := range []string{
+		"init", "reset", "connectors register", "rules set", "import", "categorize", "void",
+		"match", "export", "books", "invoice raise", "bill receive", "policy set", "accounts set",
+		"reconcile", "receipt", "report", "help", "docs", "version",
+	} {
+		if !strings.Contains(out, name) {
+			t.Errorf("usage should list the %q command", name)
+		}
+	}
+	for _, title := range []string{"SETUP", "RULES", "BOOKKEEPING", "INVOICES AND BILLS", "POLICIES AND DOCUMENTS"} {
+		if !strings.Contains(out, title) {
+			t.Errorf("usage should carry the %q section header", title)
+		}
+	}
+}
+
+// A plain palette leaves the text bare, so a pipe, a redirect, or an agent reading the screen never
+// sees an escape code.
+func TestUsagePlainPaletteEmitsNoAnsi(t *testing.T) {
+	var buf bytes.Buffer
+	writeUsage(&buf, palette{})
+	if strings.Contains(buf.String(), "\x1b") {
+		t.Error("a plain palette must not emit ANSI escapes")
+	}
+}
+
+// Optional [ ... ] groups are dimmed so the required arguments read as the ones that stand out; the
+// required arguments ahead of them are left bright.
+func TestDimOptionalsDimsOnlyBracketedGroups(t *testing.T) {
+	got := dimOptionals("<re> [-why <reason>]", colorPalette)
+	if !strings.Contains(got, colorPalette.dim+"[-why <reason>]") {
+		t.Errorf("the optional group should be dimmed: %q", got)
+	}
+	if strings.Contains(got[:strings.Index(got, "[")], colorPalette.dim) {
+		t.Errorf("the required argument ahead of the optional should stay bright: %q", got)
+	}
+}
+
+// NO_COLOR wins over the terminal check, so the widely-honored opt-out silences styling even at a
+// real keyboard.
+func TestPaletteForHonorsNoColor(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	if paletteFor(os.Stdout) != (palette{}) {
+		t.Error("NO_COLOR should disable styling regardless of the terminal")
+	}
+}
 
 // Every command in the usage block answers to help, so nobody scrolls docs to find a flag.
 func TestHelpTopicKnowsEveryCommand(t *testing.T) {
