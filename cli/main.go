@@ -192,10 +192,10 @@ var usageSections = []usageSection{
 	}},
 }
 
-const usageIntro = `Every command finds the nearest .bkpr directory by walking up, as git does.
+const usageIntro = `Every command finds the nearest .bkpr directory by walking up from where you are.
 Run "bkpr help <command>" for one command, "bkpr docs" for the full reference.
 The thing a command acts on is its first argument; flags assert facts about it.
-Wherever a fingerprint is taken, a unique prefix is enough, as with a git hash.
+Wherever a fingerprint is taken, a unique prefix of it is enough.
 `
 
 // dimOptionals wraps each [ ... ] group in the dim style, so the optional flags recede and the
@@ -220,10 +220,34 @@ func dimOptionals(s string, p palette) string {
 	return b.String()
 }
 
-// writeUsage renders the grouped command list to w in the given palette: bold title, one section
-// header per group, and every verb aligned into a column so its arguments line up.
+// wordmark is the ASCII banner spelling BKPR. Caps keep a flat baseline, so the rows line up with no
+// descenders to fight. Each row is a separate quoted string so its trailing spaces sit before the
+// closing quote and survive an editor's whitespace trim; every row is one width, pinned by a test.
+var wordmark = strings.Join([]string{
+	" ____   _  __ ____   ____  ",
+	"| __ ) | |/ /|  _ \\ |  _ \\ ",
+	"|  _ \\ | ' / | |_) || |_) |",
+	"| |_) || . \\ |  __/ |  _ < ",
+	"|____/ |_|\\_\\|_|    |_| \\_\\",
+}, "\n")
+
+// masthead is the banner atop the usage screen: the ASCII wordmark painted in the heading style over
+// a dimmed tagline, so the help opens on something composed rather than a bare sentence. When the
+// palette is off the styles are empty, so a pipe gets the same banner in clean text.
+func masthead(p palette) string {
+	var b strings.Builder
+	for _, line := range strings.Split(wordmark, "\n") {
+		fmt.Fprintf(&b, "%s%s%s\n", p.heading, line, p.reset)
+	}
+	fmt.Fprintf(&b, "\n  %sbookkeeper · books that balance themselves%s\n", p.dim, p.reset)
+	return b.String()
+}
+
+// writeUsage renders the grouped command list to w in the given palette: a boxed masthead, one
+// section header per group, and every verb aligned into a column so its arguments line up.
 func writeUsage(w io.Writer, p palette) {
-	fmt.Fprintf(w, "%sbookkeeper (bkpr)%s - turn statements into books\n\n", p.title, p.reset)
+	fmt.Fprint(w, masthead(p))
+	fmt.Fprintln(w)
 	fmt.Fprint(w, usageIntro)
 
 	var width int

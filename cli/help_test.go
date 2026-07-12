@@ -6,7 +6,47 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
+
+// The ASCII wordmark's rows must all be one width, or the banner leans; a hand-set banner is easy
+// to knock out of true, so the alignment is pinned by a test.
+func TestWordmarkRowsAreAligned(t *testing.T) {
+	lines := strings.Split(wordmark, "\n")
+	want := utf8.RuneCountInString(lines[0])
+	for _, l := range lines {
+		if got := utf8.RuneCountInString(l); got != want {
+			t.Errorf("wordmark row %q is %d wide, want %d", l, got, want)
+		}
+	}
+}
+
+// The usage screen stands on its own vocabulary rather than leaning on a git analogy.
+func TestUsageDoesNotMentionGit(t *testing.T) {
+	var buf bytes.Buffer
+	writeUsage(&buf, palette{})
+	if strings.Contains(strings.ToLower(buf.String()), "git") {
+		t.Error("the usage screen should not mention git")
+	}
+}
+
+// The masthead shows the ASCII wordmark over a tagline, and a plain palette leaves it bare so a pipe
+// gets clean text.
+func TestMastheadShowsWordmarkAndTagline(t *testing.T) {
+	plain := masthead(palette{})
+	if !strings.Contains(plain, wordmark) {
+		t.Error("the masthead should carry the ASCII wordmark")
+	}
+	if !strings.Contains(plain, "bookkeeper") {
+		t.Error("the masthead should show the bookkeeper tagline")
+	}
+	if strings.Contains(plain, "\x1b") {
+		t.Error("a plain masthead must carry no ANSI")
+	}
+	if !strings.Contains(masthead(colorPalette), colorPalette.heading) {
+		t.Error("a color masthead should paint the wordmark")
+	}
+}
 
 // The styled usage screen groups every command under a section heading and paints the verb, so a
 // person scanning it lands on the right command without reading prose.
