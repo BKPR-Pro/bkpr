@@ -508,6 +508,30 @@ lens drives the statements too: `bkpr report -basis accrual` gives an accrual in
 confuse this with the cost-basis *method* (ACB or FIFO), which is an asserted decision and does live
 in the log as `policy.set`: that changes how a gain is computed, it is not a question asked on read.
 
+### Reading foreign money in your own currency
+
+A book whose functional currency is CAD still earns in USD, and by default the report keeps each
+commodity on its own line, because a USD fee and CAD rent do not sum without a price. `-value` is a
+read-time lens that restates the report in one commodity, using only the prices the log already
+carries:
+
+```sh
+bkpr report -income -value CAD   # value USD income and holdings in CAD
+```
+
+It never invents a rate. A USD income line that recorded its own price, `-9000.00 USD @@ 12157.12
+CAD`, is read at the exact CAD the books kept for it, and a holding is valued at the sum of what each
+acquisition cost, not one rate on the total. An amount that carries no recorded price, like USD that
+was billed and deposited in USD, is left in its own currency and named in a warning, so a foreign
+total is understood rather than mistaken for a gap. To value that residual, pass the rate yourself:
+
+```sh
+bkpr report -income -value CAD -rate USD=1.35   # one USD is worth 1.35 CAD for anything unpriced
+```
+
+Like the basis, `-value` and `-rate` are read-time flags that trigger no event: the recorded `@@`
+prices are the only valuation fact in the log, and everything else is a fold chosen fresh on each read.
+
 An **invoice** is money owed to you; a **bill** is money you owe. They are the one kind of fact a bank
 statement cannot supply, because the money has not moved, so they are recorded rather than folded from
 a line. Each is a first-class thing you do, so each is its own command, the way rules and connectors

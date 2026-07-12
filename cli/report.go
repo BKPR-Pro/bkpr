@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"math/big"
 	"os"
 	"sort"
 	"strings"
@@ -16,6 +17,107 @@ import (
 	"github.com/dallasread/bookkeeper/lib/model"
 	"github.com/dallasread/bookkeeper/lib/store"
 )
+
+// valuer restates amounts into a target commodity for a "report in <target>" lens (the -value flag),
+// so foreign income and holdings can be read in the book's own currency. With an empty target it is
+// the identity, which is the ordinary per-commodity report.
+//
+// It never invents a price. It prefers the price a posting already carries — a @@ cost recorded in
+// the target, which is the exact figure the books kept for that line — then a per-unit rate the
+// caller supplied for the residual. An amount it can value neither way is left in its own commodity,
+// and that commodity is remembered so the command can warn which totals are still foreign.
+type valuer struct {
+	target   string
+	rates    map[string]model.Amount // per-unit target price of a foreign commodity
+	unpriced map[string]bool         // commodities met that could not be valued
+}
+
+// newValuer builds a lens into target, using the supplied per-unit rates for anything without its
+// own recorded price. A nil valuer, or one with an empty target, is the identity.
+func newValuer(target string, rates map[string]model.Amount) *valuer {
+	return &valuer{target: target, rates: rates, unpriced: map[string]bool{}}
+}
+
+// restate returns amount expressed in the target commodity, keeping the amount's sign, or returns it
+// unchanged when there is no lens or no price to value it with. A @@ cost recorded in the target is a
+// total for the whole posting, so it is used as the value directly; a per-unit rate is multiplied
+// through. An amount left in its own commodity is remembered as unpriced.
+func (v *valuer) restate(amount model.Amount, cost *model.Amount) model.Amount {
+	if v == nil || v.target == "" || amount.Commodity == v.target {
+		return amount
+	}
+	if cost != nil && cost.Commodity == v.target {
+		priced := *cost
+		if priced.Units < 0 {
+			priced = priced.Negate()
+		}
+		if amount.Units < 0 {
+			priced = priced.Negate()
+		}
+		return priced
+	}
+	if rate, ok := v.rates[amount.Commodity]; ok {
+		return convertAt(amount, rate)
+	}
+	v.unpriced[amount.Commodity] = true
+	return amount
+}
+
+// convertAt values amount at a per-unit rate — the target-commodity price of one unit of amount's
+// commodity — rounded half up to the target's minor unit (two places, cents). It is reached only for
+// a residual that carried no recorded price, where a rounded per-unit rate is an accepted estimate;
+// a posting that recorded its own @@ total is never routed through here, so no exact basis is rounded.
+func convertAt(amount, rate model.Amount) model.Amount {
+	const targetScale = 2
+	num := new(big.Int).Mul(big.NewInt(amount.Units), big.NewInt(rate.Units))
+	num.Mul(num, tenPow(targetScale))
+	den := tenPow(int(amount.Scale) + int(rate.Scale))
+
+	neg := num.Sign() < 0
+	if neg {
+		num.Neg(num)
+	}
+	num.Add(num, new(big.Int).Div(den, big.NewInt(2))) // round half up on the magnitude
+	units := new(big.Int).Quo(num, den).Int64()
+	if neg {
+		units = -units
+	}
+	return model.Amount{Units: units, Scale: targetScale, Commodity: rate.Commodity}
+}
+
+func tenPow(n int) *big.Int {
+	return new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(n)), nil)
+}
+
+// parseRates reads -rate values into a per-commodity price in the target: "USD=1.35" says one USD is
+// worth 1.35 of the target, and several may be given comma-separated. A rate needs a target to value
+// into, and cannot price the target against itself.
+func parseRates(spec, target string) (map[string]model.Amount, error) {
+	rates := map[string]model.Amount{}
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return rates, nil
+	}
+	if target == "" {
+		return nil, fmt.Errorf("-rate needs -value to say which currency to value into")
+	}
+	for _, pair := range strings.Split(spec, ",") {
+		commodity, value, ok := strings.Cut(pair, "=")
+		commodity = strings.TrimSpace(commodity)
+		if !ok || commodity == "" {
+			return nil, fmt.Errorf("-rate %q must be COMMODITY=RATE, e.g. USD=1.35", pair)
+		}
+		if commodity == target {
+			return nil, fmt.Errorf("-rate %q values %s in itself", pair, target)
+		}
+		amt, err := model.NewAmount(strings.TrimSpace(value), target)
+		if err != nil {
+			return nil, fmt.Errorf("-rate %q: %w", pair, err)
+		}
+		rates[commodity] = amt
+	}
+	return rates, nil
+}
 
 // reportRow is one account's total in one commodity, shown the way a statement reads: income earned
 // and expenses spent both positive.
@@ -40,24 +142,25 @@ type incomeStatement struct {
 // usually a posting, but a hand-kept line can carry one as its own account (the importer reads the
 // last posting as the source), and both sides are the same money. The accounts a P&L does not show
 // (assets, liabilities, equity) are left out.
-func buildReport(txs []model.Transaction, entries []model.Entry, from, to time.Time, filter string) incomeStatement {
+func buildReport(txs []model.Transaction, entries []model.Entry, from, to time.Time, filter string, val *valuer) incomeStatement {
 	incomeRows := map[string]model.Amount{}
 	expenseRows := map[string]model.Amount{}
 	incomeTotal := map[string]model.Amount{}
 	expenseTotal := map[string]model.Amount{}
 
-	fold := func(account string, amount model.Amount) {
+	fold := func(account string, amount model.Amount, cost *model.Amount) {
 		if !matches(account, filter) {
 			return
 		}
 		switch {
 		case isUnder(account, "Income"):
-			earned := amount.Negate() // income is negative-normal; a statement shows it positive
+			earned := val.restate(amount, cost).Negate() // income is negative-normal; a statement shows it positive
 			addAmount(incomeRows, account+"|"+earned.Commodity, earned)
 			addAmount(incomeTotal, earned.Commodity, earned)
 		case isUnder(account, "Expenses"):
-			addAmount(expenseRows, account+"|"+amount.Commodity, amount)
-			addAmount(expenseTotal, amount.Commodity, amount)
+			spent := val.restate(amount, cost)
+			addAmount(expenseRows, account+"|"+spent.Commodity, spent)
+			addAmount(expenseTotal, spent.Commodity, spent)
 		}
 	}
 
@@ -65,9 +168,9 @@ func buildReport(txs []model.Transaction, entries []model.Entry, from, to time.T
 		if !inRange(tx.Date, from, to) {
 			continue
 		}
-		fold(tx.Account, tx.Amount)
+		fold(tx.Account, tx.Amount, nil)
 		for _, p := range entries[i].Postings {
-			fold(p.Account, p.Amount)
+			fold(p.Account, p.Amount, p.Cost)
 		}
 	}
 
@@ -121,19 +224,29 @@ type balanceSheet struct {
 // balances, counting the source-account side too — the account the statement came from, which the
 // entries elide — because that is where cash and debt actually sit. Liabilities and equity are
 // credit-normal, so they are shown as the positive amount owed or held.
-func buildBalanceSheet(txs []model.Transaction, entries []model.Entry, asOf time.Time, filter string) balanceSheet {
+func buildBalanceSheet(txs []model.Transaction, entries []model.Entry, asOf time.Time, filter string, val *valuer) balanceSheet {
 	raw := map[string]model.Amount{}
+	// A holding is valued a posting at a time, because a balance's cost base is the sum of what each
+	// acquisition cost, not one rate applied to the total quantity. So each posting is restated before
+	// it accumulates, and only the accounts a balance sheet shows are folded — a foreign P&L amount is
+	// not the sheet's to value, so it is left out rather than counted as unvalued.
+	add := func(account string, amount model.Amount, cost *model.Amount) {
+		if !matches(account, filter) {
+			return
+		}
+		if !(isUnder(account, "Assets") || isUnder(account, "Liabilities") || isUnder(account, "Equity")) {
+			return
+		}
+		valued := val.restate(amount, cost)
+		addAmount(raw, account+"|"+valued.Commodity, valued)
+	}
 	for i, tx := range txs {
 		if !asOf.IsZero() && tx.Date.After(asOf) {
 			continue
 		}
-		if matches(tx.Account, filter) {
-			addAmount(raw, tx.Account+"|"+tx.Amount.Commodity, tx.Amount)
-		}
+		add(tx.Account, tx.Amount, nil)
 		for _, p := range entries[i].Postings {
-			if matches(p.Account, filter) {
-				addAmount(raw, p.Account+"|"+p.Amount.Commodity, p.Amount)
-			}
+			add(p.Account, p.Amount, p.Cost)
 		}
 	}
 
@@ -366,12 +479,18 @@ func reportCmd(args []string) error {
 	gainsOnly := fs.Bool("gains", false, "show only the capital-gains schedule")
 	format := fs.String("format", "text", "text or html")
 	basis := fs.String("basis", "cash", "cash or accrual: accrual recognizes invoices and bills when earned, before their cash")
+	value := fs.String("value", "", "value foreign income and holdings in this commodity, e.g. CAD, using the @@ prices in the log")
+	rate := fs.String("rate", "", "per-unit rates for amounts with no recorded price under -value, e.g. USD=1.35 (comma-separated)")
 	out := fs.String("out", "", "write to this file instead of stdout")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *basis != "cash" && *basis != "accrual" {
 		return fmt.Errorf("-basis must be cash or accrual")
+	}
+	rates, err := parseRates(*rate, *value)
+	if err != nil {
+		return err
 	}
 	only := 0
 	for _, b := range []bool{*incomeOnly, *balanceOnly, *gainsOnly} {
@@ -405,27 +524,47 @@ func reportCmd(args []string) error {
 		return err
 	}
 
+	val := newValuer(*value, rates)
 	var view reportView
 	if *gainsOnly {
 		g := capitalGains(txs, entries, from, to, *account)
 		view.Gains = &g
 	} else {
 		if !*balanceOnly {
-			stmt := buildReport(txs, entries, from, to, *account)
+			stmt := buildReport(txs, entries, from, to, *account, val)
 			view.Income = &stmt
 		}
 		if !*incomeOnly {
 			// The balance sheet is a position as of the period's end (or all of it, if no end was given).
-			sheet := buildBalanceSheet(txs, entries, to, *account)
+			sheet := buildBalanceSheet(txs, entries, to, *account, val)
 			view.Balance = &sheet
 		}
 	}
+	warnUnvalued(val)
 
 	render := renderReportText
 	if *format == "html" {
 		render = renderReportHTML
 	}
 	return writeOut(*out, func(w io.Writer) error { return render(w, view) })
+}
+
+// warnUnvalued tells the reader, on stderr, which commodities the lens could not value and so left
+// in their own currency — the recent USD income and USD cash that carry no @@ price. It points at the
+// -rate flag that would convert them, so a total that looks foreign is understood, not mistaken for a
+// gap in the books. It is silent with no lens or when everything valued.
+func warnUnvalued(val *valuer) {
+	if val == nil || val.target == "" || len(val.unpriced) == 0 {
+		return
+	}
+	commodities := make([]string, 0, len(val.unpriced))
+	for c := range val.unpriced {
+		commodities = append(commodities, c)
+	}
+	sort.Strings(commodities)
+	fmt.Fprintf(os.Stderr,
+		"warning: %s had no recorded price to value in %s and is shown in its own currency; pass a rate to convert, e.g. -rate %s=1.35\n",
+		strings.Join(commodities, ", "), val.target, commodities[0])
 }
 
 // writeOut sends a render to stdout, or to a file when path is set, reporting what it wrote. It is
