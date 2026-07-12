@@ -96,53 +96,53 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `bookkeeper (bk) - turn statements into books
+	fmt.Fprint(os.Stderr, `bookkeeper (bkpr) - turn statements into books
 
 Every command finds the nearest .bookkeeper directory by walking up, as git does.
-Run "bk help <command>" for one command, "bk docs" for the full reference.
+Run "bkpr help <command>" for one command, "bkpr docs" for the full reference.
 The thing a command acts on is its first argument; flags assert facts about it.
 Wherever a fingerprint is taken, a unique prefix is enough, as with a git hash.
 
 usage:
-  bk init         [dir]
-  bk reset        [-confirm]
-  bk rules   set  <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]
-  bk rules   rm   <re>
-  bk rules   mv   <re> [-before <re>]
-  bk rules   list
-  bk connectors register <name> -kind <rentapp|rbc|simplii|pcfinancial> -url <url> -token-env <ENV> -account <a> [-currency <c>]
-  bk connectors rm   <name>
-  bk connectors list
-  bk import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
-  bk import       <file.ledger>
-  bk import       <book.jsonl>
-  bk import       <file> -format csv|ledger|jsonl
-  bk import       <connector> [-relogin]
-  bk categorize   <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
-  bk void         <fingerprint> [-why <reason>] [-actor <name>]
-  bk match        <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
-  bk invoice raise   -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
-  bk invoice settle  <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
-  bk invoice void    <fingerprint> [-why <reason>] [-actor <name>]
-  bk invoice list
-  bk invoice aging   [-as-of <YYYY-MM-DD>]
-  bk bill    receive -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
-  bk bill    settle  <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
-  bk bill    void    <fingerprint> [-why <reason>] [-actor <name>]
-  bk bill    list
-  bk bill    aging   [-as-of <YYYY-MM-DD>]
-  bk policy  set  -method <acb|fifo> [-account <a>] [-actor <name>]
-  bk policy  list
-  bk accounts set  <account> -meta <k=v> ... [-actor <name>]
-  bk accounts list
-  bk reconcile
-  bk receipt      -tx <fingerprint> [-as invoice|receipt] [-format text|html] [-out <file>]
-  bk report       [-income | -balance | -gains] [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
-  bk export       <connector> [-confirm]
-  bk books        [-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re> ...] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-stdout]
-  bk help         [command]
-  bk docs
-  bk version
+  bkpr init         [dir]
+  bkpr reset        [-confirm]
+  bkpr rules   set  <re> [-category <account>] [-payee <name>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]
+  bkpr rules   rm   <re>
+  bkpr rules   mv   <re> [-before <re>]
+  bkpr rules   list
+  bkpr connectors register <name> -kind <rentapp|rbc|simplii|pcfinancial> -url <url> -token-env <ENV> -account <a> [-currency <c>]
+  bkpr connectors rm   <name>
+  bkpr connectors list
+  bkpr import       <file.csv> -account <a> -currency <c> (-amount <col> | -debit <col> -credit <col>) [-date <col> -description <col> -date-format <layout>]
+  bkpr import       <file.ledger>
+  bkpr import       <book.jsonl>
+  bkpr import       <file> -format csv|ledger|jsonl
+  bkpr import       <connector> [-relogin]
+  bkpr categorize   <fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]
+  bkpr void         <fingerprint> [-why <reason>] [-actor <name>]
+  bkpr match        <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
+  bkpr invoice raise   -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
+  bkpr invoice settle  <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
+  bkpr invoice void    <fingerprint> [-why <reason>] [-actor <name>]
+  bkpr invoice list
+  bkpr invoice aging   [-as-of <YYYY-MM-DD>]
+  bkpr bill    receive -party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]
+  bkpr bill    settle  <fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]
+  bkpr bill    void    <fingerprint> [-why <reason>] [-actor <name>]
+  bkpr bill    list
+  bkpr bill    aging   [-as-of <YYYY-MM-DD>]
+  bkpr policy  set  -method <acb|fifo> [-account <a>] [-actor <name>]
+  bkpr policy  list
+  bkpr accounts set  <account> -meta <k=v> ... [-actor <name>]
+  bkpr accounts list
+  bkpr reconcile
+  bkpr receipt      -tx <fingerprint> [-as invoice|receipt] [-format text|html] [-out <file>]
+  bkpr report       [-income | -balance | -gains] [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
+  bkpr export       <connector> [-confirm]
+  bkpr books        [-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re> ...] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-stdout]
+  bkpr help         [command]
+  bkpr docs
+  bkpr version
 `)
 }
 
@@ -159,7 +159,7 @@ type docGroup struct {
 	topics []docTopic
 }
 
-const docsPreamble = `bookkeeper (bk) - turn bank and card statements into a plain-text double-entry ledger.
+const docsPreamble = `bookkeeper (bkpr) - turn bank and card statements into a plain-text double-entry ledger.
 
 A set of books lives in a .bookkeeper directory, found by walking up from the current
 directory the way git finds .git. The log inside it (log.jsonl) is the book of record;
@@ -421,7 +421,7 @@ func helpTopic(w io.Writer, name string) error {
 		}
 	}
 	if !found {
-		return fmt.Errorf(`no help for %q; run "bk docs" for the full reference`, name)
+		return fmt.Errorf(`no help for %q; run "bkpr docs" for the full reference`, name)
 	}
 	return nil
 }
@@ -462,7 +462,7 @@ func versionCmd(w io.Writer) {
 // versionLine assembles the display string, abbreviating the revision to a
 // git-short length and omitting the parenthetical when there is no revision.
 func versionLine(mainVersion, revision, modified string) string {
-	line := "bk " + mainVersion
+	line := "bkpr " + mainVersion
 	if len(revision) > 12 {
 		revision = revision[:12]
 	}
@@ -682,7 +682,7 @@ func importConnector(log *eventlog.Log, c books.Connector, o fetchOpts) error {
 		return r.txs, ferr
 	})
 	if errors.Is(err, source.ErrSessionExpired) {
-		return fmt.Errorf("%s: its sign-in has expired; run `bk import %s` from a terminal to sign in again", c.Name, c.Name)
+		return fmt.Errorf("%s: its sign-in has expired; run `bkpr import %s` from a terminal to sign in again", c.Name, c.Name)
 	}
 	if err != nil {
 		return err
@@ -765,7 +765,7 @@ func uncategorizedHint(log *eventlog.Log) {
 		}
 	}
 	if n > 0 {
-		fmt.Printf("%d lines in the books are uncategorized; bk books -account Uncategorized lists them\n", n)
+		fmt.Printf("%d lines in the books are uncategorized; bkpr books -account Uncategorized lists them\n", n)
 	}
 }
 

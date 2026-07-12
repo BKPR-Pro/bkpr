@@ -6,9 +6,9 @@ description: Operate the bookkeeper CLI to turn imported bank and card statement
 # Operating bookkeeper
 
 bookkeeper turns bank and card statements into double-entry books. The books are a pure fold over an
-append-only log of facts committed to git, and they read as ledger-cli. You drive it with the `bk`
+append-only log of facts committed to git, and they read as ledger-cli. You drive it with the `bkpr`
 CLI. This file is the operating procedure. The README is the reference and the source of truth for
-anything here; `bk help` and `bk help <command>` give exact flags.
+anything here; `bkpr help` and `bkpr help <command>` give exact flags.
 
 ## The one rule that governs everything
 
@@ -26,28 +26,28 @@ behalf. It changes nothing about what the command does; it records who decided, 
 the git diff is attributable.
 
 ```sh
-bk categorize <id> -category "Expenses:Utilities:Power" -actor "<who>"
+bkpr categorize <id> -category "Expenses:Utilities:Power" -actor "<who>"
 ```
 
 ## The loop
 
-1. `bk init` once, to create the books in the current directory.
-2. `bk import <source>` reads statements in, where a source is a CSV file, a ledger file, or a
+1. `bkpr init` once, to create the books in the current directory.
+2. `bkpr import <source>` reads statements in, where a source is a CSV file, a ledger file, or a
    registered connector. Every input is deduped by fingerprint, so re-importing is safe.
-3. `bk rules` authors the standing categorization; `bk categorize` asserts a single line when no rule
+3. `bkpr rules` authors the standing categorization; `bkpr categorize` asserts a single line when no rule
    fits. Prefer fixing the rule: a rule reclassifies the whole history at once, a per-line assertion
    corrects only that line.
-4. `bk books` prints every line and where it posted (`-format json` for a machine,
+4. `bkpr books` prints every line and where it posted (`-format json` for a machine,
    `-account Uncategorized` for just the lines the rules could not place).
-5. `bk report` (income statement, balance sheet, and the `-gains` capital-gains schedule) and
-   `bk receipt` render output. Both default to text; `-format html` prints. `bk report -basis
+5. `bkpr report` (income statement, balance sheet, and the `-gains` capital-gains schedule) and
+   `bkpr receipt` render output. Both default to text; `-format html` prints. `bkpr report -basis
    accrual` reads through the accrual lens.
-6. `bk export <connector>` writes booked lines out to a live system.
+6. `bkpr export <connector>` writes booked lines out to a live system.
 
-Other verbs, each its own fact: `bk invoice` and `bk bill` record value earned or incurred before
-its cash; `bk void` undoes a bad line without deleting it; `bk match` forces or breaks a transfer
-pairing the automatic fold got wrong; `bk policy` sets the cost-basis method (ACB or FIFO); `bk
-connectors` registers a live source; `bk accounts`, `bk books`, and `bk docs` round it out.
+Other verbs, each its own fact: `bkpr invoice` and `bkpr bill` record value earned or incurred before
+its cash; `bkpr void` undoes a bad line without deleting it; `bkpr match` forces or breaks a transfer
+pairing the automatic fold got wrong; `bkpr policy` sets the cost-basis method (ACB or FIFO); `bkpr
+connectors` registers a live source; `bkpr accounts`, `bkpr books`, and `bkpr docs` round it out.
 
 ## Correct by recording, never by editing
 

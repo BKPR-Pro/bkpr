@@ -14,18 +14,18 @@ when an agent runs it), so the log records the hand without the tool caring whos
 
 ## Install
 
-Each tagged release ships a prebuilt `bk` for macOS and Linux, so another machine
+Each tagged release ships a prebuilt `bkpr` for macOS and Linux, so another machine
 runs bookkeeper without a Go toolchain. Download the binary for your system, mark it
 executable, and put it on your `PATH`:
 
 ```sh
 # pick your os/arch: darwin-arm64, darwin-amd64, linux-arm64, linux-amd64
 os_arch="darwin-arm64"
-curl -fsSL -o bk "https://github.com/dallasread/bookkeeper/releases/latest/download/bk-${os_arch}"
-chmod +x bk
-sudo mv bk /usr/local/bin/     # anywhere on your PATH
+curl -fsSL -o bkpr "https://github.com/dallasread/bookkeeper/releases/latest/download/bkpr-${os_arch}"
+chmod +x bkpr
+sudo mv bkpr /usr/local/bin/     # anywhere on your PATH
 
-bk version                     # confirms which release you have
+bkpr version                     # confirms which release you have
 ```
 
 Each release also carries a `checksums.txt`; verify the download against it before
@@ -35,17 +35,17 @@ trusting the binary if you like. To build from a checkout instead, see
 ## Quickstart
 
 ```sh
-go build -o bk ./cli      # bk is the short name used throughout
+go build -o bkpr ./cli      # bkpr is the short name used throughout
 
-bk init
-bk import statement.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
-bk books                  # every line and where it posted
-bk books -account Uncategorized   # only the lines the rules could not place
-bk rules set "shell|petro" -category "Expenses:Travel:Fuel" -payee "Fuel Stop"
-bk books                  # the whole history, reclassified by the rule you just wrote
+bkpr init
+bkpr import statement.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
+bkpr books                  # every line and where it posted
+bkpr books -account Uncategorized   # only the lines the rules could not place
+bkpr rules set "shell|petro" -category "Expenses:Travel:Fuel" -payee "Fuel Stop"
+bkpr books                  # the whole history, reclassified by the rule you just wrote
 ```
 
-`bk help <command>` explains one command; `bk docs` prints the whole reference. One grammar
+`bkpr help <command>` explains one command; `bkpr docs` prints the whole reference. One grammar
 throughout: the thing a command acts on — a file, a connector, a rule's pattern, a fingerprint —
 is its first argument, and flags assert facts about it. Wherever a fingerprint is taken, a unique
 prefix is enough, as with a git hash. The rest of this README is the design and the why.
@@ -254,7 +254,7 @@ store. It is small (a set of books reaches a few hundred lines a year), so foldi
 every run costs nothing, and being text is what makes the rest true:
 
 - **Git is the backup and the audit trail.** A signed history over an append-only log is a
-  tamper-evident book of record. `bk log` is `cat`; restore is `git checkout`.
+  tamper-evident book of record. `bkpr log` is `cat`; restore is `git checkout`.
 - **The append-only invariant is git-checkable.** Every write appends, so `git diff log.jsonl`
   should always be a pure addition. A diff that changes or deletes an existing line means something
   rewrote history, and you would see it in review. Git becomes a continuous check on the one
@@ -302,7 +302,7 @@ response is the part that gets lost. It is designed for and not built.)
 
 ## Usage
 
-`bk` is the command-line wrapper; `go build -o bk ./cli` builds it, or run it from a checkout with
+`bkpr` is the command-line wrapper; `go build -o bkpr ./cli` builds it, or run it from a checkout with
 `go run ./cli`.
 
 `init` creates a set of books in the current directory, marked by a `.bookkeeper` directory the way
@@ -310,7 +310,7 @@ a git repository is marked by `.git`. Every other command finds it by walking up
 them from anywhere inside your project.
 
 ```sh
-bk init
+bkpr init
 # Initialized a book of record in /your/project/.bookkeeper
 ```
 
@@ -321,14 +321,14 @@ reader a file gets; `-format csv|ledger|jsonl` overrides it, so hand-kept books 
 import as a ledger without renaming.
 
 ```sh
-bk import statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
+bkpr import statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
 # 9 lines read: 9 imported, 0 already in the log
 
-bk import statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
+bkpr import statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
 # 9 lines read: 0 imported, 9 already in the log
 
 # a debit/credit pair instead of one signed column:
-bk import visa.csv -account "Liabilities:Card:Visa" -currency CAD -debit Charge -credit Payment -date Posted
+bkpr import visa.csv -account "Liabilities:Card:Visa" -currency CAD -debit Charge -credit Payment -date Posted
 ```
 
 ### Adapters: how the outside world gets in and out
@@ -352,7 +352,7 @@ The plain-text ledger format is both a door and the artifact. `import` reads a l
 flags (`-format ledger` when the extension does not say so): each entry's single amountless
 posting names the account its line came from, and the file's
 own categorization is deliberately not carried in — the rules place every line, so the books stay
-a fold. `bk books -format ledger` writes the same format back out as the committed artifact,
+a fold. `bkpr books -format ledger` writes the same format back out as the committed artifact,
 read-only and regenerated whole.
 
 When a rule renamed a payee, the artifact keeps the line's raw description as a `; memo:` note (an
@@ -371,7 +371,7 @@ that could drift from the first, which is the one thing the design refuses.
 The log is its own interchange format, so combining two books is an import, not a new adapter:
 
 ```sh
-bk import ../business/.bookkeeper/log.jsonl
+bkpr import ../business/.bookkeeper/log.jsonl
 ```
 
 The other book's events replay here in their order. Statement lines, invoices, bills, and exports
@@ -389,12 +389,12 @@ name is the same registry, built later. Registering one is a logged fact (`conne
 and moves no data by itself; `export` is the verb that does.
 
 ```sh
-bk connectors register <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
-bk connectors list   # NAME, KIND, URL, ACCOUNT, CURRENCY, TOKEN-ENV
-bk connectors rm <name>
+bkpr connectors register <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
+bkpr connectors list   # NAME, KIND, URL, ACCOUNT, CURRENCY, TOKEN-ENV
+bkpr connectors rm <name>
 ```
 
-- `<name>` is yours to choose and is how every other command refers to it: `bk export rent`.
+- `<name>` is yours to choose and is how every other command refers to it: `bkpr export rent`.
 - `-kind` names the adapter that speaks the system's protocol; each kind below.
 - `-url` is the system's base URL.
 - `-token-env` names the **environment variable** that holds the bearer token. The token itself is
@@ -417,12 +417,12 @@ deposits failed while the rest stand. Without `-confirm` it is a dry run:
 
 ```sh
 export BK_RENT_TOKEN=...   # the rent app's bearer token
-bk connectors register rent -kind rentapp -url https://rent.stcroixproperties.ca \
+bkpr connectors register rent -kind rentapp -url https://rent.stcroixproperties.ca \
   -token-env BK_RENT_TOKEN -account "Assets:Bank:Chequing" -currency CAD
-bk rules set "hyungjin" -category "Income:Real Estate:Rent:22 Lisgar Street" \
+bkpr rules set "hyungjin" -category "Income:Real Estate:Rent:22 Lisgar Street" \
   -meta rentapp.lease=31
-bk export rent            # dry run: what it would record
-bk export rent -confirm   # records each rent deposit against its lease
+bkpr export rent            # dry run: what it would record
+bkpr export rent -confirm   # records each rent deposit against its lease
 ```
 
 `rules set` authors a rule: it adds a pattern not yet known, or changes the one already matching it.
@@ -430,9 +430,9 @@ Each is one event. Order decides which of two matching rules wins, so a new rule
 unless `-before` places it ahead of another. `rules rm` and `mv` drop and reorder.
 
 ```sh
-bk rules set "shell|petro" -category "Expenses:Travel:Fuel" -payee "Fuel Stop"
-bk rules set "city water"  -category "Expenses:Utilities:Water" -before "water"
-bk rules list
+bkpr rules set "shell|petro" -category "Expenses:Travel:Fuel" -payee "Fuel Stop"
+bkpr rules set "city water"  -category "Expenses:Utilities:Water" -before "water"
+bkpr rules list
 ```
 
 `books` folds the log and renders it: a table or JSON to read, or the ledger artifact. `-account`
@@ -440,13 +440,13 @@ narrows any of the three to the lines posting to a matching account — repeat i
 so there is no separate review command: the decision queue is just the books, filtered:
 
 ```sh
-bk books                                  # a table, to read
-bk books -account Uncategorized           # only the lines the rules could not place
-bk books -account Fuel -account Water     # several accounts, one reading
-bk books -from 2026-03-01 -to 2026-03-31  # exactly March: that month's lines and health line
-bk books -format json                     # the same reading for a machine
-bk books -format ledger                   # regenerates .bookkeeper/books.ledger
-bk books -account Fuel -format ledger     # a filtered ledger, to stdout; the artifact stays whole
+bkpr books                                  # a table, to read
+bkpr books -account Uncategorized           # only the lines the rules could not place
+bkpr books -account Fuel -account Water     # several accounts, one reading
+bkpr books -from 2026-03-01 -to 2026-03-31  # exactly March: that month's lines and health line
+bkpr books -format json                     # the same reading for a machine
+bkpr books -format ledger                   # regenerates .bookkeeper/books.ledger
+bkpr books -account Fuel -format ledger     # a filtered ledger, to stdout; the artifact stays whole
 ```
 
 ```text
@@ -456,7 +456,7 @@ bf3292b4aac90b2e-1  2026-03-02  Acme Hardware        -84.20   Expenses:Real Esta
 a106c3b1d01636de-1  2026-03-05  J. Smith             1600.00  Income:Real Estate:Rent:123 Example Street
 5f79d9a707bc433f-1  2026-03-12  UNKNOWN MERCHANT 88  -39.99   Uncategorized
 
-9 lines posted, 2 of them uncategorized (bk books -account Uncategorized shows only them)
+9 lines posted, 2 of them uncategorized (bkpr books -account Uncategorized shows only them)
 
 INCOME       EXPENSES    NET          UNCATEGORIZED
 1600.00 CAD  146.60 CAD  1453.40 CAD  -39.99 CAD
@@ -477,8 +477,8 @@ incurred, before the cash follows. bookkeeper does not choose between them and d
 The basis is a **read-time lens** over the one log, chosen with `-basis`:
 
 ```sh
-bk books -basis cash      # only money that moved. The default, and every earlier example
-bk books -basis accrual   # also books the invoices and bills that have not been paid yet
+bkpr books -basis cash      # only money that moved. The default, and every earlier example
+bkpr books -basis accrual   # also books the invoices and bills that have not been paid yet
 ```
 
 Cash basis is what every example above already is: it ignores invoices and bills entirely, so it is
@@ -491,7 +491,7 @@ at work. The recognition timing is derivable, so it is a fold, and a fold is nev
 only accrual facts in the log are the inputs a statement cannot supply: `invoice.raised`,
 `bill.received`, and `settled` (which line cleared which). So with no invoices and no bills there are
 no accrual facts to re-time, and `-basis cash` and `-basis accrual` return identical books. The same
-lens drives the statements too: `bk report -basis accrual` gives an accrual income statement. Do not
+lens drives the statements too: `bkpr report -basis accrual` gives an accrual income statement. Do not
 confuse this with the cost-basis *method* (ACB or FIFO), which is an asserted decision and does live
 in the log as `policy.set`: that changes how a gain is computed, it is not a question asked on read.
 
@@ -501,8 +501,8 @@ a line. Each is a first-class thing you do, so each is its own command, the way 
 are:
 
 ```sh
-bk invoice raise -party "J. Smith" -amount 1600.00 -category "Income:Consulting"  -date 2026-03-01
-bk bill    receive -party "Power Co" -amount 142.03 -category "Expenses:Utilities:Power" -date 2026-03-02
+bkpr invoice raise -party "J. Smith" -amount 1600.00 -category "Income:Consulting"  -date 2026-03-01
+bkpr bill    receive -party "Power Co" -amount 142.03 -category "Expenses:Utilities:Power" -date 2026-03-02
 ```
 
 An invoice debits a receivable and credits income; a bill is the mirror, debiting an expense and
@@ -523,8 +523,8 @@ invoice, so the cash clears the receivable instead of booking the income a secon
 was booked when the invoice was raised):
 
 ```sh
-bk import march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
-bk invoice settle 9617607456a06619 -tx 6afa3719db1eb739-1
+bkpr import march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
+bkpr invoice settle 9617607456a06619 -tx 6afa3719db1eb739-1
 ```
 
 ```text
@@ -542,7 +542,7 @@ reliably name which invoice it clears, so settling is an asserted fact rather th
 with *say only what is known*. A wrong invoice is dropped with `invoice void` — the same verb as voiding a bad import,
 one operation on a different noun.
 
-You do not have to hunt the fingerprint, though. `bk invoice list` (and `bk bill list`) prints, for
+You do not have to hunt the fingerprint, though. `bkpr invoice list` (and `bkpr bill list`) prints, for
 each open accrual, the bank lines that plausibly settle it under a **CANDIDATES** column — the same
 transfer-pairing heuristic (same amount, within a few months, not already used), surfaced instead of
 applied. Settling is then copying a suggested fingerprint, not grepping the log:
@@ -563,7 +563,7 @@ subtotal per bucket. Settled and voided accruals have already left the fold, so 
 outstanding money shows.
 
 ```sh
-bk invoice aging -as-of 2026-07-11
+bkpr invoice aging -as-of 2026-07-11
 ```
 
 ```text
@@ -588,7 +588,7 @@ before that reads identically under both bases, because there is nothing there t
 `-since` makes that switch explicit when you want it:
 
 ```sh
-bk books -basis accrual -since 2026-07-01   # accrue only invoices/bills dated on or after July 1
+bkpr books -basis accrual -since 2026-07-01   # accrue only invoices/bills dated on or after July 1
 ```
 
 On the accrual basis it books only accruals dated on or after the effective date; an earlier one is
@@ -605,8 +605,8 @@ Learn that every hardware receipt was Unit 1, and say so once. `set` changes onl
 name, so the payee is left as it was:
 
 ```sh
-bk rules set "acme hardware" -category "Expenses:...:Unit 1" -why "the receipts were all Unit 1"
-bk books -format ledger
+bkpr rules set "acme hardware" -category "Expenses:...:Unit 1" -why "the receipts were all Unit 1"
+bkpr books -format ledger
 ```
 
 The books change by exactly one line per affected transaction, and so does the log, by exactly one
@@ -627,19 +627,19 @@ buys, and committing both files is how the change reviews.
 
 Some attributions are not a rule. A hardware receipt in your truck says Unit 1, and no pattern over
 the description could have known that. So `categorize` asserts the answer for that one line, keyed
-by its fingerprint, and it wins over whatever the rule said. `bk books -account Uncategorized`
+by its fingerprint, and it wins over whatever the rule said. `bkpr books -account Uncategorized`
 lists every waiting line with its fingerprint, and any unique prefix of one is enough, as with a
 git hash:
 
 ```sh
-bk categorize 0d76f1f1 -category "Expenses:...:Unit 1" -payee "Acme" -why "receipt was Unit 1"
+bkpr categorize 0d76f1f1 -category "Expenses:...:Unit 1" -payee "Acme" -why "receipt was Unit 1"
 ```
 
 One charge can serve two properties, so an assertion can be a split, and it is only accepted if the
 postings still account for the whole line:
 
 ```sh
-bk categorize 0d76f1f1 \
+bkpr categorize 0d76f1f1 \
   -post "Expenses:Materials:Unit 1=40.00" \
   -post "Expenses:Materials:Unit 2=44.20"
 ```
@@ -656,7 +656,7 @@ imports garbage that re-importing cannot repair on its own: the fingerprints are
 and a re-import is a no-op on them. `void` is the way out.
 
 ```sh
-bk void 33247b87 -why "imported to the wrong account"
+bkpr void 33247b87 -why "imported to the wrong account"
 ```
 
 It does not delete the imported event. It appends a fact that supersedes it, and the fold drops the
@@ -676,7 +676,7 @@ Three different itches, three different tools, only one of them new:
 - **A wrong batch** — an import with the wrong flags, a merge you regret — is git's job: every
   write is a pure append, so `git restore .bookkeeper/log.jsonl` rolls the book back to any
   committed point, and the diff you are discarding is readable before you discard it.
-- **Starting over** is `bk reset`: the log emptied, the artifact removed, the directory still a
+- **Starting over** is `bkpr reset`: the log emptied, the artifact removed, the directory still a
   book. It is the one verb in the tool that destroys history, so without `-confirm` it is a dry
   run that says what would be lost — and after a reset the old log is recoverable only from git.
 
@@ -708,7 +708,7 @@ Here the price does the work the mutual naming does above. Categorize the leg th
 account the money reached and the rate it cleared at:
 
 ```sh
-bk categorize -tx <cad-leg> -payee "Transfer to USD" -post "Assets:USD=740 USD @@ 1000.00 CAD"
+bkpr categorize -tx <cad-leg> -payee "Transfer to USD" -post "Assets:USD=740 USD @@ 1000.00 CAD"
 ```
 
 That posting ties the two real amounts together — the 740 USD that landed, priced at the 1000 CAD
@@ -720,7 +720,7 @@ that prices a stock purchase), so a later conversion back realizes the exchange 
 ### Reconciliation, to the penny
 
 A bank import reads the account's balance at the same time as its lines and records it — ground truth
-to check the books against. `bk reconcile` folds the books to that date and reports the difference per
+to check the books against. `bkpr reconcile` folds the books to that date and reports the difference per
 account. The first balance for an account **anchors** it: imports rarely reach the day it was opened,
 so the anchor derives that opening balance (the bank's figure less what the books fold to on that
 date) and the account matches by definition. Every balance after is a real check — with the opening
@@ -728,7 +728,7 @@ figure fixed, the books at the later date must equal the bank's number exactly, 
 precisely a movement that was missed, duplicated, or mispaired since. It is a fold; it records
 nothing, and it needs nothing typed in — the scrape supplies the truth.
 
-`bk accounts list` is the **account folder**: every account you hold, its display name, what it holds
+`bkpr accounts list` is the **account folder**: every account you hold, its display name, what it holds
 now, and where it stands against the bank. An account is yours once a statement imports against it or
 a connector posts to it — the same owned-account set that tells an internal transfer from a payment
 out to the world.
@@ -738,8 +738,8 @@ out to the world.
 `-format ledger` regenerates `.bookkeeper/books.ledger`, the plain-text double-entry artifact.
 
 ```sh
-bk books -format ledger           # into the store
-bk books -format ledger -stdout   # to stdout, to pipe
+bkpr books -format ledger           # into the store
+bkpr books -format ledger -stdout   # to stdout, to pipe
 ```
 
 Every entry is **cleared** (`*`), because every line came off a bank statement and so has cleared
@@ -765,7 +765,7 @@ ordered, and for each field the first rule that supplies it wins; `match` is the
 no two may share one.
 
 ```sh
-bk rules set "acme hardware" -payee "Acme Hardware" -category "Expenses:Real Estate:Materials:Uncategorized"
+bkpr rules set "acme hardware" -payee "Acme Hardware" -category "Expenses:Real Estate:Materials:Uncategorized"
 ```
 
 Categories are free-form account paths, so you can go as deep as your books do, down to the
@@ -826,7 +826,7 @@ deterministic fold over the lines and their categorization, so the money is not 
 across a currency boundary too, where the rate on the categorized leg ties the two amounts together.
 A bad line is undone with `void`, which supersedes the imported line without deleting it.
 
-Cash and accrual are the same log read through two lenses, chosen with `bk books -basis`. Cash is the
+Cash and accrual are the same log read through two lenses, chosen with `bkpr books -basis`. Cash is the
 default and every statement example is already it. Accrual also books the value recognized before its
 cash: `invoice raise` raises a receivable and `bill receive` raises a payable, and `settle` records the
 bank line that paid one so the cash clears the parked account rather than booking the value twice. The
@@ -966,7 +966,7 @@ books.Import(s.Log, "statement:march", txs)
 txs, entries, _ := books.Ledger(s.Log)
 ```
 
-`bk docs` prints the full command reference, so the CLI is self-documenting.
+`bkpr docs` prints the full command reference, so the CLI is self-documenting.
 
 ## Building on it
 

@@ -329,7 +329,7 @@ func plus(a, b model.Amount) model.Amount {
 // reportEntries folds the log for a report on the chosen basis. Cash reads only money that moved;
 // accrual also books revenue earned and costs incurred before their cash, so an unpaid invoice shows
 // on the day it was billed. It reuses the one basis engine (books.LedgerBasis) rather than re-deriving
-// accrual, so a report can never drift from what `bk books -basis accrual` shows.
+// accrual, so a report can never drift from what `bkpr books -basis accrual` shows.
 func reportEntries(log *eventlog.Log, accrual bool) ([]model.Transaction, []model.Entry, error) {
 	basis := books.CashBasis
 	if accrual {

@@ -282,7 +282,7 @@ func report(out io.Writer, txs []model.Transaction, entries []model.Entry, sum b
 	// Every line posts, so the only thing left to say is where the rules ran out, and how to see
 	// only those lines.
 	if sum.UncategorizedLines > 0 {
-		fmt.Fprintf(out, "\n%d lines posted, %d of them uncategorized (bk books -account Uncategorized shows only them)\n", sum.Lines, sum.UncategorizedLines)
+		fmt.Fprintf(out, "\n%d lines posted, %d of them uncategorized (bkpr books -account Uncategorized shows only them)\n", sum.Lines, sum.UncategorizedLines)
 	} else {
 		fmt.Fprintf(out, "\n%d lines posted, %d of them uncategorized\n", sum.Lines, sum.UncategorizedLines)
 	}

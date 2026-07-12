@@ -1,7 +1,7 @@
 name: release
 
 # Cutting a release is pushing a tag. The tag names the version; this workflow
-# cross-compiles bk for every supported OS/arch and attaches the binaries to the
+# cross-compiles bkpr for every supported OS/arch and attaches the binaries to the
 # GitHub Release so another machine can run bookkeeper without a Go toolchain.
 on:
   push:
@@ -27,7 +27,7 @@ jobs:
         run: |
           mkdir -p dist
           # One static, dependency-free binary per target. The tag is stamped in
-          # so `bk version` reports the release rather than (devel). bookkeeper is
+          # so `bkpr version` reports the release rather than (devel). bookkeeper is
           # Unix-only (it relies on flock-based log locking and ioctl isatty), so
           # the matrix is macOS and Linux on both architectures.
           for target in \
@@ -35,13 +35,13 @@ jobs:
             linux/amd64 linux/arm64; do
             os="${target%/*}"
             arch="${target#*/}"
-            out="dist/bk-${os}-${arch}"
+            out="dist/bkpr-${os}-${arch}"
             echo "building $out"
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
               go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "$out" ./cli
           done
           # A checksum file so a download can be verified before it is trusted.
-          (cd dist && sha256sum bk-* > checksums.txt)
+          (cd dist && sha256sum bkpr-* > checksums.txt)
 
       - name: Publish the release
         env:

@@ -8,7 +8,7 @@ import (
 )
 
 // Two real books on disk, one import: the log is its own interchange format, so bringing a whole
-// book in is `bk import its/log.jsonl` — no new adapter, no second serialization.
+// book in is `bkpr import its/log.jsonl` — no new adapter, no second serialization.
 func TestImportAnotherBooksLog(t *testing.T) {
 	// The other book: one statement line, a rule that places it.
 	bookHere(t)

@@ -131,7 +131,7 @@ func TestReportListsFingerprints(t *testing.T) {
 	if !strings.Contains(out, "FINGERPRINT") || !strings.Contains(out, "mystery") {
 		t.Errorf("table should carry the fingerprint column:\n%s", out)
 	}
-	if !strings.Contains(out, "bk books -account Uncategorized") {
+	if !strings.Contains(out, "bkpr books -account Uncategorized") {
 		t.Errorf("table should name how to see only the unplaced lines:\n%s", out)
 	}
 }
