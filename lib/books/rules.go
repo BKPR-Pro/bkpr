@@ -50,7 +50,14 @@ func Rules(log *eventlog.Log) ([]rules.Rule, error) {
 
 		switch e.Action {
 		case ActionAdded:
-			set = insertBefore(set, rules.Rule{Match: e.RecordID, Payee: data.Payee, Category: data.Category, Metadata: data.Metadata}, data.Before)
+			// A merged log can carry an added for a pattern already present, because each book
+			// authored the rule on its own. The pattern is the rule's identity, so the second added
+			// reads as a change in place — the later book's answer — never as a second rule.
+			if i := indexOf(set, e.RecordID); i >= 0 {
+				set[i].Payee, set[i].Category, set[i].Metadata = data.Payee, data.Category, data.Metadata
+			} else {
+				set = insertBefore(set, rules.Rule{Match: e.RecordID, Payee: data.Payee, Category: data.Category, Metadata: data.Metadata}, data.Before)
+			}
 		case ActionChanged:
 			if i := indexOf(set, e.RecordID); i >= 0 {
 				set[i].Payee, set[i].Category, set[i].Metadata = data.Payee, data.Category, data.Metadata

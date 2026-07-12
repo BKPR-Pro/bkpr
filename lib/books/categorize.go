@@ -43,8 +43,9 @@ func Categorize(log *eventlog.Log, actor, why, txID, payee string, postings []mo
 	if err != nil {
 		return err
 	}
+	// tx.ID, not txID: the caller may have quoted a prefix, and the assertion must key to the line.
 	_, err = log.Track(eventlog.Event{
-		Collection: CollectionTransaction, RecordID: txID, Action: ActionCategorized,
+		Collection: CollectionTransaction, RecordID: tx.ID, Action: ActionCategorized,
 		Version: version, Actor: actor, Data: data,
 	})
 	return err

@@ -26,7 +26,7 @@ behalf. It changes nothing about what the command does; it records who decided, 
 the git diff is attributable.
 
 ```sh
-bk categorize -tx <id> -category "Expenses:Utilities:Power" -actor "<who>"
+bk categorize <id> -category "Expenses:Utilities:Power" -actor "<who>"
 ```
 
 ## The loop
@@ -37,8 +37,8 @@ bk categorize -tx <id> -category "Expenses:Utilities:Power" -actor "<who>"
 3. `bk rules` authors the standing categorization; `bk categorize` asserts a single line when no rule
    fits. Prefer fixing the rule: a rule reclassifies the whole history at once, a per-line assertion
    corrects only that line.
-4. `bk review` prints the whole books as JSON, so you see what stands and what is still
-   `Uncategorized`.
+4. `bk books` prints every line and where it posted (`-format json` for a machine,
+   `-account Uncategorized` for just the lines the rules could not place).
 5. `bk report` (income statement, balance sheet, and the `-gains` capital-gains schedule) and
    `bk receipt` render output. Both default to text; `-format html` prints. `bk report -basis
    accrual` reads through the accrual lens.

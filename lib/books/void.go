@@ -27,7 +27,8 @@ type voidedData struct {
 // Voiding is the way out. It must be a line the books currently show, so a fingerprint that was never
 // imported (or is already voided) is refused rather than recorded against nothing.
 func VoidTransaction(log *eventlog.Log, actor, why, txID string) error {
-	if _, err := Transaction(log, txID); err != nil {
+	tx, err := Transaction(log, txID)
+	if err != nil {
 		return err
 	}
 
@@ -35,8 +36,9 @@ func VoidTransaction(log *eventlog.Log, actor, why, txID string) error {
 	if err != nil {
 		return err
 	}
+	// tx.ID, not txID: the caller may have quoted a prefix, and the void must key to the line.
 	_, err = log.Track(eventlog.Event{
-		Collection: CollectionTransaction, RecordID: txID, Action: ActionVoided,
+		Collection: CollectionTransaction, RecordID: tx.ID, Action: ActionVoided,
 		Version: version, Actor: actor, Data: data,
 	})
 	return err

@@ -87,9 +87,11 @@ func SettleBill(log *eventlog.Log, actor, billID, txID string) error {
 		return err
 	}
 	if txID != "" {
-		if _, err := Transaction(log, txID); err != nil {
+		tx, err := Transaction(log, txID)
+		if err != nil {
 			return err
 		}
+		txID = tx.ID // the caller may have quoted a prefix; the settlement keys to the line
 	}
 	return trackSettlement(log, actor, CollectionBill, b.ID, txID)
 }
@@ -97,10 +99,11 @@ func SettleBill(log *eventlog.Log, actor, billID, txID string) error {
 // VoidBill supersedes a bill that should not have been received, the same operation as voiding a bad
 // import. The received fact stays in the log; a later fact supersedes it.
 func VoidBill(log *eventlog.Log, actor, why, billID string) error {
-	if _, err := bill(log, billID); err != nil {
+	b, err := bill(log, billID)
+	if err != nil {
 		return err
 	}
-	return trackVoid(log, actor, CollectionBill, why, billID)
+	return trackVoid(log, actor, CollectionBill, why, b.ID)
 }
 
 // Bills folds the log into the bills it currently holds, in the order they were received, with the
@@ -138,19 +141,22 @@ func Bills(log *eventlog.Log) ([]Bill, error) {
 	return out, nil
 }
 
-// bill folds out the one bill with this id, so a command can refuse to settle or void a fingerprint
-// that was never received (or has since been voided) rather than record against nothing.
+// bill folds out the one bill whose id is this fingerprint or uniquely begins with it, so a command
+// can refuse to settle or void a fingerprint that was never received (or has since been voided)
+// rather than record against nothing.
 func bill(log *eventlog.Log, id string) (Bill, error) {
 	bills, err := Bills(log)
 	if err != nil {
 		return Bill{}, err
 	}
-	for _, b := range bills {
-		if b.ID == id {
-			return b, nil
-		}
+	b, ok, err := byPrefix(bills, id, func(b Bill) string { return b.ID })
+	if err != nil {
+		return Bill{}, err
 	}
-	return Bill{}, fmt.Errorf("books: no bill %q; receive it before settling or voiding it", id)
+	if !ok {
+		return Bill{}, fmt.Errorf("books: no bill %q; receive it before settling or voiding it", id)
+	}
+	return b, nil
 }
 
 // BillSettlements folds the current bank line, if any, that settles each bill.

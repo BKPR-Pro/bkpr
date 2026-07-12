@@ -6,11 +6,29 @@ The goal is Mint's touch with a real ledger's resolution: you set it up, it runs
 recurring work is re-categorizing a couple of things every once in a while.
 
 It is driven entirely through commands, so it does not matter whether a person or an agent operates
-it. Every capability has deterministic, idempotent, machine-readable I/O: `review` reports the whole
-books as JSON, every write is safe to repeat, and the log is the whole state. Whoever runs it imports
-statements, writes rules, and answers the `Uncategorized` lines the same way. The only trace of who
-is `-actor`, stamped on each authoring command (default `human`; e.g. `-actor claude` when an agent
-runs it), so the log records the hand without the tool caring whose it is.
+it. Every capability has deterministic, idempotent, machine-readable I/O: `books -format json`
+reports the whole books, every write is safe to repeat, and the log is the whole state. Whoever runs
+it imports statements, writes rules, and answers the `Uncategorized` lines the same way. The only
+trace of who is `-actor`, stamped on each authoring command (default `human`; e.g. `-actor claude`
+when an agent runs it), so the log records the hand without the tool caring whose it is.
+
+## Quickstart
+
+```sh
+go build -o bk ./cli      # bk is the short name used throughout
+
+bk init
+bk import statement.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
+bk books                  # every line and where it posted
+bk books -account Uncategorized   # only the lines the rules could not place
+bk rules set "shell|petro" -category "Expenses:Travel:Fuel" -payee "Fuel Stop"
+bk books                  # the whole history, reclassified by the rule you just wrote
+```
+
+`bk help <command>` explains one command; `bk docs` prints the whole reference. One grammar
+throughout: the thing a command acts on — a file, a connector, a rule's pattern, a fingerprint —
+is its first argument, and flags assert facts about it. Wherever a fingerprint is taken, a unique
+prefix is enough, as with a git hash. The rest of this README is the design and the why.
 
 ## Every line posts, and nothing is guessed
 
@@ -238,10 +256,10 @@ fold over an in-memory adapter.
 
 1. **Rules.** Deterministic, free, reproducible. Handles almost everything.
 2. **Whoever operates it.** A person or an agent, through the same commands — import, rules,
-   categorize, match, export, review. The standing job is the lines the rules left `Uncategorized`:
-   find them (from `review`, or `ledger bal Uncategorized`), assert the postings, and code writes,
-   with `-actor` recording the hand. Never blocking — whatever is left is a rule not yet written or a
-   line to correct, and the books are complete in the meantime.
+   categorize, match, export, books. The standing job is the lines the rules left `Uncategorized`:
+   find them (`books -account Uncategorized`, or `ledger bal Uncategorized`), assert the postings,
+   and code writes, with `-actor` recording the hand. Never blocking — whatever is left is a rule
+   not yet written or a line to correct, and the books are complete in the meantime.
 
 Whoever operates it may label; code does the writing, the deduplication, and the arithmetic.
 Quarantining the nondeterminism is what keeps the books regenerable, and it is why an asserted answer
@@ -291,20 +309,94 @@ bk import statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -am
 bk import visa.csv -account "Liabilities:Card:Visa" -currency CAD -debit Charge -credit Payment -date Posted
 ```
 
-A connector is bidirectional in principle; `export` is the direction built first. The rent app is
-the first connector: `export` records rent the books already booked back to it, so its paid/unpaid
-state stays current. The token is kept in an environment variable, never in the books.
+### Adapters: how the outside world gets in and out
 
-Which lease a deposit belongs to is not in the bank memo, so the tenant's rule carries it as
-metadata: `-meta rentapp.lease=<id>` rides onto the categorized deposit, and `export` records that
-deposit against that lease, keyed by the deposit's fingerprint so a repeat is a no-op. Without
-`-confirm` it is a dry run.
+Ports and adapters: the core folds normalized transactions and knows nothing of files, formats, or
+endpoints — only an adapter does, and each speaks exactly one protocol (see Layout). There are two
+kinds of door. A **file** is a one-time input, read with its details supplied inline. A
+**connector** is a live system, registered once by name. One subsection per adapter:
+
+#### CSV statements
+
+Every bank exports CSV and it needs no credentials, so it is the default transport. `import` reads
+one with the account, currency, and columns named inline (see above). The parser accepts the
+shapes banks actually emit — `$1,234.56`, `(45.00)` for a negative, a single signed column or a
+debit/credit pair, a blank amount as zero — and refuses a row carrying both a debit and a credit.
+Each line is stored already normalized, so the books never re-parse the file.
+
+#### Ledger files
+
+The plain-text ledger format is both a door and the artifact. `import` reads a ledger file with no
+flags: each entry's single amountless posting names the account its line came from, and the file's
+own categorization is deliberately not carried in — the rules place every line, so the books stay
+a fold. `bk books -format ledger` writes the same format back out as the committed artifact,
+read-only and regenerated whole.
+
+When a rule renamed a payee, the artifact keeps the line's raw description as a `; memo:` note (an
+ordinary ledger entry note), and the reader prefers it. That makes the trip honest: importing the
+artifact into an empty book regenerates the same fingerprints, and the same rules fold it to the
+same books — which is exactly what the round-trip test drives, end to end, on every run.
+
+What the artifact deliberately does not carry is the rules, corrections, invoices, and connectors
+themselves. Those are facts, and facts live in the log: `.bookkeeper/log.jsonl` is the complete
+backup — one committable file holding everything the books cannot recompute — and restoring is
+copying it back (or `git checkout`). Encoding facts into artifact comments would be a second copy
+that could drift from the first, which is the one thing the design refuses.
+
+#### Another book's log
+
+The log is its own interchange format, so combining two books is an import, not a new adapter:
+
+```sh
+bk import ../business/.bookkeeper/log.jsonl
+```
+
+The other book's events replay here in their order. Statement lines, invoices, bills, and exports
+dedupe by fingerprint, so a line both books saw lands once; rules and corrections are recorded
+again here, later than everything this book holds, so where both books answered the same question
+the imported answer wins, and a rule pattern both books authored folds to one rule rather than
+two. A transfer each book saw from its own side — chequing out, savings in — pairs up once the
+books merge, and the movement counts once. Re-importing the same file is a no-op, keyed by a
+fingerprint of its content, exactly as re-importing a statement is.
+
+#### Connectors: register, list, rm
+
+A connector is bidirectional in principle: `export` writes to it today, and importing from it by
+name is the same registry, built later. Registering one is a logged fact (`connector.registered`)
+and moves no data by itself; `export` is the verb that does.
+
+```sh
+bk connectors register <name> -kind rentapp -url <url> -token-env <ENV> -account <a> [-currency <c>]
+bk connectors list   # NAME, KIND, URL, ACCOUNT, CURRENCY, TOKEN-ENV
+bk connectors rm <name>
+```
+
+- `<name>` is yours to choose and is how every other command refers to it: `bk export rent`.
+- `-kind` names the adapter that speaks the system's protocol; each kind below.
+- `-url` is the system's base URL.
+- `-token-env` names the **environment variable** that holds the bearer token. The token itself is
+  never stored: the log keeps only the variable's name and reads it at the moment the connector is
+  used, so the books stay committable. Set the variable in your shell (or profile) before an
+  export; a missing one is refused with the variable named.
+- `-account` and `-currency` say which ledger account's lines the connector concerns.
+
+`connectors rm` forgets one; like everything else the registration stays in the log and the fold
+drops it, so a re-register is a new fact, not an edit.
+
+#### The rent app (`-kind rentapp`)
+
+The first connector: `export` records rent the books already booked back to it, so its paid/unpaid
+state stays current. Which lease a deposit belongs to is not in the bank memo, so the tenant's
+rule carries it as metadata: `-meta rentapp.lease=<id>` rides onto the categorized deposit, and
+`export` sends each such deposit as its lease, amount, and date, with the deposit's fingerprint as
+the idempotency key — so a repeat records nothing twice, and a partially failed run reports which
+deposits failed while the rest stand. Without `-confirm` it is a dry run:
 
 ```sh
 export BK_RENT_TOKEN=...   # the rent app's bearer token
 bk connectors register rent -kind rentapp -url https://rent.stcroixproperties.ca \
   -token-env BK_RENT_TOKEN -account "Assets:Bank:Chequing" -currency CAD
-bk rules set -match "hyungjin" -category "Income:Real Estate:Rent:22 Lisgar Street" \
+bk rules set "hyungjin" -category "Income:Real Estate:Rent:22 Lisgar Street" \
   -meta rentapp.lease=31
 bk export rent            # dry run: what it would record
 bk export rent -confirm   # records each rent deposit against its lease
@@ -315,27 +407,45 @@ Each is one event. Order decides which of two matching rules wins, so a new rule
 unless `-before` places it ahead of another. `rules rm` and `mv` drop and reorder.
 
 ```sh
-bk rules set -match "shell|petro" -category "Expenses:Travel:Fuel" -payee "Fuel Stop"
-bk rules set -match "city water"  -category "Expenses:Utilities:Water" -before "water"
+bk rules set "shell|petro" -category "Expenses:Travel:Fuel" -payee "Fuel Stop"
+bk rules set "city water"  -category "Expenses:Utilities:Water" -before "water"
 bk rules list
 ```
 
-`books` folds the log into a table, or regenerates the ledger artifact in the store:
+`books` folds the log and renders it: a table or JSON to read, or the ledger artifact. `-account`
+narrows any of the three to the lines posting to a matching account — repeat it to name several —
+so there is no separate review command: the decision queue is just the books, filtered:
 
 ```sh
-bk books                 # a table, to read
-bk books -format ledger  # regenerates .bookkeeper/books.ledger
+bk books                                  # a table, to read
+bk books -account Uncategorized           # only the lines the rules could not place
+bk books -account Fuel -account Water     # several accounts, one reading
+bk books -from 2026-03-01 -to 2026-03-31  # exactly March: that month's lines and health line
+bk books -format json                     # the same reading for a machine
+bk books -format ledger                   # regenerates .bookkeeper/books.ledger
+bk books -account Fuel -format ledger     # a filtered ledger, to stdout; the artifact stays whole
 ```
 
 ```text
-DATE        PAYEE                AMOUNT   POSTS TO
-2026-03-01  Fuel Stop            -62.40   Expenses:Consulting:Travel:Fuel
-2026-03-02  Acme Hardware        -84.20   Expenses:Real Estate:Materials:Uncategorized
-2026-03-05  J. Smith             1600.00  Income:Real Estate:Rent:123 Example Street
-2026-03-12  UNKNOWN MERCHANT 88  -39.99   Uncategorized
+FINGERPRINT         DATE        PAYEE                AMOUNT   POSTS TO
+6d67c4670ff1e372-1  2026-03-01  Fuel Stop            -62.40   Expenses:Consulting:Travel:Fuel
+bf3292b4aac90b2e-1  2026-03-02  Acme Hardware        -84.20   Expenses:Real Estate:Materials:Uncategorized
+a106c3b1d01636de-1  2026-03-05  J. Smith             1600.00  Income:Real Estate:Rent:123 Example Street
+5f79d9a707bc433f-1  2026-03-12  UNKNOWN MERCHANT 88  -39.99   Uncategorized
 
-9 lines posted, 2 of them uncategorized
+9 lines posted, 2 of them uncategorized (bk books -account Uncategorized shows only them)
+
+INCOME       EXPENSES    NET          UNCATEGORIZED
+1600.00 CAD  146.60 CAD  1453.40 CAD  -39.99 CAD
 ```
+
+The fingerprint is the handle every correction takes, which is why the table leads with it. The
+closing block is the health line: income, expenses, net, and money whose kind is unknown — kept in
+statement sign rather than guessed into either column — one row per commodity, since amounts of
+different commodities cannot honestly sum. Every format ends with this same line, computed once
+from the same fold (JSON carries it as a `summary` object, the ledger as a trailing comment that
+ledger tools ignore), so the formats cannot disagree; a filtered reading is summarized as
+filtered.
 
 ### Cash and accrual are one log read two ways
 
@@ -391,7 +501,7 @@ was booked when the invoice was raised):
 
 ```sh
 bk import march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
-bk invoice settle -id 9617607456a06619 -tx 6afa3719db1eb739-1
+bk invoice settle 9617607456a06619 -tx 6afa3719db1eb739-1
 ```
 
 ```text
@@ -472,7 +582,7 @@ Learn that every hardware receipt was Unit 1, and say so once. `set` changes onl
 name, so the payee is left as it was:
 
 ```sh
-bk rules set -match "acme hardware" -category "Expenses:...:Unit 1" -why "the receipts were all Unit 1"
+bk rules set "acme hardware" -category "Expenses:...:Unit 1" -why "the receipts were all Unit 1"
 bk books -format ledger
 ```
 
@@ -494,17 +604,19 @@ buys, and committing both files is how the change reviews.
 
 Some attributions are not a rule. A hardware receipt in your truck says Unit 1, and no pattern over
 the description could have known that. So `categorize` asserts the answer for that one line, keyed
-by its fingerprint, and it wins over whatever the rule said:
+by its fingerprint, and it wins over whatever the rule said. `bk books -account Uncategorized`
+lists every waiting line with its fingerprint, and any unique prefix of one is enough, as with a
+git hash:
 
 ```sh
-bk categorize -tx 0d76f1f1... -category "Expenses:...:Unit 1" -payee "Acme" -why "receipt was Unit 1"
+bk categorize 0d76f1f1 -category "Expenses:...:Unit 1" -payee "Acme" -why "receipt was Unit 1"
 ```
 
 One charge can serve two properties, so an assertion can be a split, and it is only accepted if the
 postings still account for the whole line:
 
 ```sh
-bk categorize -tx 0d76f1f1... \
+bk categorize 0d76f1f1 \
   -post "Expenses:Materials:Unit 1=40.00" \
   -post "Expenses:Materials:Unit 2=44.20"
 ```
@@ -521,7 +633,7 @@ imports garbage that re-importing cannot repair on its own: the fingerprints are
 and a re-import is a no-op on them. `void` is the way out.
 
 ```sh
-bk void -tx 33247b87... -why "imported to the wrong account"
+bk void 33247b87 -why "imported to the wrong account"
 ```
 
 It does not delete the imported event. It appends a fact that supersedes it, and the fold drops the
@@ -531,6 +643,19 @@ still there and the import stays a no-op.
 
 The repair flow the append-only log makes possible: re-import with the right flags (the corrected
 line lands under a new fingerprint, since the amount or date changed), then void the garbage one.
+
+### Undo, restore, start over
+
+Three different itches, three different tools, only one of them new:
+
+- **A wrong fact** is superseded, never erased: a bad line is `void`, a wrong rule is `rules rm`,
+  a wrong settlement is `-reopen`. The mistake and its correction both stay in the log.
+- **A wrong batch** — an import with the wrong flags, a merge you regret — is git's job: every
+  write is a pure append, so `git restore .bookkeeper/log.jsonl` rolls the book back to any
+  committed point, and the diff you are discarding is readable before you discard it.
+- **Starting over** is `bk reset`: the log emptied, the artifact removed, the directory still a
+  book. It is the one verb in the tool that destroys history, so without `-confirm` it is a dry
+  run that says what would be lost — and after a reset the old log is recoverable only from git.
 
 ### Transfers between your own accounts
 
@@ -598,7 +723,7 @@ ordered, and for each field the first rule that supplies it wins; `match` is the
 no two may share one.
 
 ```sh
-bk rules set -match "acme hardware" -payee "Acme Hardware" -category "Expenses:Real Estate:Materials:Uncategorized"
+bk rules set "acme hardware" -payee "Acme Hardware" -category "Expenses:Real Estate:Materials:Uncategorized"
 ```
 
 Categories are free-form account paths, so you can go as deep as your books do, down to the
@@ -692,7 +817,7 @@ from it is refused: the rent money already arrives on the bank statement, and im
 app's copy would double-count it.
 
 The tool is driven entirely through commands, so a person or an agent operates it the same way.
-`review` reports the whole books as JSON, and the authoring commands take an `-actor` (default
+`books -format json` reports the whole books, and the authoring commands take an `-actor` (default
 `human`, e.g. `-actor claude`), so whoever answers works through one path and the log records the
 hand without the core caring whose it is.
 

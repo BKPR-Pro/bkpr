@@ -90,9 +90,11 @@ func SettleInvoice(log *eventlog.Log, actor, invoiceID, txID string) error {
 		return err
 	}
 	if txID != "" {
-		if _, err := Transaction(log, txID); err != nil {
+		tx, err := Transaction(log, txID)
+		if err != nil {
 			return err
 		}
+		txID = tx.ID // the caller may have quoted a prefix; the settlement keys to the line
 	}
 	return trackSettlement(log, actor, CollectionInvoice, inv.ID, txID)
 }
@@ -101,10 +103,11 @@ func SettleInvoice(log *eventlog.Log, actor, invoiceID, txID string) error {
 // a bad import. It does not delete the raised event; it appends a fact the fold honours, so the
 // mistake and its correction both stay.
 func VoidInvoice(log *eventlog.Log, actor, why, invoiceID string) error {
-	if _, err := invoice(log, invoiceID); err != nil {
+	inv, err := invoice(log, invoiceID)
+	if err != nil {
 		return err
 	}
-	return trackVoid(log, actor, CollectionInvoice, why, invoiceID)
+	return trackVoid(log, actor, CollectionInvoice, why, inv.ID)
 }
 
 // Invoices folds the log into the invoices it currently holds, in the order they were raised, with
@@ -143,19 +146,22 @@ func Invoices(log *eventlog.Log) ([]Invoice, error) {
 	return out, nil
 }
 
-// invoice folds out the one invoice with this id, so a command can refuse to settle or void a
-// fingerprint that was never raised (or has since been voided) rather than record against nothing.
+// invoice folds out the one invoice whose id is this fingerprint or uniquely begins with it, so a
+// command can refuse to settle or void a fingerprint that was never raised (or has since been
+// voided) rather than record against nothing.
 func invoice(log *eventlog.Log, id string) (Invoice, error) {
 	invs, err := Invoices(log)
 	if err != nil {
 		return Invoice{}, err
 	}
-	for _, inv := range invs {
-		if inv.ID == id {
-			return inv, nil
-		}
+	inv, ok, err := byPrefix(invs, id, func(inv Invoice) string { return inv.ID })
+	if err != nil {
+		return Invoice{}, err
 	}
-	return Invoice{}, fmt.Errorf("books: no invoice %q; raise it before settling or voiding it", id)
+	if !ok {
+		return Invoice{}, fmt.Errorf("books: no invoice %q; raise it before settling or voiding it", id)
+	}
+	return inv, nil
 }
 
 // InvoiceSettlements folds the current bank line, if any, that settles each invoice.

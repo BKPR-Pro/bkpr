@@ -41,11 +41,27 @@ func TestExpenseEntry(t *testing.T) {
 	}
 
 	want := "2026/03/02  * Acme Hardware\n" +
+		"  ; memo: ACME HARDWARE #4471\n" +
 		"  Expenses:Repairs:Materials  84.20 CAD\n" +
 		"  Assets:Bank:Chequing\n"
 
 	if got := write(t, tx, e); got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// A rule that renames the payee would otherwise cost the line its raw description, and with it
+// the fingerprint and every rule keyed on it. The memo note keeps that fact in the artifact; when
+// the title already is the description, there is nothing to note.
+func TestTheMemoNoteAppearsOnlyWhenARuleRenamedThePayee(t *testing.T) {
+	tx := chequing(12, -3999, "UNKNOWN MERCHANT 88")
+	e := model.Entry{
+		Payee:    "UNKNOWN MERCHANT 88",
+		Postings: []model.Posting{{Account: model.Uncategorized, Amount: cad(3999)}},
+	}
+
+	if got := write(t, tx, e); strings.Contains(got, "; memo:") {
+		t.Errorf("a payee identical to the description needs no memo:\n%s", got)
 	}
 }
 
@@ -81,7 +97,7 @@ func TestEveryEntryIsCleared(t *testing.T) {
 	}
 }
 
-// The account path is the only marker there is. Nothing annotates it.
+// The account path is the only marker of what is unknown. Nothing annotates it.
 func TestAnUncategorizedLineCarriesNoAnnotation(t *testing.T) {
 	tx := chequing(2, -8420, "ACME HARDWARE #4471")
 	e := model.Entry{
@@ -90,6 +106,7 @@ func TestAnUncategorizedLineCarriesNoAnnotation(t *testing.T) {
 	}
 
 	want := "2026/03/02  * Acme Hardware\n" +
+		"  ; memo: ACME HARDWARE #4471\n" +
 		"  Expenses:Real Estate:Materials:Uncategorized  84.20 CAD\n" +
 		"  Assets:Bank:Chequing\n"
 
@@ -111,6 +128,7 @@ func TestASplitWritesEveryPostingAndStillElidesTheSourceAccount(t *testing.T) {
 	}
 
 	want := "2026/03/02  * Acme Hardware\n" +
+		"  ; memo: ACME HARDWARE #4471\n" +
 		"  Expenses:Materials:Unit 1  40.00 CAD\n" +
 		"  Expenses:Materials:Unit 2  44.20 CAD\n" +
 		"  Assets:Bank:Chequing\n"
@@ -199,6 +217,7 @@ func TestAPricedPostingIsWrittenWithItsTotalCost(t *testing.T) {
 	}
 
 	want := "2026/03/01  * Bought Apple\n" +
+		"  ; memo: BOUGHT 10 AAPL\n" +
 		"  Assets:Brokerage:AAPL  10 AAPL @@ 1000.00 USD\n" +
 		"  Assets:Brokerage:Cash\n"
 

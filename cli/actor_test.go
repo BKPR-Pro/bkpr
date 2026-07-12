@@ -64,7 +64,7 @@ func TestCategorizeRecordsTheActor(t *testing.T) {
 	bookHere(t)
 	seedTx(t, "tx1")
 
-	if err := categorize([]string{"-tx", "tx1", "-category", "Expenses:Food", "-actor", "model:claude"}); err != nil {
+	if err := categorize([]string{"tx1", "-category", "Expenses:Food", "-actor", "model:claude"}); err != nil {
 		t.Fatalf("categorize: %v", err)
 	}
 	if got := actorOf(t, "transaction", "categorized"); got != "model:claude" {
@@ -77,7 +77,7 @@ func TestCategorizeDefaultsTheActorToHuman(t *testing.T) {
 	bookHere(t)
 	seedTx(t, "tx1")
 
-	if err := categorize([]string{"-tx", "tx1", "-category", "Expenses:Food"}); err != nil {
+	if err := categorize([]string{"tx1", "-category", "Expenses:Food"}); err != nil {
 		t.Fatalf("categorize: %v", err)
 	}
 	if got := actorOf(t, "transaction", "categorized"); got != "human" {
@@ -89,7 +89,7 @@ func TestVoidRecordsTheActor(t *testing.T) {
 	bookHere(t)
 	seedTx(t, "tx1")
 
-	if err := voidCmd([]string{"-tx", "tx1", "-actor", "model:claude"}); err != nil {
+	if err := voidCmd([]string{"tx1", "-actor", "model:claude"}); err != nil {
 		t.Fatalf("void: %v", err)
 	}
 	if got := actorOf(t, "transaction", "voided"); got != "model:claude" {
@@ -100,7 +100,7 @@ func TestVoidRecordsTheActor(t *testing.T) {
 func TestRulesSetRecordsTheActor(t *testing.T) {
 	bookHere(t)
 
-	if err := ruleSetOne([]string{"-match", "acme", "-category", "Expenses:Materials", "-actor", "model:claude"}); err != nil {
+	if err := ruleSetOne([]string{"acme", "-category", "Expenses:Materials", "-actor", "model:claude"}); err != nil {
 		t.Fatalf("rules set: %v", err)
 	}
 	if got := actorOf(t, "rule", "added"); got != "model:claude" {
@@ -114,7 +114,7 @@ func TestMatchRecordsTheActor(t *testing.T) {
 	seedTx(t, "a")
 	seedTx(t, "b")
 
-	if err := match([]string{"-tx", "a", "-with", "b", "-actor", "model:claude"}); err != nil {
+	if err := match([]string{"a", "-with", "b", "-actor", "model:claude"}); err != nil {
 		t.Fatalf("match: %v", err)
 	}
 	if got := actorOf(t, "transaction", "matched"); got != "model:claude" {
@@ -126,10 +126,10 @@ func TestMatchRecordsTheActor(t *testing.T) {
 func TestMatchRefusesBothOrNeither(t *testing.T) {
 	bookHere(t)
 	seedTx(t, "a")
-	if err := match([]string{"-tx", "a"}); err == nil {
+	if err := match([]string{"a"}); err == nil {
 		t.Error("neither -with nor -break should be an error")
 	}
-	if err := match([]string{"-tx", "a", "-with", "b", "-break"}); err == nil {
+	if err := match([]string{"a", "-with", "b", "-break"}); err == nil {
 		t.Error("both -with and -break should be an error")
 	}
 }
