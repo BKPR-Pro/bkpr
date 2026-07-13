@@ -1,10 +1,22 @@
 package source
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+// padOptions builds <option value="01">1</option> ... value="0n", the zero-padded values Simplii's
+// month and day selects use (and widenHistory selects by).
+func padOptions(n int) string {
+	var b strings.Builder
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&b, `<option value="%02d">%d</option>`, i, i)
+	}
+	return b.String()
+}
 
 // signedInPage wraps Simplii account markup with the signed-in landmark (the profile initials link)
 // so the profile's isLoginWall reports false and no sign-in is attempted.
@@ -88,6 +100,78 @@ func TestSimpliiReadsALineOfCredit(t *testing.T) {
 	// Balance is the owing magnitude; the CLI negates it for the liability.
 	if !res.HasBalance || res.Balance.String() != "49671.86 CAD" {
 		t.Errorf("balance = %s (has=%v), want 49671.86 CAD", res.Balance, res.HasBalance)
+	}
+}
+
+// A history window drives Simplii's custom date search: widenHistory fills the From (and To) date --
+// each a month/day/year <select> -- and clicks Get Details. The fixture reveals an older row only once
+// the From date holds the requested start, so the test passes only if -from actually reached the
+// date fields.
+func TestSimpliiReadsAWiderHistoryWindow(t *testing.T) {
+	months := padOptions(12)
+	days := padOptions(31)
+	years := `<option value="2025">2025</option><option value="2026">2026</option>`
+	dateRow := func(container string) string {
+		return `<div class="` + container + `">
+		  <div class="ui-month"><select>` + months + `</select></div>
+		  <div class="ui-date"><select>` + days + `</select></div>
+		  <div class="ui-year"><select>` + years + `</select></div>
+		</div>`
+	}
+
+	body := `
+	  <div class="filter-by-range">` + dateRow("from") + dateRow("to") + `</div>
+	  <button type="button" id="getDetails">Get Details</button>
+	  <section class="transaction-list row"><table><tbody id="tb">
+	    <tr>
+	      <td class="date">Jul 10, 2026</td>
+	      <td class="transactions"><span class="transactionDescription">RECENT</span></td>
+	      <td class="debit"><span class="hidden-text">Not applicable</span></td>
+	      <td class="credit"><span>$50.00</span></td>
+	      <td class="balance"><span class="negative">−$49,671.86</span></td>
+	    </tr>
+	  </tbody></table></section>
+	  <script>
+	    document.getElementById('getDetails').addEventListener('click', function () {
+	      var f = document.querySelector('.filter-by-range .from')
+	      if (f.querySelector('.ui-month select').value === '02' &&
+	          f.querySelector('.ui-date select').value === '01' &&
+	          f.querySelector('.ui-year select').value === '2026') {
+	        document.getElementById('tb').insertAdjacentHTML('beforeend',
+	          '<tr><td class="date">Feb 5, 2026</td>' +
+	          '<td class="transactions"><span class="transactionDescription">OLDER DRAW</span></td>' +
+	          '<td class="debit"><span>$200.00</span></td>' +
+	          '<td class="credit"><span class="hidden-text">Not applicable</span></td>' +
+	          '<td class="balance"><span class="negative">−$50,000.00</span></td></tr>')
+	      }
+	    })
+	  </script>`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(signedInSimplii(body)))
+	}))
+	defer srv.Close()
+
+	out, err := execBankScript(Bank{
+		Institution: "simplii", LoginURL: srv.URL, DefaultCurrency: "CAD",
+		Account:     "Liabilities:Real Estate:Simplii LOC",
+		HistoryFrom: "Feb 1, 2026", HistoryTo: "Jul 13, 2026",
+	}, nil)
+	skipIfNoBrowser(t, err)
+	if err != nil {
+		t.Fatalf("reading with a Simplii history window: %v", err)
+	}
+
+	res, err := parseBankOutput(out, "Liabilities:Real Estate:Simplii LOC", "CAD")
+	if err != nil {
+		t.Fatalf("parsing simplii.js output %q: %v", out, err)
+	}
+	if len(res.Transactions) != 2 {
+		t.Fatalf("got %d transactions, want 2 (recent + older via the date range): %q", len(res.Transactions), out)
+	}
+	if res.Transactions[1].Date.Format("2006-01-02") != "2026-02-05" || res.Transactions[1].Description != "OLDER DRAW" {
+		t.Errorf("older row not loaded from the date range: %+v", res.Transactions[1])
 	}
 }
 
