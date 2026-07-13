@@ -74,6 +74,10 @@ func main() {
 		err = exportCmd(os.Args[2:])
 	case "books":
 		err = renderBooks(os.Args[2:])
+	case "completion":
+		err = completionCmd(os.Args[2:])
+	case "__complete":
+		runComplete(os.Stdout, os.Args[2:], liveConnectors)
 	case "docs":
 		docs(os.Stdout)
 	case "version":
@@ -142,7 +146,7 @@ var usageSections = []usageSection{
 	{"SETUP", []usageLine{
 		{"init", "[dir]"},
 		{"reset", "[-confirm]"},
-		{"connectors register", "<name> -kind <rentapp|rbc|simplii|pcfinancial> -url <url> -token-env <ENV> -account <a> [-currency <c>] [-cred field=ref ...] [-secret-cmd <cmd>] [-account-path <label> ...]"},
+		{"connectors register", "<name> -kind <rentapp|rbc|simplii|pcfinancial> -url <url> -token-env <ENV> -account <a> [-currency <c>] [-cred field=ref ...] [-secret-cmd <cmd>] [-account-path <label> ...] [-history <days>]"},
 		{"connectors rm", "<name>"},
 		{"connectors list", ""},
 	}},
@@ -186,6 +190,7 @@ var usageSections = []usageSection{
 		{"report", "[-income | -balance | -gains] [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
 	}},
 	{"MORE", []usageLine{
+		{"completion", "<bash|zsh|fish>"},
 		{"help", "[command]"},
 		{"docs", ""},
 		{"version", ""},
@@ -333,6 +338,16 @@ var reference = []docGroup{
       principle: export writes to it, import reads from it. Registering one does not itself move data.
   connectors rm <name>            Forget a connector.
   connectors list                 Show the registered connectors.
+`},
+		{[]string{"completion"}, `  completion <bash|zsh|fish>
+      Print a shell completion script. Source it so the shell completes bkpr's commands, their
+      subcommands and flags, and -- read live from the book you are in -- your connector names.
+      Add to the shell's startup file, after its completion system is initialized:
+        bash:  eval "$(bkpr completion bash)"    (in ~/.bashrc)
+        zsh:   eval "$(bkpr completion zsh)"     (in ~/.zshrc, after compinit)
+        fish:  bkpr completion fish | source     (in ~/.config/fish/config.fish)
+      The shell calls bkpr back as you type; nothing is stored and no book is opened unless a
+      connector name is what is being completed.
 `},
 	}},
 	{"RULES  (deterministic categorization; first matching rule wins per field)", []docTopic{
