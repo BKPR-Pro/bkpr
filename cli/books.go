@@ -42,12 +42,21 @@ func renderBooks(args []string) error {
 	fs.Var(&accounts, "account", "show only lines posting to an account matching this pattern; repeatable, any match keeps the line")
 	from := fs.String("from", "", "show only lines dated on or after this (YYYY-MM-DD)")
 	to := fs.String("to", "", "show only lines dated on or before this (YYYY-MM-DD)")
+	value := fs.String("value", "", "value every amount in this commodity, e.g. CAD, using recorded @@ prices; pass -rate for lines without one")
+	rate := fs.String("rate", "", "per-unit rates for amounts with no recorded price under -value, e.g. USD=1.35 (comma-separated)")
 	stdout := fs.Bool("stdout", false, "write the ledger to stdout instead of the store")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *basis != string(books.CashBasis) && *basis != string(books.AccrualBasis) {
 		return fmt.Errorf("unknown basis %q: want cash or accrual", *basis)
+	}
+	rates, err := parseRates(*rate, *value)
+	if err != nil {
+		return err
+	}
+	if *value != "" && *format == "ledger" {
+		return fmt.Errorf("-value cannot render -format ledger: the ledger is the stored artifact and must stay in each line's own commodity")
 	}
 	var effective time.Time
 	if *since != "" {
@@ -83,6 +92,13 @@ func renderBooks(args []string) error {
 		txs, entries = filterByDate(fromDay, toDay, txs, entries)
 	}
 
+	// Under -value the reading is restated into one currency before anything reads it, so every
+	// format — the health line and each line's amount alike — speaks that currency from the one fold.
+	val := newValuer(*value, rates)
+	if *value != "" {
+		txs, entries = valued(val, txs, entries)
+	}
+
 	// The summary is computed once, here, and handed to whichever renderer runs. That is the
 	// mechanism that keeps the formats from drifting: no format computes its own numbers, so the
 	// table, the JSON, and the ledger cannot disagree about the same reading.
@@ -93,9 +109,20 @@ func renderBooks(args []string) error {
 
 	switch *format {
 	case "table":
-		return report(os.Stdout, txs, entries, sum)
+		if err := report(os.Stdout, txs, entries, sum); err != nil {
+			return err
+		}
+		if *value != "" {
+			fmt.Fprintf(os.Stdout, "\n%s\n", valuationNote(*value))
+		}
+		warnUnvalued(val)
+		return nil
 	case "json":
-		return writeJSON(os.Stdout, txs, entries, sum)
+		if err := writeJSON(os.Stdout, txs, entries, sum); err != nil {
+			return err
+		}
+		warnUnvalued(val)
+		return nil
 	case "ledger":
 		// A filtered ledger is a reading and goes to stdout; the artifact in the store is only
 		// ever the whole books, so a partial one can never overwrite it.
@@ -260,6 +287,60 @@ func filterByDate(from, to time.Time, txs []model.Transaction, entries []model.E
 		keptEntries = append(keptEntries, entries[i])
 	}
 	return keptTxs, keptEntries
+}
+
+// valued restates every amount in the reading into val's target so a mixed-commodity book reads in
+// one currency. A posting is valued at its own recorded @@ price (or a supplied -rate); the source
+// line, which records no price, is valued as the negation of its postings when they all reached the
+// target — a line and its categorized side sum to zero — and otherwise at a -rate. It returns copies,
+// leaving the stored reading untouched, which is why -value never restates the ledger artifact.
+func valued(val *valuer, txs []model.Transaction, entries []model.Entry) ([]model.Transaction, []model.Entry) {
+	if val == nil || val.target == "" {
+		return txs, entries
+	}
+	vt := make([]model.Transaction, len(txs))
+	ve := make([]model.Entry, len(entries))
+	for i, tx := range txs {
+		e := entries[i]
+		ps := make([]model.Posting, len(e.Postings))
+		side := model.Amount{Commodity: val.target}
+		allTarget := len(e.Postings) > 0
+		for j, p := range e.Postings {
+			amt := val.restate(p.Amount, p.Cost)
+			ps[j] = model.Posting{Account: p.Account, Amount: amt}
+			switch {
+			case amt.Commodity != val.target:
+				allTarget = false
+				if p.Cost != nil {
+					ps[j].Cost = p.Cost // left in its own commodity: keep the price it still carries
+				}
+			default:
+				if sum, err := side.Add(amt); err == nil {
+					side = sum
+				}
+			}
+		}
+		switch {
+		case tx.Amount.Commodity == val.target:
+			// already in the target; the source line needs no valuing
+		case allTarget:
+			tx.Amount = side.Negate()
+		default:
+			tx.Amount = val.restate(tx.Amount, nil)
+		}
+		e.Postings = ps
+		vt[i] = tx
+		ve[i] = e
+	}
+	return vt, ve
+}
+
+// valuationNote explains, under -value, that the amounts shown were restated into the target — a line
+// at its recorded @@ price or a supplied -rate — so a reader does not mistake a valued figure for the
+// amount originally recorded. A line that could be valued neither way stays in its own currency, which
+// warnUnvalued then names.
+func valuationNote(target string) string {
+	return fmt.Sprintf("amounts valued in %s from each line's recorded @@ price or a -rate; a line with neither is left in its own currency", target)
 }
 
 func postsToAny(e model.Entry, res []*regexp.Regexp) bool {

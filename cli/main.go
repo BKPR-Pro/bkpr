@@ -162,7 +162,7 @@ var usageSections = []usageSection{
 		{"void", "<fingerprint> [-why <reason>] [-actor <name>]"},
 		{"match", "<fingerprint> (-with <fingerprint> | -break) [-actor <name>]"},
 		{"export", "<connector> [-confirm]"},
-		{"books", "[-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re> ...] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-stdout]"},
+		{"books", "[-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re> ...] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-value <c> [-rate <C=n> ...]] [-stdout]"},
 	}},
 	{"INVOICES AND BILLS", []usageLine{
 		{"invoice raise", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]"},
@@ -417,7 +417,7 @@ var reference = []docGroup{
       prints what it would send.
 `},
 		{[]string{"books"}, `  books [-format table|json|ledger] [-basis cash|accrual] [-since YYYY-MM-DD] [-account <re> ...]
-        [-from YYYY-MM-DD] [-to YYYY-MM-DD] [-stdout]
+        [-from YYYY-MM-DD] [-to YYYY-MM-DD] [-value <c> [-rate <C=n> ...]] [-stdout]
       Fold the log into a table (default), machine-readable JSON, or regenerate
       .bkpr/books.ledger (-stdout writes the ledger to standard output instead).
       -account narrows any of the three to the lines posting to a matching account, at any
@@ -442,6 +442,13 @@ var reference = []docGroup{
       accrual mid-year without retroactively accruing everything. An accrual before the date
       reads as cash (its payment books as income or expense when it lands). The caveat is a
       receivable open across the date: it is not shown until it is paid, when it books as cash.
+      -value reads a mixed-commodity book in one currency: every amount, each line's and the
+      health line's alike, is restated into it - a posting at the @@ price it recorded (USD income
+      booked at the CAD it was worth reads as that CAD), a source line as the negation of its
+      postings when they reach the target. A line with no recorded price is valued at a -rate you
+      supply (-rate USD=1.35, one unit's worth in the target, comma-separated for several), and one
+      with neither is left in its own currency and named in a warning. Valuing restates a reading,
+      not the artifact, so -value cannot render -format ledger, which stays each line's own commodity.
 `},
 	}},
 	{"INVOICES AND BILLS  (value recognized before its cash; only shown on -basis accrual)", []docTopic{

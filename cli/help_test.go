@@ -87,6 +87,20 @@ func TestRulesHelpDocumentsTax(t *testing.T) {
 	}
 }
 
+// The books help topic documents valuing a mixed-commodity book into one currency, so a person with
+// USD income learns the two flags from the tool itself.
+func TestBooksHelpDocumentsValue(t *testing.T) {
+	var buf bytes.Buffer
+	if err := helpTopic(&buf, "books"); err != nil {
+		t.Fatalf("helpTopic: %v", err)
+	}
+	for _, want := range []string{"-value", "-rate"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("books help should mention %q", want)
+		}
+	}
+}
+
 // A plain palette leaves the text bare, so a pipe, a redirect, or an agent reading the screen never
 // sees an escape code.
 func TestUsagePlainPaletteEmitsNoAnsi(t *testing.T) {

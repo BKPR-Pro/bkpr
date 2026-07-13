@@ -279,3 +279,100 @@ func TestWriteJSONRoundTrips(t *testing.T) {
 		t.Errorf("posts_to = %v, want [Uncategorized]", got.PostsTo)
 	}
 }
+
+// foreignIncome is one USD-billed line whose categorized side records its own @@ CAD price, the shape
+// DNSimple income takes: a USD deposit posted to income at the CAD it was worth. The source line
+// records no price, only the USD that landed.
+func foreignIncome(cost *model.Amount) ([]model.Transaction, []model.Entry) {
+	txs := []model.Transaction{{ID: "dnsimple", Account: "Assets:Bank:USD",
+		Date: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Amount: usd2(900000)}}
+	entries := []model.Entry{{Payee: "DNSimple", Postings: []model.Posting{
+		{Account: "Income:Consulting:DNSimple", Amount: usd2(-900000), Cost: cost}}}}
+	return txs, entries
+}
+
+// Under -value CAD the health line reads in one currency: USD income that recorded its own @@ CAD
+// price is folded at that exact price, so a mixed book nets to a single CAD figure.
+func TestBooksValuesForeignIncomeAtItsRecordedPrice(t *testing.T) {
+	cost := cad2(1215712)
+	rawTxs, rawEntries := foreignIncome(&cost)
+	val := newValuer("CAD", nil)
+	txs, entries := valued(val, rawTxs, rawEntries)
+
+	sum, err := summarize(txs, entries)
+	if err != nil {
+		t.Fatalf("summarize: %v", err)
+	}
+	if len(sum.Totals) != 1 || sum.Totals[0].Commodity != "CAD" {
+		t.Fatalf("totals = %+v, want one CAD line", sum.Totals)
+	}
+	if got := sum.Totals[0].Income.String(); got != "12157.12 CAD" {
+		t.Errorf("income = %q, want the recorded @@ CAD price", got)
+	}
+}
+
+// The per-line AMOUNT is valued too, and stays consistent with the health line: a USD line with a
+// recorded @@ CAD price shows the CAD it was worth, never its USD face, because a line equals the
+// negation of its categorized side, which reached the target.
+func TestBooksValuesEachLineIntoTheTarget(t *testing.T) {
+	cost := cad2(1215712)
+	rawTxs, rawEntries := foreignIncome(&cost)
+	val := newValuer("CAD", nil)
+	txs, entries := valued(val, rawTxs, rawEntries)
+
+	lines := bookLines(txs, entries)
+	if len(lines) != 1 || lines[0].Amount != "12157.12 CAD" {
+		t.Fatalf("line amount = %+v, want 12157.12 CAD", lines)
+	}
+	sum, err := summarize(txs, entries)
+	if err != nil {
+		t.Fatalf("summarize: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := report(&buf, txs, entries, sum); err != nil {
+		t.Fatalf("report: %v", err)
+	}
+	if out := buf.String(); !strings.Contains(out, "12157.12 CAD") || strings.Contains(out, "9000.00 USD") {
+		t.Errorf("table should show the valued CAD, not the USD face:\n%s", out)
+	}
+	if len(val.unpriced) != 0 {
+		t.Errorf("unpriced = %+v, want none: the line carried its own price", val.unpriced)
+	}
+}
+
+// With no recorded price and no rate, a foreign line is left in its own currency and its commodity
+// is remembered so the reader is warned; a -rate then values both the line and the health total.
+func TestBooksLeavesUnpricedForeignNativeThenValuesItWithARate(t *testing.T) {
+	nativeTxs, nativeEntries := foreignIncome(nil)
+	val := newValuer("CAD", nil)
+	txs, entries := valued(val, nativeTxs, nativeEntries)
+	if got := bookLines(txs, entries)[0].Amount; got != "9000.00 USD" {
+		t.Errorf("line = %q, want it left in USD with no price to value it", got)
+	}
+	if !val.unpriced["USD"] {
+		t.Errorf("unpriced = %+v, want USD remembered so the reader is warned", val.unpriced)
+	}
+
+	rawTxs, rawEntries := foreignIncome(nil)
+	rated := newValuer("CAD", map[string]model.Amount{"USD": cad2(135)})
+	rtxs, rentries := valued(rated, rawTxs, rawEntries)
+	if got := bookLines(rtxs, rentries)[0].Amount; got != "12150.00 CAD" {
+		t.Errorf("line = %q, want 9000 USD at 1.35 = 12150.00 CAD", got)
+	}
+	sum, err := summarize(rtxs, rentries)
+	if err != nil {
+		t.Fatalf("summarize: %v", err)
+	}
+	if got := sum.Totals[0].Income.String(); got != "12150.00 CAD" {
+		t.Errorf("income = %q, want the rate applied", got)
+	}
+}
+
+// The ledger is the stored artifact and must stay in each line's own commodity, so -value cannot
+// restate it; the command refuses rather than write a valued file that would not round-trip.
+func TestBooksRefusesToValueTheLedgerArtifact(t *testing.T) {
+	err := renderBooks([]string{"-value", "CAD", "-format", "ledger"})
+	if err == nil || !strings.Contains(err.Error(), "ledger") {
+		t.Fatalf("err = %v, want a refusal naming the ledger artifact", err)
+	}
+}
