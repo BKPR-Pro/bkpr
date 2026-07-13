@@ -64,3 +64,48 @@ func TestRBCReadsAVisaCard(t *testing.T) {
 		t.Errorf("payment row = %+v", res.Transactions[1])
 	}
 }
+
+// A card has no per-row running balance; its balance owing is a summary tile. A legitimately paid-off
+// card reads $0.00, which must be recorded as a real balance (not treated as "no balance"), so the CLI
+// can reconcile the card to zero.
+func TestRBCReadsACardZeroBalance(t *testing.T) {
+	const page = `<!doctype html><html><body>
+	  <div class="mini-statement--with-tooltip current-balance">
+	    <span class="label">Current Balance:</span>
+	    <span data-role="product-summary-details-booked-balance" class="balance-currency">
+	      <rbc-currency-display>$0.00</rbc-currency-display>
+	    </span>
+	  </div>
+	  <div class="available-credit">
+	    <span class="label">Available Credit:</span>
+	    <span data-role="product-summary-details-booked-balance" class="balance-currency">
+	      <rbc-currency-display>$2,500.00</rbc-currency-display>
+	    </span>
+	  </div>
+	  <table class="rbc-transaction-list-table"><tbody></tbody></table>
+	</body></html>`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(page))
+	}))
+	defer srv.Close()
+
+	out, err := execBankScript(Bank{
+		Institution: "rbc", LoginURL: srv.URL, DefaultCurrency: "CAD",
+		Account: "Liabilities:Consulting:RBC Visa",
+	}, nil)
+	skipIfNoBrowser(t, err)
+	if err != nil {
+		t.Fatalf("reading the card balance: %v", err)
+	}
+
+	res, err := parseBankOutput(out, "Liabilities:Consulting:RBC Visa", "CAD")
+	if err != nil {
+		t.Fatalf("parsing rbc.js output %q: %v", out, err)
+	}
+	// The paid-off card's Current Balance, not its Available Credit, and recorded rather than dropped.
+	if !res.HasBalance || res.Balance.String() != "0.00 CAD" {
+		t.Errorf("balance = %s (has=%v), want 0.00 CAD", res.Balance, res.HasBalance)
+	}
+}
