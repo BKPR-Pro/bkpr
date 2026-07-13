@@ -162,6 +162,7 @@ var usageSections = []usageSection{
 		{"import", "<book.jsonl>"},
 		{"import", "<file> -format csv|ledger|jsonl"},
 		{"import", "<connector> [-relogin] [-history <days> | -from <date> [-to <date>]]"},
+		{"import", "-all [-relogin] [-history <days> | -from <date> [-to <date>]]"},
 		{"categorize", "<fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]"},
 		{"void", "<fingerprint> [-why <reason>] [-actor <name>]"},
 		{"match", "<fingerprint> (-with <fingerprint> | -break) [-actor <name>]"},
@@ -398,6 +399,14 @@ var reference = []docGroup{
       read at the same time and recorded, so reconcile can check the books against the bank. A
       transfer between two of your accounts, seen in both, is paired automatically and booked
       once (undo it with match).
+  import -all [-relogin] [-history <days> | -from <date> [-to <date>]]
+      Import every registered connector that can be read (a rentapp-style export-only connector
+      is named and skipped). Connectors that share a login are run back to back so one sign-in
+      covers the group -- every RBC account behind one browser session, both Simplii accounts
+      behind another -- and -relogin refreshes each login once, not once per account. It keeps
+      going when a connector fails (an expired session, a page that changed), reports which ones
+      did, and exits non-zero if any failed. The -history and -from/-to windows apply to them
+      all, and every line lands through the same deduped import a single connector takes.
   import <book.jsonl>
       Merge another book: the log is its own interchange format, so its events replay here in
       their order. Statement lines, invoices, bills, and exports dedupe by fingerprint, so a
@@ -722,6 +731,11 @@ func firstArg(args []string, desc string) (string, []string, error) {
 // registered connector by name is the same verb and will land here too; for now a bank statement is
 // where the money is read from, since that is the direction built first.
 func importCmd(args []string) error {
+	// `import -all` imports every registered connector, grouping shared logins; it takes no file, so it
+	// is routed before the file argument is read.
+	if len(args) > 0 && (args[0] == "-all" || args[0] == "--all") {
+		return importAllConnectors(args[1:])
+	}
 	arg, rest, err := firstArg(args, "a file to import")
 	if err != nil {
 		return err
