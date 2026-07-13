@@ -973,12 +973,19 @@ and balances, with expected-vs-actual reconciliation ("which rent has not landed
 Like every other view it is a fold over the log, so it adds a projection, not stored state.
 
 Backlog, until asked: **rules scoped to a source account**, so a rule can fire only on lines imported
-under a given `-account` and the same memo can mean different things on different cards (today a rule
-matches on the description alone, which forces a payee-only workaround when two cards share a memo);
-remembered CSV import profiles (so a file's account and columns need not be retyped each month), an
-aggregator or FDX official-API adapter if a free one appears (realistically 2027), reading the share
-quantity straight off a brokerage statement so a trade need not be typed, and out-of-tree connectors
-as installable plugins.
+under a given `-account` and the same memo can mean different things on different cards (a rule
+already matches on the description and amount, so this is for two cards that share both a memo and an
+amount); **re-homing an account's postings** (`accounts mv <from> <to>`), so a connector registered
+against the wrong account path is corrected in place rather than by a full `reset` and re-login
+(today the imported lines stay on the old path and re-import dedupes them away, so the only fix was
+resetting and re-running every connector login); **keeping connector config across `reset`** (a
+`connectors export`/`import`, or a `reset` that spares connector definitions, with `connectors list`
+showing each one's cred refs and account path), so a reset does not drop the `-cred` and
+`-account-path` that headless import needs (today it wipes the `registered` events, recoverable only
+from a pre-reset log backup); remembered CSV import profiles (so a file's account and columns need
+not be retyped each month), an aggregator or FDX official-API adapter if a free one appears
+(realistically 2027), reading the share quantity straight off a brokerage statement so a trade need
+not be typed, and out-of-tree connectors as installable plugins.
 
 ## Layout
 
