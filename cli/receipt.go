@@ -216,7 +216,7 @@ func receiptCmd(args []string) error {
 		return fmt.Errorf("-format must be text or html")
 	}
 
-	s, err := store.Open(".")
+	s, err := store.OpenReader(".")
 	if err != nil {
 		return err
 	}

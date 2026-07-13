@@ -513,7 +513,7 @@ func reportCmd(args []string) error {
 		return fmt.Errorf("-to: %w", err)
 	}
 
-	s, err := store.Open(".")
+	s, err := store.OpenReader(".")
 	if err != nil {
 		return err
 	}

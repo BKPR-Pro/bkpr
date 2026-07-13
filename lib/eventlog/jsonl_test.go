@@ -110,6 +110,81 @@ func TestJSONLRefusesCorruptionInTheMiddle(t *testing.T) {
 	}
 }
 
+// A reader takes no lock, so a query can fold the books while an import holds the log open. This is
+// the whole point: read commands must not be locked out by a running writer.
+func TestJSONLReaderReadsWhileAWriterHoldsTheLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+
+	writer, err := eventlog.OpenJSONL(path)
+	if err != nil {
+		t.Fatalf("open writer: %v", err)
+	}
+	defer writer.Close()
+	whole, err := eventlog.New(writer).Track(fact("a", "imported"))
+	if err != nil {
+		t.Fatalf("track: %v", err)
+	}
+
+	reader, err := eventlog.OpenJSONLReader(path)
+	if err != nil {
+		t.Fatalf("a reader should open a log a writer holds: %v", err)
+	}
+	defer reader.Close()
+
+	events, _ := reader.All()
+	if len(events) != 1 || events[0].ID != whole.ID {
+		t.Fatalf("reader saw %d events, want the one the writer committed", len(events))
+	}
+}
+
+// A reader may catch a writer mid-append: the last line can be torn. It drops that line in memory
+// but must never heal the file, since the log belongs to the writer that still holds it.
+func TestJSONLReaderDropsATornFinalLineWithoutHealing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	s, _ := eventlog.OpenJSONL(path)
+	whole, _ := eventlog.New(s).Track(fact("a", "imported"))
+	s.Close()
+
+	torn := `{"id":"b","collection":"transa`
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	f.WriteString(torn)
+	f.Close()
+
+	reader, err := eventlog.OpenJSONLReader(path)
+	if err != nil {
+		t.Fatalf("a torn final line should be dropped, not fatal: %v", err)
+	}
+	defer reader.Close()
+
+	events, _ := reader.All()
+	if len(events) != 1 || events[0].ID != whole.ID {
+		t.Fatalf("reader saw %d events, want only the whole one", len(events))
+	}
+
+	// The reader must not have truncated another process's file.
+	body, _ := os.ReadFile(path)
+	if !strings.Contains(string(body), torn) {
+		t.Fatalf("reader healed a file it does not own:\n%s", body)
+	}
+}
+
+// A reader is read-only: it must refuse to append rather than corrupt a log it holds no lock on.
+func TestJSONLReaderRefusesToAppend(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	s, _ := eventlog.OpenJSONL(path)
+	s.Close()
+
+	reader, err := eventlog.OpenJSONLReader(path)
+	if err != nil {
+		t.Fatalf("open reader: %v", err)
+	}
+	defer reader.Close()
+
+	if _, err := eventlog.New(reader).Track(fact("a", "imported")); err == nil {
+		t.Fatal("a reader appended to the log")
+	}
+}
+
 // One writer at a time, which is what lets AppendOnce trust its in-memory set.
 func TestJSONLLocksAgainstASecondWriter(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "log.jsonl")

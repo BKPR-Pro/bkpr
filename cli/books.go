@@ -81,7 +81,7 @@ func renderBooks(args []string) error {
 		return err
 	}
 
-	s, err := store.Open(".")
+	s, err := store.OpenReader(".")
 	if err != nil {
 		return err
 	}

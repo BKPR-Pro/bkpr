@@ -185,7 +185,7 @@ func runComplete(w io.Writer, words []string, connectors func() []string) {
 // liveConnectors reads the registered connectors' names from the nearest book, or none when there is
 // no book here or it will not open. It is the connector source `__complete` runs in earnest.
 func liveConnectors() []string {
-	s, err := store.Open(".")
+	s, err := store.OpenReader(".")
 	if err != nil {
 		return nil
 	}

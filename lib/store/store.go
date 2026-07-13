@@ -100,3 +100,22 @@ func Open(dir string) (*Store, error) {
 	}
 	return &Store{Path: path, Log: eventlog.New(jsonl), close: jsonl.Close}, nil
 }
+
+// OpenReader finds the book of record and opens its log for reading only.
+//
+// A read command is a fold over the log, not a write to it, so it takes no lock. That is what lets a
+// query run while an import holds the log open — the exclusive lock Open takes is only there to keep
+// a single writer, and enforcing it on reads locked queries out of their own books for no gain. The
+// reader can never write, so it cannot break the one-writer guarantee it declines to hold.
+func OpenReader(dir string) (*Store, error) {
+	path, err := Find(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonl, err := eventlog.OpenJSONLReader(filepath.Join(path, LogFile))
+	if err != nil {
+		return nil, err
+	}
+	return &Store{Path: path, Log: eventlog.New(jsonl), close: jsonl.Close}, nil
+}

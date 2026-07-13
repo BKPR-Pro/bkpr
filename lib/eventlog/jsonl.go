@@ -20,11 +20,12 @@ import (
 // hundred lines a year) the log is small. The file on disk is the truth; the slice is a mirror the
 // one writer keeps in step.
 type JSONL struct {
-	mu     sync.Mutex
-	file   *os.File
-	writer *bufio.Writer
-	events []Event
-	once   map[string]struct{}
+	mu       sync.Mutex
+	file     *os.File
+	writer   *bufio.Writer
+	events   []Event
+	once     map[string]struct{}
+	readOnly bool
 }
 
 // OpenJSONL opens or creates the log at path, taking an exclusive lock so a second writer cannot
@@ -48,6 +49,25 @@ func OpenJSONL(path string) (*JSONL, error) {
 	return j, nil
 }
 
+// OpenJSONLReader opens the log at path for reading only. It takes no lock, so a query can fold the
+// books while an import holds the log open for writing — the contention that would otherwise turn
+// every read into an error. The trade is that it must never write: a torn final line from an
+// in-flight append is dropped in memory rather than healed, since the file belongs to the writer
+// that still holds it, and Append/AppendOnce refuse.
+func OpenJSONLReader(path string) (*JSONL, error) {
+	file, err := os.OpenFile(path, os.O_RDONLY, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("eventlog: open %s: %w", path, err)
+	}
+
+	j := &JSONL{file: file, once: make(map[string]struct{}), readOnly: true}
+	if err := j.load(); err != nil {
+		file.Close()
+		return nil, err
+	}
+	return j, nil
+}
+
 // load folds the file into memory. A crash mid-append can leave a torn final line; since the log
 // only ever grows, only the last line can be partial, so a trailing line that will not parse is
 // dropped and the file truncated back to the last whole event. An unparseable line anywhere else
@@ -66,10 +86,13 @@ func (j *JSONL) load() error {
 			return fmt.Errorf("eventlog: read: %w", err)
 		}
 
-		// A final chunk with no newline is a torn write. Drop it and heal the file.
+		// A final chunk with no newline is a torn write. Drop it in memory; heal the file too, unless
+		// this is a read-only open, in which case the file is another process's to repair.
 		if atEOF && len(line) > 0 {
-			if terr := j.file.Truncate(offset); terr != nil {
-				return fmt.Errorf("eventlog: healing a torn final line: %w", terr)
+			if !j.readOnly {
+				if terr := j.file.Truncate(offset); terr != nil {
+					return fmt.Errorf("eventlog: healing a torn final line: %w", terr)
+				}
 			}
 			break
 		}
@@ -111,6 +134,9 @@ func (j *JSONL) AppendOnce(e Event) error {
 // was told is recorded survives a crash. The in-memory mirror is only updated once the bytes are
 // down, so a failed write leaves memory and file agreeing.
 func (j *JSONL) append(e Event) error {
+	if j.readOnly {
+		return errors.New("eventlog: log is open read-only")
+	}
 	line, err := json.Marshal(e)
 	if err != nil {
 		return err

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dallasread/bookkeeper/lib/eventlog"
 	"github.com/dallasread/bookkeeper/lib/store"
 )
 
@@ -99,6 +100,55 @@ func TestFindStopsAtTheFilesystemRoot(t *testing.T) {
 // The bug this package exists to close. A wrong working directory used to create a new, empty book
 // of record; folding it produced an empty ledger, and a shell redirect wrote that over the real
 // one. Exit status zero, no warning.
+// A read command must fold the books even while an import holds the log open for writing, so the
+// reader takes no lock and reads what the writer has committed so far.
+func TestOpenReaderReadsWhileAWriterHoldsTheLog(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := store.Init(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	writer, err := store.Open(dir)
+	if err != nil {
+		t.Fatalf("open writer: %v", err)
+	}
+	defer writer.Close()
+	if _, err := writer.Log.Track(eventlog.Event{
+		Collection: "transaction", RecordID: "a", Action: "imported", Version: 1, Actor: "human",
+	}); err != nil {
+		t.Fatalf("track: %v", err)
+	}
+
+	reader, err := store.OpenReader(dir)
+	if err != nil {
+		t.Fatalf("OpenReader while a writer holds the log: %v", err)
+	}
+	defer reader.Close()
+
+	events, err := reader.Log.All()
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("reader folded %d events, want the one the writer committed", len(events))
+	}
+}
+
+func TestOpenReaderNeverCreatesABookOfRecord(t *testing.T) {
+	dir := t.TempDir()
+
+	if _, err := store.OpenReader(dir); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("got %v, want ErrNotFound", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("opening created %v", entries)
+	}
+}
+
 func TestOpenNeverCreatesABookOfRecord(t *testing.T) {
 	dir := t.TempDir()
 

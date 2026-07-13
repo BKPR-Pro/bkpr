@@ -739,6 +739,16 @@ func open() (*eventlog.Log, func() error, error) {
 	return s.Log, s.Close, nil
 }
 
+// openReader is open for commands that only fold the log. It takes no lock, so a query still runs
+// while an import holds the log open for writing.
+func openReader() (*eventlog.Log, func() error, error) {
+	s, err := store.OpenReader(".")
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.Log, s.Close, nil
+}
+
 // firstArg peels a required positional argument off the front, before any flags.
 func firstArg(args []string, desc string) (string, []string, error) {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
@@ -1119,7 +1129,7 @@ func connectorRemove(args []string) error {
 }
 
 func connectorList(args []string) error {
-	log, closeLog, err := open()
+	log, closeLog, err := openReader()
 	if err != nil {
 		return err
 	}
@@ -1463,7 +1473,7 @@ func ruleMove(args []string) error {
 }
 
 func ruleList(args []string) error {
-	log, closeLog, err := open()
+	log, closeLog, err := openReader()
 	if err != nil {
 		return err
 	}
@@ -1824,7 +1834,7 @@ func invoiceVoid(args []string) error {
 
 // invoiceList prints the open invoices and the line that settled each, if any.
 func invoiceList(args []string) error {
-	log, closeLog, err := open()
+	log, closeLog, err := openReader()
 	if err != nil {
 		return err
 	}
@@ -1993,7 +2003,7 @@ func billVoid(args []string) error {
 
 // billList prints the open bills and the line that settled each, if any.
 func billList(args []string) error {
-	log, closeLog, err := open()
+	log, closeLog, err := openReader()
 	if err != nil {
 		return err
 	}
@@ -2045,7 +2055,7 @@ func invoiceAging(args []string) error {
 	if err != nil {
 		return err
 	}
-	log, closeLog, err := open()
+	log, closeLog, err := openReader()
 	if err != nil {
 		return err
 	}
@@ -2064,7 +2074,7 @@ func billAging(args []string) error {
 	if err != nil {
 		return err
 	}
-	log, closeLog, err := open()
+	log, closeLog, err := openReader()
 	if err != nil {
 		return err
 	}
@@ -2168,7 +2178,7 @@ func policySetOne(args []string) error {
 }
 
 func policyList(args []string) error {
-	log, closeLog, err := open()
+	log, closeLog, err := openReader()
 	if err != nil {
 		return err
 	}
@@ -2251,7 +2261,7 @@ func accountList(args []string) error {
 		return fmt.Errorf("accounts list -sort takes: amount (the default is by name)")
 	}
 
-	log, closeLog, err := open()
+	log, closeLog, err := openReader()
 	if err != nil {
 		return err
 	}
@@ -2334,7 +2344,7 @@ func reconciledCell(r books.Reconciliation) string {
 // reconcileCmd shows every account with a scraped balance against the books: what the bank last said
 // it held, what the books fold to on that date, and the difference. It writes nothing; it is a fold.
 func reconcileCmd(args []string) error {
-	log, closeLog, err := open()
+	log, closeLog, err := openReader()
 	if err != nil {
 		return err
 	}
