@@ -1,0 +1,35 @@
+<!doctype html>
+<!--
+  A stand-in for RBC's two-step sign-in, faithful to the flow the codegen recorded: a "Client Card or
+  Username" field, then Next, then a "Password" field (a masked text input RBC exposes as a textbox,
+  not input[type=password]), then Sign In. Signing in sets a session cookie and returns to the same
+  URL, which the fixture server then answers with the account page -- mimicking how a real session
+  cookie makes the account URL resolve to the account instead of the login wall. The credentials
+  entered here are supplied by the test; nothing real lives in this file.
+-->
+<html>
+  <body>
+    <form onsubmit="return false">
+      <div id="step1">
+        <label for="u">Client Card or Username</label>
+        <input id="u" type="text" />
+        <button id="next" type="button">Next</button>
+      </div>
+      <div id="step2" style="display:none">
+        <label for="p">Password</label>
+        <input id="p" type="text" />
+        <button id="signin" type="button">Sign In</button>
+      </div>
+    </form>
+    <script>
+      document.getElementById('next').addEventListener('click', function () {
+        document.getElementById('step1').style.display = 'none'
+        document.getElementById('step2').style.display = 'block'
+      })
+      document.getElementById('signin').addEventListener('click', function () {
+        document.cookie = 'bk_session=1; path=/'
+        window.location.href = '/'
+      })
+    </script>
+  </body>
+</html>

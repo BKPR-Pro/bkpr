@@ -63,6 +63,34 @@ type Bank struct {
 	SessionFile     string
 	Interactive     bool
 	Relogin         bool
+
+	// CredentialRefs names, per field (username, password, and any security answers), where that
+	// secret lives -- a reference like "op://Private/RBC/password", never the secret. SecretCmd is the
+	// command that turns a reference into its value ("op read {}" by default). They are resolved at
+	// import and the values handed to the browser script over stdin; nothing secret is stored here, on
+	// the command line, or in the environment. Absent credentials mean an interactive (headed) sign-in.
+	CredentialRefs map[string]string
+	SecretCmd      string
+
+	// SnapshotDir, when set, is where the script saves the HTML of the page it read, as
+	// <institution>.html, for diagnosing a run that read nothing or the wrong thing. The directory is
+	// made self-ignoring because the page holds real statement data. Empty disables snapshots.
+	SnapshotDir string
+
+	// AccountPath is the ordered list of link or button labels to click, after signing in, to reach
+	// this account -- for a bank whose accounts have no stable URL (RBC: "Go to RBC Business Banking",
+	// then "Current Account"). Empty means the LoginURL itself is the account, as for a CSV-like bank.
+	AccountPath []string
+
+	// Progress, when set, is called with the script's current stage (starting a browser, signing in,
+	// reading transactions) so a caller can show a live status. It is called from the goroutine that
+	// reads the script's output, synchronously, during the run.
+	Progress func(stage string)
+
+	// HistoryDays, when > 0, asks the script to read that many days back rather than the site's short
+	// default (RBC's presets stop at 30 days). The window is turned into a from/to date pair here --
+	// the script drives the site's custom date-range filter -- so "today" is decided once, in Go.
+	HistoryDays int
 }
 
 // ErrSessionExpired reports that a bank's saved session is gone and no person was present to sign in
@@ -70,8 +98,8 @@ type Bank struct {
 // a generic failure.
 var ErrSessionExpired = errors.New("bank session expired")
 
-// runBank runs an institution's browser script and returns its JSON output. It is a package variable
-// so tests can drive ReadBank without Node or a browser.
+// runBank runs an institution's browser script with the resolved credentials and returns its JSON
+// output. It is a package variable so tests can drive ReadBank without Node or a browser.
 var runBank = execBankScript
 
 // BankResult is what one account's import yields: its transactions, and -- when the site showed it --
@@ -90,7 +118,11 @@ func ReadBank(b Bank) (BankResult, error) {
 	if !SupportsBank(b.Institution) {
 		return BankResult{}, fmt.Errorf("import: no bank importer for %q; known: %v", b.Institution, Banks())
 	}
-	out, err := runBank(b)
+	creds, err := resolveCredentials(b.CredentialRefs, b.SecretCmd)
+	if err != nil {
+		return BankResult{}, err
+	}
+	out, err := runBank(b, creds)
 	if err != nil {
 		return BankResult{}, err
 	}
@@ -104,9 +136,11 @@ const exitSessionExpired = 75
 // execBankScript materializes the embedded scripts into a temp dir -- so an institution script can
 // require('./harness.js'), the shared session-and-sign-in code -- and runs its entry with Node,
 // passing the account's details in the environment. NODE_PATH is set so the script resolves the
-// customer's Playwright (global or project-local). No secret is ever put on the command line, and
-// there is none to pass: the credential is the saved session the script reads from SessionFile.
-func execBankScript(b Bank) ([]byte, error) {
+// customer's Playwright (global or project-local). Resolved credentials, when present, are handed to
+// the script as a JSON object on stdin -- never on the command line or in the environment, where
+// another process could read them -- so an unattended sign-in can type them; with none, the script
+// falls back to the saved session or a headed human sign-in.
+func execBankScript(b Bank, creds map[string]string) ([]byte, error) {
 	dir, err := os.MkdirTemp("", "bk-bank-")
 	if err != nil {
 		return nil, err
@@ -137,18 +171,57 @@ func execBankScript(b Bank) ([]byte, error) {
 		"BK_IMPORT_RELOGIN="+boolEnv(b.Relogin),
 		"NODE_PATH="+nodePath(),
 	)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
+	if b.SnapshotDir != "" {
+		cmd.Env = append(cmd.Env, "BK_IMPORT_SNAPSHOT_FILE="+filepath.Join(b.SnapshotDir, b.Institution+".html"))
+	}
+	if len(b.AccountPath) > 0 {
+		pathJSON, err := json.Marshal(b.AccountPath)
+		if err != nil {
+			return nil, err
+		}
+		cmd.Env = append(cmd.Env, "BK_IMPORT_ACCOUNT_PATH="+string(pathJSON))
+	}
+	if b.HistoryDays > 0 {
+		now := time.Now()
+		// RBC's date fields read "MMM D, YYYY" (its own "Example: Feb 17, 2020"), matching how it
+		// prints transaction dates.
+		const rbcDate = "Jan 2, 2006"
+		cmd.Env = append(cmd.Env,
+			"BK_IMPORT_HISTORY_FROM="+now.AddDate(0, 0, -b.HistoryDays).Format(rbcDate),
+			"BK_IMPORT_HISTORY_TO="+now.Format(rbcDate),
+		)
+	}
+	if creds == nil {
+		creds = map[string]string{}
+	}
+	credsJSON, err := json.Marshal(creds)
+	if err != nil {
+		return nil, err
+	}
+	cmd.Stdin = bytes.NewReader(credsJSON)
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return nil, fmt.Errorf("import %s: needs Node and Playwright to drive the browser (node not found)", b.Institution)
 		}
+		return nil, fmt.Errorf("import %s: %w", b.Institution, err)
+	}
+	// Read stderr to completion -- routing progress markers to b.Progress and keeping the rest for a
+	// failure message -- before waiting on the process, as StderrPipe requires.
+	errText := strings.TrimSpace(scanProgress(stderrPipe, b.Progress))
+	if err := cmd.Wait(); err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && ee.ExitCode() == exitSessionExpired {
 			return nil, fmt.Errorf("import %s: %w", b.Institution, ErrSessionExpired)
 		}
-		if msg := bytes.TrimSpace(stderr.Bytes()); len(msg) > 0 {
-			return nil, fmt.Errorf("import %s: %s", b.Institution, msg)
+		if errText != "" {
+			return nil, fmt.Errorf("import %s: %s", b.Institution, errText)
 		}
 		return nil, fmt.Errorf("import %s: %w", b.Institution, err)
 	}

@@ -46,6 +46,57 @@ func TestAConnectorStoresTheTokenEnvNotTheToken(t *testing.T) {
 	}
 }
 
+// A bank connector may carry credential references and a resolver command, so an unattended sign-in
+// knows where to fetch its secrets. These are references (op://...), not secrets, so they round-trip
+// through the git-committed log like any other connector field.
+func TestConnectorRoundTripsCredentialReferences(t *testing.T) {
+	log := newLog()
+	c := books.Connector{
+		Name: "rbc", Kind: "rbc", URL: "https://www.rbcroyalbank.com/", TokenEnv: "BK_RBC_SESSION",
+		Account: "Assets:Bank:RBC", Currency: "CAD",
+		SecretCmd: "op read {}",
+		Credentials: map[string]string{
+			"username": "op://Private/RBC/username",
+			"password": "op://Private/RBC/password",
+		},
+	}
+	if err := books.RegisterConnector(log, "human", c); err != nil {
+		t.Fatalf("RegisterConnector: %v", err)
+	}
+
+	got, ok, err := books.ConnectorByName(log, "rbc")
+	if err != nil || !ok {
+		t.Fatalf("ConnectorByName: ok=%v err=%v", ok, err)
+	}
+	if got.SecretCmd != "op read {}" {
+		t.Errorf("secret-cmd = %q, want the stored one", got.SecretCmd)
+	}
+	if got.Credentials["password"] != "op://Private/RBC/password" {
+		t.Errorf("credential reference lost: %v", got.Credentials)
+	}
+}
+
+// The stored references name where secrets live; a secret value must never reach the log.
+func TestConnectorStoresCredentialReferencesNotSecrets(t *testing.T) {
+	log := newLog()
+	c := books.Connector{
+		Name: "rbc", Kind: "rbc", URL: "https://www.rbcroyalbank.com/", TokenEnv: "BK_RBC_SESSION",
+		Account: "Assets:Bank:RBC", Currency: "CAD",
+		Credentials: map[string]string{"password": "op://Private/RBC/password"},
+	}
+	books.RegisterConnector(log, "human", c)
+
+	events, _ := log.All()
+	for _, e := range events {
+		if e.Collection != "connector" {
+			continue
+		}
+		if !strings.Contains(string(e.Data), "op://Private/RBC/password") {
+			t.Errorf("the credential reference should be stored: %s", e.Data)
+		}
+	}
+}
+
 // Register is an upsert under the name, so re-registering changes the connector.
 func TestReRegisteringAConnectorUpdatesIt(t *testing.T) {
 	log := newLog()

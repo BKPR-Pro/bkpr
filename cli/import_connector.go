@@ -26,8 +26,20 @@ type connectorFetch func(books.Connector) (fetchResult, error)
 // kept, whether a person is present to sign in again, and whether to force a fresh sign-in.
 type fetchOpts struct {
 	sessionDir  string
+	snapshotDir string
 	interactive bool
 	relogin     bool
+	history     int                // days of history to read this run; 0 means use the connector's default
+	progress    func(stage string) // reports the browser's current stage for a live status; may be nil
+}
+
+// historyDays picks the history window: an import-time -history flag overrides the connector's stored
+// default, so a one-time backfill needs no re-registering.
+func historyDays(c books.Connector, o fetchOpts) int {
+	if o.history > 0 {
+		return o.history
+	}
+	return c.HistoryDays
 }
 
 // fetcherFor maps a connector kind to how its transactions are read. A bank (rbc, simplii,
@@ -49,6 +61,12 @@ func fetcherFor(kind string, o fetchOpts) (connectorFetch, error) {
 				SessionFile:     filepath.Join(o.sessionDir, c.TokenEnv+".json"),
 				Interactive:     o.interactive,
 				Relogin:         o.relogin,
+				CredentialRefs:  c.Credentials,
+				SecretCmd:       c.SecretCmd,
+				SnapshotDir:     o.snapshotDir,
+				AccountPath:     c.AccountPath,
+				HistoryDays:     historyDays(c, o),
+				Progress:        o.progress,
 			})
 			if err != nil {
 				return fetchResult{}, err

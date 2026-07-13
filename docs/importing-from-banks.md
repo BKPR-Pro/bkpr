@@ -51,6 +51,15 @@ stubbed direction.
   connectors that share a login (every RBC account) share one session by sharing a token-env. The
   session lives outside the book of record (machine-local, under the OS config dir), because it is a
   live credential, not committed history.
+- **When a session must be refreshed, credentials are referenced, never stored.** For an unattended
+  refresh (cron, an agent) the person can register where each login field lives instead of typing it:
+  `-cred username=op://Private/RBC/username -cred password=op://…`. The connector stores only the
+  *reference*, and `-secret-cmd` (default `op read {}`) is the command that resolves it — so 1Password
+  works out of the box and any store with a CLI (macOS Keychain, `pass`) plugs in by naming its
+  command. References are safe in the git-committed log; the secret is resolved only at sign-in
+  (`resolveCredentials`, `lib/adapters/source/secret.go`) and handed to the browser script on **stdin**
+  — never on the command line or in the environment, where another process could read it. With no
+  `-cred`, sign-in stays interactive (headed, a person clears 2FA).
 - **Sign-in is folded into import, and self-heals.** There is no separate `login` verb. `import`
   tries the saved session headless; if it lands on the sign-in wall, and a person is present (a real
   terminal, detected with isatty), it opens a headed browser to sign in again and saves the fresh
@@ -84,17 +93,47 @@ The Go plumbing and the harness are **done** (`lib/adapters/source`):
   one is present) is implemented in `scripts/harness.js` and verified end to end against a local
   fake-bank fixture with a real browser.
 
-What remains is **per institution**: pinning the three selectors in each script — `isLoginWall`,
-`signIn`, and `readRows` — to the real site. Each is marked `TODO(<institution>)` and the fastest way
-to capture them is `npx playwright codegen <bank url>`: sign in, open an account, and read the
-selectors it records into the three functions.
+**RBC is pinned** (`scripts/rbc.js`) against its real account page -- an RBC business Current Account.
+`isLoginWall` keys on the client-card / username field; `signIn` waits for an authenticated landmark
+(a transactions grid, an accounts-summary link, or a sign-out control); `readRows` reads the desktop
+transaction grid (`rbc-transaction-list-transaction-new`), turning a withdrawal/deposit into a signed
+amount and "Jul 11, 2026" into 2026-07-11; `readBalance` reads the newest running balance. It is
+verified end to end through a headless browser against a fixture that mirrors RBC's DOM
+(`TestRBCScriptReadsAccountPage`, `TestRBCScriptDetectsLoginWall`).
+
+RBC's login is not a plain URL: its accounts have no stable address (the SSO deep link is one-time),
+so an account is reached by **signing in and clicking through a menu**. `-url` is the landing page,
+whose sign-in form sits behind a "Sign in to RBC Online" button; `isLoginWall` keys on that button or
+the username field, `signIn` opens the form and types the two-step credentials, and the harness then
+walks the connector's **account path** -- an ordered list of link labels (`-account-path "Go to RBC
+Business Banking" -account-path "Current Account"`) -- to the account before `readRows`. Several RBC
+accounts thus share one login and one `-url`, differing only by their path. The whole flow (button ->
+two-step login -> menu -> account) is verified end to end through a browser
+(`TestRBCSignsInAndWalksTheAccountPath`), as is the plain unattended sign-in
+(`TestRBCSignsInWithCredentials`). Every run also drops a snapshot of the page it read to
+`.bkpr/snapshots/<institution>.html` (self-ignoring), so a run that reads nothing is diagnosable.
+
+What remains for RBC is the **2-step-verification page**: with 2-step set to security questions, the
+stored answers are typed on that page, but its selectors are not captured yet, so a run that reaches
+it fails loudly (`waitSignedIn`) rather than hanging. Switch RBC's 2-step to security questions,
+capture that page, and pin it.
+
+What remains for RBC otherwise is the account types beyond a Current Account: a **card or loan** shows
+its balance owing, which `readBalance` must negate to the books' sign, and RBC may label its columns
+differently than chequing's Withdrawals/Deposits -- capture one and extend the same way. **Simplii**
+and **PC Financial** are still stubs: pin their three selectors (each marked `TODO(<institution>)`)
+the same way, fastest via `npx playwright codegen <bank url>` -- sign in, open an account, and read
+the selectors into the three functions.
 
 ## What to build next
 
-1. Pin one institution's three selectors against its real site (start with RBC — one login reaches
-   all five of its accounts). Until then that import fails loudly, and a manual CSV export is the way
-   in.
-2. Or, if a free token flow appears, an `fdx`/aggregator adapter as another `fetcherFor` case,
+1. Pin RBC's 2-step-verification (security-question) page so an unattended refresh completes without a
+   person, finishing the full auto-login.
+2. Extend RBC to a card/loan account: verify the transactions layout and negate `readBalance` for a
+   balance owing, so the books agree.
+3. Pin Simplii and PC Financial the way RBC was pinned. Until then those imports fail loudly, and a
+   manual CSV export is the way in.
+4. Or, if a free token flow appears, an `fdx`/aggregator adapter as another `fetcherFor` case,
    leaving the seam and the rest of the tool unchanged.
 
 ## Watch

@@ -142,7 +142,7 @@ var usageSections = []usageSection{
 	{"SETUP", []usageLine{
 		{"init", "[dir]"},
 		{"reset", "[-confirm]"},
-		{"connectors register", "<name> -kind <rentapp|rbc|simplii|pcfinancial> -url <url> -token-env <ENV> -account <a> [-currency <c>]"},
+		{"connectors register", "<name> -kind <rentapp|rbc|simplii|pcfinancial> -url <url> -token-env <ENV> -account <a> [-currency <c>] [-cred field=ref ...] [-secret-cmd <cmd>] [-account-path <label> ...]"},
 		{"connectors rm", "<name>"},
 		{"connectors list", ""},
 	}},
@@ -316,13 +316,21 @@ var reference = []docGroup{
       write is a pure append, so git restore .bkpr/log.jsonl rolls the book back to any
       committed point. After a reset the old log is recoverable only from git.
 `},
-		{[]string{"connectors"}, `  connectors register <name> -kind <kind> -url <url> -token-env <ENV> -account <a> [-currency <c>]
+		{[]string{"connectors"}, `  connectors register <name> -kind <kind> -url <url> -token-env <ENV> -account <a> [-currency <c>] [-cred field=ref ...] [-secret-cmd <cmd>]
       Register a live connector. Kinds: rentapp (export), and the banks imported from --
       rbc, simplii, pcfinancial. No secret is stored: -token-env names where the credential
       lives, read when the connector is used. For a bank that credential is a saved browser
       session rather than a token, so connectors that share a login share a -token-env and
-      thus one sign-in (every RBC account, say). A connector is bidirectional in principle:
-      export writes to it, import reads from it. Registering one does not itself move data.
+      thus one sign-in (every RBC account, say). To sign in unattended, -cred names where each
+      login field lives -- a reference, not the secret, e.g. -cred username=op://Private/RBC/username
+      -cred password=op://Private/RBC/password -- and -secret-cmd is the command that resolves a
+      reference ({} is the reference; default "op read {}", so 1Password works out of the box, and
+      any store with a CLI can be named instead). References are safe to commit; the secret is
+      fetched only at sign-in and never written down. When an account has no stable URL and is reached
+      by menu (RBC), -account-path names each link to click after sign-in, in order, e.g.
+      -account-path "Go to RBC Business Banking" -account-path "Current Account"; several accounts
+      then share one login and one -url, differing only by their path. A connector is bidirectional in
+      principle: export writes to it, import reads from it. Registering one does not itself move data.
   connectors rm <name>            Forget a connector.
   connectors list                 Show the registered connectors.
 `},
@@ -726,6 +734,7 @@ func importCmd(args []string) error {
 	}
 	fs := flag.NewFlagSet("import (connector)", flag.ExitOnError)
 	relogin := fs.Bool("relogin", false, "ignore any saved sign-in and sign in fresh")
+	history := fs.Int("history", 0, "days of history to read this run (overrides the connector default; e.g. 120 for ~4 months)")
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
@@ -735,8 +744,10 @@ func importCmd(args []string) error {
 	}
 	return importConnector(s.Log, c, fetchOpts{
 		sessionDir:  dir,
+		snapshotDir: filepath.Join(s.Path, "snapshots"),
 		interactive: interactiveTerminal(),
 		relogin:     *relogin,
+		history:     *history,
 	})
 }
 
@@ -800,6 +811,12 @@ func importFrom(log *eventlog.Log, label string, src Source) error {
 // every file takes, deduped by fingerprint. A bank whose session has expired with no one present to
 // sign in again is reported as an actionable hint rather than a raw error.
 func importConnector(log *eventlog.Log, c books.Connector, o fetchOpts) error {
+	// A live status while the browser works, so the import does not look like a hang. It stops the
+	// moment the fetch returns, before any summary prints, and is silent off a terminal.
+	sp := newSpinner(os.Stderr, isTerminal(os.Stderr), "connecting to "+c.Name)
+	defer sp.finish()
+	o.progress = sp.set
+
 	fetch, err := fetcherFor(c.Kind, o)
 	if err != nil {
 		return err
@@ -808,6 +825,7 @@ func importConnector(log *eventlog.Log, c books.Connector, o fetchOpts) error {
 	var got fetchResult
 	err = importFrom(log, label, func() ([]model.Transaction, error) {
 		r, ferr := fetch(c)
+		sp.finish() // browser work done; stop before importFrom prints its summary
 		got = r
 		return r.txs, ferr
 	})
@@ -976,15 +994,27 @@ func connectorRegister(args []string) error {
 	}
 	fs := flag.NewFlagSet("connectors register", flag.ExitOnError)
 	var c books.Connector
+	creds := credFlag{}
 	fs.StringVar(&c.Kind, "kind", "rentapp", "which connector this is")
 	fs.StringVar(&c.URL, "url", "", "the connector's base URL")
 	fs.StringVar(&c.TokenEnv, "token-env", "", "the environment variable holding its bearer token")
 	fs.StringVar(&c.Account, "account", "", "the ledger account its transactions land in")
 	fs.StringVar(&c.Currency, "currency", "CAD", "the currency of its transactions")
+	fs.Var(&creds, "cred", "a credential reference field=ref (repeatable), e.g. password=op://Private/RBC/password")
+	fs.StringVar(&c.SecretCmd, "secret-cmd", "", "command resolving a credential reference; {} is the reference (default: op read {})")
+	var path pathFlag
+	fs.Var(&path, "account-path", "a link/button to click after sign-in to reach the account (repeatable, in order), e.g. -account-path \"Current Account\"")
+	fs.IntVar(&c.HistoryDays, "history", 0, "days of history to read (0 = the site's short default; e.g. 120 for ~4 months)")
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
 	c.Name = name
+	if len(creds) > 0 {
+		c.Credentials = creds
+	}
+	if len(path) > 0 {
+		c.AccountPath = path
+	}
 
 	log, closeLog, err := open()
 	if err != nil {
@@ -1076,6 +1106,42 @@ func (m *metaFlag) Set(s string) error {
 		*m = metaFlag{}
 	}
 	(*m)[key] = s[i+1:]
+	return nil
+}
+
+// credFlag collects repeated -cred field=ref pairs into a connector's credential references. The
+// value is a secret reference (op://..., a Keychain name), kept verbatim; it is never the secret.
+type credFlag map[string]string
+
+func (c credFlag) String() string { return "" }
+
+func (c *credFlag) Set(s string) error {
+	i := strings.Index(s, "=")
+	if i < 0 {
+		return fmt.Errorf("credential %q must be field=reference", s)
+	}
+	field := strings.TrimSpace(s[:i])
+	if field == "" {
+		return fmt.Errorf("credential %q has an empty field name", s)
+	}
+	if *c == nil {
+		*c = credFlag{}
+	}
+	(*c)[field] = strings.TrimSpace(s[i+1:])
+	return nil
+}
+
+// pathFlag collects repeated -account-path labels, in order, into a connector's account path -- the
+// menu clicks that reach an account with no stable URL.
+type pathFlag []string
+
+func (p pathFlag) String() string { return "" }
+
+func (p *pathFlag) Set(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return fmt.Errorf("an account-path step cannot be empty")
+	}
+	*p = append(*p, s)
 	return nil
 }
 

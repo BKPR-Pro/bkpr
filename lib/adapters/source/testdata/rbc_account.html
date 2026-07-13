@@ -1,0 +1,104 @@
+<!doctype html>
+<!--
+  A stand-in for an RBC business "Current Account" page, mirroring the real DOM that
+  `scripts/rbc.js` reads: the `rbc-transaction-list-table` grid RBC renders, with the desktop
+  variant's `rbc-transaction-list-transaction-new` rows. The structure (class names, the ISO date
+  in the cell id, the "Mon D, YYYY" visible date, withdrawals already carrying a minus sign, the
+  multi-`div` description, the running Balance column) is copied faithfully from a captured page; the
+  *content* is fabricated -- no real merchants, people, amounts, or balances live here.
+-->
+<html>
+  <body>
+    <table role="grid" aria-labelledby="txTableLabel" aria-readonly="true" class="rbc-transaction-list-table">
+      <thead class="rbc-transaction-list-header-new bottom-border">
+        <tr>
+          <th id="date" role="columnheader" class="date-format" aria-sort="descending">
+            <button class="rbc-transaction-list-sort"><span> Date</span></button>
+          </th>
+          <th id="wd" role="columnheader" class="description description-format"> Description </th>
+          <th id="wd" role="columnheader" class="amount-format"> Withdrawals </th>
+          <th id="dep" role="columnheader" class="amount-format"> Deposits </th>
+          <th id="bal" role="columnheader" class="amount-format"> Balance </th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- A withdrawal (already negative) that carries the day's running balance. -->
+        <tr data-role="transaction-list-table-transaction" class="rbc-transaction-list-transaction-new">
+          <td headers="date" class="date-column-padding" id="2026-07-11"> Jul 11, 2026 </td>
+          <td class="rbc-transaction-list-desc description-column-padding" id="descId-" headers="2026-07-11">
+            <div> Online Banking payment </div><div>  </div><div>  </div><div>  </div>
+          </td>
+          <td class="rbc-transaction-list-withdraw" headers="2026-07-11 descId- wd"><span>-$150.00</span></td>
+          <td class="rbc-transaction-list-blank"></td>
+          <td class="rbc-transaction-list-balance" headers="2026-07-11"> $1,000.00 </td>
+          <td class="rbc-transaction-list-blank"></td>
+        </tr>
+        <!-- A two-line description; the merchant sits in a second div. No running balance on this row. -->
+        <tr data-role="transaction-list-table-transaction" class="rbc-transaction-list-transaction-new">
+          <td headers="date" class="date-column-padding" id="2026-07-10"> Jul 10, 2026 </td>
+          <td class="rbc-transaction-list-desc description-column-padding" id="descId-" headers="2026-07-10">
+            <div> Contactless Interac purchase - 0001 B001 </div><div> TEST CAFE </div><div>  </div><div>  </div>
+          </td>
+          <td class="rbc-transaction-list-withdraw" headers="2026-07-10 descId- wd"><span>-$12.34</span></td>
+          <td class="rbc-transaction-list-blank"></td>
+          <td class="rbc-transaction-list-balance" headers="2026-07-10">  </td>
+          <td class="rbc-transaction-list-blank"></td>
+        </tr>
+        <!-- A deposit (positive) with a three-line description, and the withdraw cell absent. -->
+        <tr tabindex="0" data-role="transaction-list-table-transaction" class="rbc-transaction-list-transaction-new interac-row">
+          <td headers="date" class="date-column-padding" id="2026-07-10"> Jul 10, 2026 </td>
+          <td class="rbc-transaction-list-desc description-column-padding" id="descId-" headers="2026-07-10">
+            <div> e-Transfer - Autodeposit </div><div> TEST PERSON </div><div> ref123 </div><div>  </div>
+          </td>
+          <td class="rbc-transaction-list-blank"></td>
+          <td class="rbc-transaction-list-deposit" headers="2026-07-10 descId- dep"><span>$500.00</span></td>
+          <td class="rbc-transaction-list-balance" headers="2026-07-10">  </td>
+          <td class="rbc-transaction-chevron"></td>
+        </tr>
+        <!-- A deposit whose amount carries a thousands separator. -->
+        <tr data-role="transaction-list-table-transaction" class="rbc-transaction-list-transaction-new">
+          <td headers="date" class="date-column-padding" id="2026-07-09"> Jul 9, 2026 </td>
+          <td class="rbc-transaction-list-desc description-column-padding" id="descId-" headers="2026-07-09">
+            <div> Misc Payment </div><div> TEST CORP </div><div>  </div><div>  </div>
+          </td>
+          <td class="rbc-transaction-list-blank"></td>
+          <td class="rbc-transaction-list-deposit" headers="2026-07-09 descId- dep"><span>$1,234.56</span></td>
+          <td class="rbc-transaction-list-balance" headers="2026-07-09">  </td>
+          <td class="rbc-transaction-list-blank"></td>
+        </tr>
+        <!-- A single-line description and a month that sorts differently than the day-of-month digit. -->
+        <tr data-role="transaction-list-table-transaction" class="rbc-transaction-list-transaction-new">
+          <td headers="date" class="date-column-padding" id="2026-06-30"> Jun 30, 2026 </td>
+          <td class="rbc-transaction-list-desc description-column-padding" id="descId-" headers="2026-06-30">
+            <div> Monthly fee </div><div>  </div><div>  </div><div>  </div>
+          </td>
+          <td class="rbc-transaction-list-withdraw" headers="2026-06-30 descId- wd"><span>-$6.00</span></td>
+          <td class="rbc-transaction-list-blank"></td>
+          <td class="rbc-transaction-list-balance" headers="2026-06-30">  </td>
+          <td class="rbc-transaction-list-blank"></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!--
+      The responsive/print variant RBC also renders in the DOM at the same time, with
+      `rbc-transaction-list-transaction-mob` rows and interleaved date-header rows. The reader must
+      pick the desktop `-new` rows only; if it selected across both tables every transaction would be
+      counted twice. One `-mob` row is included here so the test would catch that regression.
+    -->
+    <table role="grid" class="rbc-transaction-list-table">
+      <thead class="rbc-transaction-list-header"><tr><th id="date" role="columnheader"> Date </th></tr></thead>
+      <tbody>
+        <tr data-role="transaction-list-table-header" class="rbc-transaction-list-date">
+          <th headers="date" id="2026-07-11"> Jul 11, 2026 </th>
+          <td class="rbc-transaction-list-balance" headers="bal 2026-07-11"> $1,000.00 </td>
+        </tr>
+        <tr data-role="transaction-list-table-transaction" class="rbc-transaction-list-transaction-mob">
+          <th class="rbc-transaction-list-desc" id="descId-" headers="2026-07-11"><div> Online Banking payment </div></th>
+          <td class="rbc-transaction-list-withdraw" headers="2026-07-11 descId- wd"><span>-$150.00</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
+</html>

@@ -10,7 +10,7 @@ import (
 func stubBank(t *testing.T, out []byte, err error) {
 	t.Helper()
 	prev := runBank
-	runBank = func(Bank) ([]byte, error) { return out, err }
+	runBank = func(Bank, map[string]string) ([]byte, error) { return out, err }
 	t.Cleanup(func() { runBank = prev })
 }
 
@@ -95,7 +95,7 @@ func TestReadBankUnknownInstitution(t *testing.T) {
 func TestScriptsFailLoudlyWithoutABrowser(t *testing.T) {
 	// An unreachable URL so the run fails quickly even where Playwright happens to be installed, and
 	// non-interactive so it never tries to open a browser.
-	_, err := execBankScript(Bank{Institution: "rbc", LoginURL: "http://127.0.0.1:0/"})
+	_, err := execBankScript(Bank{Institution: "rbc", LoginURL: "http://127.0.0.1:0/"}, nil)
 	if err != nil && strings.Contains(err.Error(), "node not found") {
 		t.Skip("Node not installed")
 	}

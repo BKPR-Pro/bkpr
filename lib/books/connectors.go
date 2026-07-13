@@ -29,6 +29,24 @@ type Connector struct {
 	TokenEnv string `json:"token_env"` // env var holding its secret; never the secret itself
 	Account  string `json:"account"`   // ledger account its transactions land in
 	Currency string `json:"currency"`  // default commodity for a line that carries none of its own
+
+	// Credentials names, per field (username, password, security answers), where that secret lives --
+	// a reference like "op://Private/RBC/password", never the secret. SecretCmd is the command that
+	// turns a reference into its value ("op read {}" by default). Both are safe to commit: they say
+	// where the secret is and how to fetch it, not what it is. Present only for a bank signing in
+	// unattended; absent, sign-in is interactive.
+	Credentials map[string]string `json:"credentials,omitempty"`
+	SecretCmd   string            `json:"secret_cmd,omitempty"`
+
+	// AccountPath is the ordered list of link/button labels to click after signing in to reach this
+	// account, for a bank whose accounts have no stable URL (RBC). Several connectors share one login
+	// and differ only by this path. Empty means the URL itself is the account.
+	AccountPath []string `json:"account_path,omitempty"`
+
+	// HistoryDays, when > 0, reads that many days back instead of the site's short default (RBC's
+	// presets stop at 30 days), by driving its custom date-range filter. Imports dedupe by
+	// fingerprint, so a wider window backfills without duplicating.
+	HistoryDays int `json:"history_days,omitempty"`
 }
 
 // RegisterConnector registers a connector, or updates one under the same name. The token is
