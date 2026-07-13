@@ -28,8 +28,16 @@ func serveFixture(t *testing.T, name string) string {
 // the page; any other error is a real failure.
 func skipIfNoBrowser(t *testing.T, err error) {
 	t.Helper()
-	if err != nil && (strings.Contains(err.Error(), "node not found") || strings.Contains(err.Error(), "playwright")) {
-		t.Skipf("browser tooling unavailable: %v", err)
+	if err == nil {
+		return
+	}
+	msg := err.Error()
+	// The stealth path (Simplii) needs patchright and a real Chrome; skip where either is absent, the
+	// same way we skip when node or Playwright's browser is missing.
+	for _, want := range []string{"node not found", "playwright", "patchright", "chrome", "Chromium", "channel"} {
+		if strings.Contains(msg, want) {
+			t.Skipf("browser tooling unavailable: %v", err)
+		}
 	}
 }
 

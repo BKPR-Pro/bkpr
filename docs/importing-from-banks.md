@@ -70,6 +70,14 @@ stubbed direction.
   the bank importer runs a per-institution Node script via `os/exec` and reads its JSON output.
   The Go binary stays stdlib-only; the runtime dependency (Node + Playwright) is the scraper's, and
   only when you actually scrape. `NODE_PATH` is set so the script finds the customer's Playwright.
+- **A bot-walled bank gets a stealth browser.** Simplii (CIBC's Akamai Bot Manager) blocks the login
+  call for any browser Playwright launches, whatever the user agent or flags — it scores the CDP
+  automation leak. A profile that sets `stealth: true` takes the harness's `runStealth` path instead:
+  real Chrome driven through **patchright** (a patched Playwright that closes that leak) in a
+  persistent profile, so the "device" is remembered and the reads look ordinary. It needs `patchright`
+  installed alongside Playwright (`npm i -g patchright`). The persistent profile stands in for the
+  saved session; the one-time SMS code is entered by the person in the headed window on first sign-in,
+  then the trusted device skips it.
 - **One harness, thin per-institution scripts.** `scripts/harness.js` owns everything common —
   loading the session, the headed re-sign-in, saving the session, printing JSON. Each institution
   script (`rbc.js`, `simplii.js`, `pcfinancial.js`) is just a profile: the three selectors that
@@ -121,9 +129,11 @@ capture that page, and pin it.
 What remains for RBC otherwise is the account types beyond a Current Account: a **card or loan** shows
 its balance owing, which `readBalance` must negate to the books' sign, and RBC may label its columns
 differently than chequing's Withdrawals/Deposits -- capture one and extend the same way. **Simplii**
-and **PC Financial** are still stubs: pin their three selectors (each marked `TODO(<institution>)`)
-the same way, fastest via `npx playwright codegen <bank url>` -- sign in, open an account, and read
-the selectors into the three functions.
+is pinned: its chequing and line of credit are read through the stealth path (see above), one reader
+for both since Funds in/out already matches the books' sign for the asset and the (negatively shown)
+liability alike. **PC Financial** is still a stub: pin its selectors (marked `TODO(pcfinancial)`) the
+same way, fastest via `npx playwright codegen <bank url>` -- sign in, open an account, read the
+selectors into the functions.
 
 ## What to build next
 
@@ -131,7 +141,7 @@ the selectors into the three functions.
    person, finishing the full auto-login.
 2. Extend RBC to a card/loan account: verify the transactions layout and negate `readBalance` for a
    balance owing, so the books agree.
-3. Pin Simplii and PC Financial the way RBC was pinned. Until then those imports fail loudly, and a
+3. Pin PC Financial the way RBC and Simplii were pinned. Until then its import fails loudly, and a
    manual CSV export is the way in.
 4. Or, if a free token flow appears, an `fdx`/aggregator adapter as another `fetcherFor` case,
    leaving the seam and the rest of the tool unchanged.
