@@ -157,7 +157,7 @@ var usageSections = []usageSection{
 		{"import", "<file.ledger>"},
 		{"import", "<book.jsonl>"},
 		{"import", "<file> -format csv|ledger|jsonl"},
-		{"import", "<connector> [-relogin]"},
+		{"import", "<connector> [-relogin] [-history <days> | -from <date> [-to <date>]]"},
 		{"categorize", "<fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]"},
 		{"void", "<fingerprint> [-why <reason>] [-actor <name>]"},
 		{"match", "<fingerprint> (-with <fingerprint> | -break) [-actor <name>]"},
@@ -370,14 +370,19 @@ var reference = []docGroup{
       deduped import every file takes.
       -date-format is a Go layout: the reference date Jan 2, 2006 written the way the column
       writes dates, so MM/DD/YYYY is -date-format 01/02/2006 (the default is 2006-01-02).
-  import <connector> [-relogin]
+  import <connector> [-relogin] [-history <days> | -from <date> [-to <date>]]
       Import a bank connector's lines. It reuses a saved browser session; when that has
       expired it opens a browser for you to sign in again (your password and 2FA are entered
       there and never stored -- only the resulting session is kept). With no terminal present
       it does not open a browser, it fails with a message to sign in from one. -relogin signs
-      in fresh, ignoring any saved session. The account's balance is read at the same time and
-      recorded, so reconcile can check the books against the bank. A transfer between two of
-      your accounts, seen in both, is paired automatically and booked once (undo it with match).
+      in fresh, ignoring any saved session. By default it reads the account's short recent
+      window; -history <days> reads that many days back (a relative window, good for a routine
+      pull), and -from/-to read an explicit range for backfilling a known period (-to defaults
+      to today, and -from overrides -history). Dates are written as 2026-02-01 or "Feb 1, 2026".
+      Imports dedupe by fingerprint, so a wider window never duplicates. The account's balance is
+      read at the same time and recorded, so reconcile can check the books against the bank. A
+      transfer between two of your accounts, seen in both, is paired automatically and booked
+      once (undo it with match).
   import <book.jsonl>
       Merge another book: the log is its own interchange format, so its events replay here in
       their order. Statement lines, invoices, bills, and exports dedupe by fingerprint, so a
@@ -741,8 +746,14 @@ func importCmd(args []string) error {
 	}
 	fs := flag.NewFlagSet("import (connector)", flag.ExitOnError)
 	relogin := fs.Bool("relogin", false, "ignore any saved sign-in and sign in fresh")
-	history := fs.Int("history", 0, "days of history to read this run (overrides the connector default; e.g. 120 for ~4 months)")
+	history := fs.Int("history", 0, "days of history to read this run (relative; overrides the connector default)")
+	fromFlag := fs.String("from", "", "backfill start date, e.g. 2026-02-01 or \"Feb 1, 2026\" (overrides -history)")
+	toFlag := fs.String("to", "", "backfill end date; defaults to today when -from is given")
 	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	from, to, err := backfillRange(*fromFlag, *toFlag)
+	if err != nil {
 		return err
 	}
 	dir, err := sessionsDir()
@@ -755,6 +766,8 @@ func importCmd(args []string) error {
 		interactive: interactiveTerminal(),
 		relogin:     *relogin,
 		history:     *history,
+		from:        from,
+		to:          to,
 	})
 }
 
@@ -845,10 +858,11 @@ func importConnector(log *eventlog.Log, c books.Connector, o fetchOpts) error {
 	// The scraped balance anchors reconciliation: record what the bank showed, as of now, so the next
 	// `reconcile` can check the books against it to the penny.
 	if got.hasBalance {
-		if err := books.AssertBalance(log, label, c.Account, time.Now(), got.balance); err != nil {
+		bal := reconcileBalance(c.Account, got.balance)
+		if err := books.AssertBalance(log, label, c.Account, time.Now(), bal); err != nil {
 			return err
 		}
-		fmt.Printf("bank balance recorded: %s reconciles %s\n", got.balance, c.Account)
+		fmt.Printf("bank balance recorded: %s reconciles %s\n", bal, c.Account)
 	}
 	return nil
 }

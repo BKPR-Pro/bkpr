@@ -3,19 +3,22 @@ package source
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
-// With a history window, rbc.js drives RBC's custom date-range filter: it fills the from/to date
-// fields (#rbc-dp-0 / #rbc-dp-1), runs Search, and pages through "Show More" so the whole range loads.
-// Here the fixture shows only recent rows until a from-date is entered and Search is clicked, then a
-// "Show More" reveals the rest -- so the test passes only if all three happened.
+// With a history window, rbc.js drives RBC's date-range filter: open the Filter panel (which reveals
+// the date fields), type the from and to dates, Apply, then page "Show More" until it is gone. The
+// fixture reveals the older transaction only after that whole sequence, and Apply proceeds only once
+// both date fields hold a value -- so the test passes only if the panel was opened, both fields were
+// filled, Apply ran, and Show More paged the rest in.
 func TestRBCReadsAWiderHistoryWindow(t *testing.T) {
 	const page = `<!doctype html><html><body>
-	  <label>From</label><input id="rbc-dp-0" type="text" placeholder="Select...">
-	  <label>To</label><input id="rbc-dp-1" type="text" placeholder="Select...">
-	  <button id="search" type="submit">Search</button>
+	  <button id="filter" type="button">Filter</button>
+	  <div id="panel" style="display:none">
+	    <input id="rbc-dp-0" type="text" placeholder="Select...">
+	    <input id="rbc-dp-1" type="text" placeholder="Select...">
+	    <button id="apply" type="button" aria-label="Apply">Apply</button>
+	  </div>
 	  <button id="more" type="button" style="display:none">Show More</button>
 	  <table class="rbc-transaction-list-table"><tbody id="tb">
 	    <tr data-role="transaction-list-table-transaction" class="rbc-transaction-list-transaction-new">
@@ -26,20 +29,23 @@ func TestRBCReadsAWiderHistoryWindow(t *testing.T) {
 	    </tr>
 	  </tbody></table>
 	  <script>
-	    // Search with a from-date reveals a Show More button.
-	    document.getElementById('search').addEventListener('click', function () {
-	      if (document.getElementById('rbc-dp-0').value.trim() !== '') {
-	        document.getElementById('more').style.display = 'inline'
-	      }
+	    var applied = false
+	    document.getElementById('filter').addEventListener('click', function () {
+	      document.getElementById('panel').style.display = 'block' })
+	    document.getElementById('apply').addEventListener('click', function () {
+	      var f = document.getElementById('rbc-dp-0').value.trim()
+	      var t = document.getElementById('rbc-dp-1').value.trim()
+	      if (f !== '' && t !== '') { applied = true; document.getElementById('more').style.display = 'inline' }
 	    })
-	    // Show More appends an older transaction, then hides itself.
 	    document.getElementById('more').addEventListener('click', function () {
-	      document.getElementById('tb').insertAdjacentHTML('beforeend',
-	        '<tr data-role="transaction-list-table-transaction" class="rbc-transaction-list-transaction-new">' +
-	        '<td headers="date" id="2026-04-02"> Apr 2, 2026 </td>' +
-	        '<td class="rbc-transaction-list-desc"><div> Older </div></td>' +
-	        '<td class="rbc-transaction-list-deposit"><span>$2.00</span></td>' +
-	        '<td class="rbc-transaction-list-balance"> </td></tr>')
+	      if (applied) {
+	        document.getElementById('tb').insertAdjacentHTML('beforeend',
+	          '<tr data-role="transaction-list-table-transaction" class="rbc-transaction-list-transaction-new">' +
+	          '<td headers="date" id="2026-04-02"> Apr 2, 2026 </td>' +
+	          '<td class="rbc-transaction-list-desc"><div> Older </div></td>' +
+	          '<td class="rbc-transaction-list-deposit"><span>$2.00</span></td>' +
+	          '<td class="rbc-transaction-list-balance"> </td></tr>')
+	      }
 	      this.style.display = 'none'
 	    })
 	  </script>
@@ -52,7 +58,7 @@ func TestRBCReadsAWiderHistoryWindow(t *testing.T) {
 	defer srv.Close()
 
 	out, err := execBankScript(Bank{
-		Institution: "rbc", LoginURL: srv.URL, DefaultCurrency: "CAD", HistoryDays: 120,
+		Institution: "rbc", LoginURL: srv.URL, DefaultCurrency: "CAD", HistoryDays: 100,
 	}, nil)
 	skipIfNoBrowser(t, err)
 	if err != nil {
@@ -63,12 +69,68 @@ func TestRBCReadsAWiderHistoryWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing rbc.js output %q: %v", out, err)
 	}
-	// Two rows only if the from-date was entered, Search clicked, and Show More paged in the older one.
 	if len(res.Transactions) != 2 {
-		t.Fatalf("got %d transactions, want 2 (recent + older via Show More): %q", len(res.Transactions), out)
+		t.Fatalf("got %d transactions, want 2 (recent + older via the range filter): %q", len(res.Transactions), out)
 	}
-	got := res.Transactions[0].Date.Format("2006-01-02") + "," + res.Transactions[1].Date.Format("2006-01-02")
-	if !strings.Contains(got, "2026-04-02") {
-		t.Errorf("older transaction not loaded; dates = %s", got)
+	if got := res.Transactions[1].Date.Format("2006-01-02"); got != "2026-04-02" {
+		t.Errorf("older transaction not loaded; second date = %s", got)
+	}
+}
+
+// An explicit from/to range drives the same filter as the relative window, so a backfill of a known
+// period reads the same way.
+func TestRBCReadsAnExplicitDateRange(t *testing.T) {
+	const page = `<!doctype html><html><body>
+	  <button id="filter" type="button">Filter</button>
+	  <div id="panel" style="display:none">
+	    <input id="rbc-dp-0" type="text" placeholder="Select...">
+	    <input id="rbc-dp-1" type="text" placeholder="Select...">
+	    <button id="apply" type="button" aria-label="Apply">Apply</button>
+	  </div>
+	  <table class="rbc-transaction-list-table"><tbody id="tb"></tbody></table>
+	  <script>
+	    document.getElementById('filter').addEventListener('click', function () {
+	      document.getElementById('panel').style.display = 'block' })
+	    document.getElementById('apply').addEventListener('click', function () {
+	      // Reveal a row only if both dates were entered, and stamp it with the typed from-date so the
+	      // test can confirm the explicit range reached the field.
+	      var f = document.getElementById('rbc-dp-0').value.trim()
+	      var t = document.getElementById('rbc-dp-1').value.trim()
+	      if (f !== '' && t !== '') {
+	        document.getElementById('tb').innerHTML =
+	          '<tr data-role="transaction-list-table-transaction" class="rbc-transaction-list-transaction-new">' +
+	          '<td headers="date" id="2026-02-01"> Feb 1, 2026 </td>' +
+	          '<td class="rbc-transaction-list-desc"><div>' + f + '</div></td>' +
+	          '<td class="rbc-transaction-list-withdraw"><span>-$3.00</span></td>' +
+	          '<td class="rbc-transaction-list-balance"> $9.00 </td></tr>'
+	      }
+	    })
+	  </script>
+	</body></html>`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(page))
+	}))
+	defer srv.Close()
+
+	out, err := execBankScript(Bank{
+		Institution: "rbc", LoginURL: srv.URL, DefaultCurrency: "CAD",
+		HistoryFrom: "Feb 1, 2026", HistoryTo: "Jun 1, 2026",
+	}, nil)
+	skipIfNoBrowser(t, err)
+	if err != nil {
+		t.Fatalf("reading with an explicit range: %v", err)
+	}
+
+	res, err := parseBankOutput(out, "Assets:Bank:RBC", "CAD")
+	if err != nil {
+		t.Fatalf("parsing rbc.js output %q: %v", out, err)
+	}
+	if len(res.Transactions) != 1 {
+		t.Fatalf("got %d transactions, want 1: %q", len(res.Transactions), out)
+	}
+	if res.Transactions[0].Description != "Feb 1, 2026" {
+		t.Errorf("the from date typed into the filter = %q, want \"Feb 1, 2026\"", res.Transactions[0].Description)
 	}
 }

@@ -88,9 +88,14 @@ type Bank struct {
 	Progress func(stage string)
 
 	// HistoryDays, when > 0, asks the script to read that many days back rather than the site's short
-	// default (RBC's presets stop at 30 days). The window is turned into a from/to date pair here --
-	// the script drives the site's custom date-range filter -- so "today" is decided once, in Go.
+	// default (RBC's presets stop at 30 days). The relative window is turned into a from/to date pair
+	// here, so "today" is decided once, in Go.
 	HistoryDays int
+
+	// HistoryFrom and HistoryTo are an explicit date range ("MMM D, YYYY"), for a backfill of a known
+	// period. When HistoryFrom is set it wins over HistoryDays; HistoryTo empty means up to today.
+	HistoryFrom string
+	HistoryTo   string
 }
 
 // ErrSessionExpired reports that a bank's saved session is gone and no person was present to sign in
@@ -181,15 +186,19 @@ func execBankScript(b Bank, creds map[string]string) ([]byte, error) {
 		}
 		cmd.Env = append(cmd.Env, "BK_IMPORT_ACCOUNT_PATH="+string(pathJSON))
 	}
-	if b.HistoryDays > 0 {
+	// RBC's date filter (once its Filter panel is open) takes typed dates in "MMM D, YYYY", the way it
+	// prints them. An explicit range wins; otherwise a relative window is turned into from/to here.
+	from, to := b.HistoryFrom, b.HistoryTo
+	if from == "" && b.HistoryDays > 0 {
 		now := time.Now()
-		// RBC's date fields read "MMM D, YYYY" (its own "Example: Feb 17, 2020"), matching how it
-		// prints transaction dates.
-		const rbcDate = "Jan 2, 2006"
-		cmd.Env = append(cmd.Env,
-			"BK_IMPORT_HISTORY_FROM="+now.AddDate(0, 0, -b.HistoryDays).Format(rbcDate),
-			"BK_IMPORT_HISTORY_TO="+now.Format(rbcDate),
-		)
+		from = now.AddDate(0, 0, -b.HistoryDays).Format("Jan 2, 2006")
+		to = now.Format("Jan 2, 2006")
+	}
+	if from != "" {
+		cmd.Env = append(cmd.Env, "BK_IMPORT_HISTORY_FROM="+from)
+		if to != "" {
+			cmd.Env = append(cmd.Env, "BK_IMPORT_HISTORY_TO="+to)
+		}
 	}
 	if creds == nil {
 		creds = map[string]string{}

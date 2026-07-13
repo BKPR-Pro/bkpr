@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/dallasread/bookkeeper/lib/adapters/source"
 	"github.com/dallasread/bookkeeper/lib/books"
@@ -30,6 +31,7 @@ type fetchOpts struct {
 	interactive bool
 	relogin     bool
 	history     int                // days of history to read this run; 0 means use the connector's default
+	from, to    string             // explicit backfill range ("MMM D, YYYY"); from set means it overrides history
 	progress    func(stage string) // reports the browser's current stage for a live status; may be nil
 }
 
@@ -40,6 +42,17 @@ func historyDays(c books.Connector, o fetchOpts) int {
 		return o.history
 	}
 	return c.HistoryDays
+}
+
+// reconcileBalance turns a bank-shown balance into the books' sign. A bank shows every balance
+// positive; the books hold a liability's balance owing as negative (as accruals do), while an asset's
+// stays positive. So a line of credit's or card's scraped balance is negated, a chequing's is not,
+// and the anchor matches the folded transactions.
+func reconcileBalance(account string, bal model.Amount) model.Amount {
+	if account == "Liabilities" || strings.HasPrefix(account, "Liabilities:") {
+		return bal.Negate()
+	}
+	return bal
 }
 
 // fetcherFor maps a connector kind to how its transactions are read. A bank (rbc, simplii,
@@ -66,6 +79,8 @@ func fetcherFor(kind string, o fetchOpts) (connectorFetch, error) {
 				SnapshotDir:     o.snapshotDir,
 				AccountPath:     c.AccountPath,
 				HistoryDays:     historyDays(c, o),
+				HistoryFrom:     o.from,
+				HistoryTo:       o.to,
 				Progress:        o.progress,
 			})
 			if err != nil {
