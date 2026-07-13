@@ -27,6 +27,78 @@ func signedInSimplii(body string) string {
 	</body></html>`
 }
 
+// The sign-in fields render inside the auth widget's iframe, so signIn must find them across frames,
+// fill card + password, and click the real "Sign in" button (data-test-id="primary-button"). Here the
+// top page has no signed-in landmark until the iframe posts back after a filled submit, at which point
+// the account picker + transactions appear -- so the test passes only if the cross-frame fill and
+// submit actually happened, then the reader runs.
+func TestSimpliiSignsInAcrossFramesThenReads(t *testing.T) {
+	const cardHTML = `<!doctype html><html><body>
+	  <input data-test-id="card-number-input" type="text">
+	  <input data-test-id="password-input" type="password">
+	  <button data-test-id="primary-button" type="button">Sign in</button>
+	  <script>
+	    document.querySelector('[data-test-id="primary-button"]').addEventListener('click', function () {
+	      if (document.querySelector('[data-test-id="card-number-input"]').value &&
+	          document.querySelector('[data-test-id="password-input"]').value) {
+	        window.parent.postMessage('signed-in', '*')
+	      }
+	    })
+	  </script>
+	</body></html>`
+
+	// The signed-in view the top page reveals once the iframe reports a successful sign-in.
+	const account = `<select aria-label="Select an account. This page will refresh upon selection."><option>Personal Line of Credit</option></select>
+	  <div class="tombstone"><div class="row"><div class="box-small balance"><span>Balance:</span><em>−$49,671.86</em></div></div></div>
+	  <section class="transaction-list row"><table><tbody>
+	    <tr><td class="date">Jul 10, 2026</td>
+	      <td class="transactions"><span class="transactionDescription">TRANSFER OUT</span></td>
+	      <td class="debit"><span>$1,000.00</span></td>
+	      <td class="credit"><span class="hidden-text">Not applicable</span></td>
+	      <td class="balance"><span class="negative">−$49,671.86</span></td></tr>
+	  </tbody></table></section>`
+
+	topHTML := `<!doctype html><html><body class="ember-application">
+	  <iframe title="empty" src="/card" style="width:400px;height:200px;border:0"></iframe>
+	  <div id="content"></div>
+	  <script>
+	    window.addEventListener('message', function (e) {
+	      if (e.data === 'signed-in') document.getElementById('content').innerHTML = ` + "`" + account + "`" + `
+	    })
+	  </script>
+	</body></html>`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.URL.Path == "/card" {
+			_, _ = w.Write([]byte(cardHTML))
+		} else {
+			_, _ = w.Write([]byte(topHTML))
+		}
+	}))
+	defer srv.Close()
+
+	out, err := execBankScript(Bank{
+		Institution: "simplii", LoginURL: srv.URL, DefaultCurrency: "CAD",
+		Account: "Liabilities:Real Estate:Simplii LOC",
+	}, map[string]string{"username": "4500000000000000", "password": "hunter2"})
+	skipIfNoBrowser(t, err)
+	if err != nil {
+		t.Fatalf("signing in across frames: %v", err)
+	}
+
+	res, err := parseBankOutput(out, "Liabilities:Real Estate:Simplii LOC", "CAD")
+	if err != nil {
+		t.Fatalf("parsing simplii.js output %q: %v", out, err)
+	}
+	if len(res.Transactions) != 1 || res.Transactions[0].Amount.String() != "-1000.00 CAD" {
+		t.Fatalf("expected the one row read after sign-in, got %d: %q", len(res.Transactions), out)
+	}
+	if !res.HasBalance || res.Balance.String() != "49671.86 CAD" {
+		t.Errorf("balance = %s (has=%v), want 49671.86 CAD", res.Balance, res.HasBalance)
+	}
+}
+
 // Simplii's line of credit and chequing render the same transaction table, read one way: Funds in
 // (credit) positive, Funds out (debit) negative -- already the books' sign for the liability line of
 // credit (whose balance Simplii shows negative) and the asset chequing alike. Runs through the stealth
