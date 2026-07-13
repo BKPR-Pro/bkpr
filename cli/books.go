@@ -45,11 +45,19 @@ func renderBooks(args []string) error {
 	value := fs.String("value", "", "value every amount in this commodity, e.g. CAD, using recorded @@ prices; pass -rate for lines without one")
 	rate := fs.String("rate", "", "per-unit rates for amounts with no recorded price under -value, e.g. USD=1.35 (comma-separated)")
 	stdout := fs.Bool("stdout", false, "write the ledger to stdout instead of the store")
+	sortBy := fs.String("sort", "", "sort lines by: amount (the default is by date)")
+	desc := fs.Bool("desc", false, "sort descending (with -sort amount)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *basis != string(books.CashBasis) && *basis != string(books.AccrualBasis) {
 		return fmt.Errorf("unknown basis %q: want cash or accrual", *basis)
+	}
+	if *sortBy != "" && *sortBy != "amount" {
+		return fmt.Errorf("books -sort takes: amount (the default is by date)")
+	}
+	if *sortBy != "" && *format == "ledger" {
+		return fmt.Errorf("-sort cannot reorder -format ledger: the ledger stays in date order, its canonical form")
 	}
 	rates, err := parseRates(*rate, *value)
 	if err != nil {
@@ -105,6 +113,12 @@ func renderBooks(args []string) error {
 	sum, err := summarize(txs, entries)
 	if err != nil {
 		return err
+	}
+
+	// The reading's order is a display choice made after the summary is folded, so sorting the lines
+	// by amount never changes the totals -- only which line prints first.
+	if *sortBy == "amount" {
+		txs, entries = orderLinesByAmount(txs, entries, *desc)
 	}
 
 	switch *format {

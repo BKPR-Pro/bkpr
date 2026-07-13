@@ -167,7 +167,7 @@ var usageSections = []usageSection{
 		{"void", "<fingerprint> [-why <reason>] [-actor <name>]"},
 		{"match", "<fingerprint> (-with <fingerprint> | -break) [-actor <name>]"},
 		{"export", "<connector> [-confirm]"},
-		{"books", "[-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re> ...] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-value <c> [-rate <C=n> ...]] [-stdout]"},
+		{"books", "[-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re> ...] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-sort amount [-desc]] [-value <c> [-rate <C=n> ...]] [-stdout]"},
 	}},
 	{"INVOICES AND BILLS", []usageLine{
 		{"invoice raise", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]"},
@@ -185,7 +185,7 @@ var usageSections = []usageSection{
 		{"policy set", "-method <acb|fifo> [-account <a>] [-actor <name>]"},
 		{"policy list", ""},
 		{"accounts set", "<account> -meta <k=v> ... [-actor <name>]"},
-		{"accounts list", ""},
+		{"accounts list", "[-sort amount [-desc]]"},
 		{"reconcile", ""},
 		{"receipt", "-tx <fingerprint> [-as invoice|receipt] [-format text|html] [-out <file>]"},
 		{"report", "[-income | -balance | -gains] [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
@@ -446,7 +446,7 @@ var reference = []docGroup{
       prints what it would send.
 `},
 		{[]string{"books"}, `  books [-format table|json|ledger] [-basis cash|accrual] [-since YYYY-MM-DD] [-account <re> ...]
-        [-from YYYY-MM-DD] [-to YYYY-MM-DD] [-value <c> [-rate <C=n> ...]] [-stdout]
+        [-from YYYY-MM-DD] [-to YYYY-MM-DD] [-sort amount [-desc]] [-value <c> [-rate <C=n> ...]] [-stdout]
       Fold the log into a table (default), machine-readable JSON, or regenerate
       .bkpr/books.ledger (-stdout writes the ledger to standard output instead).
       -account narrows any of the three to the lines posting to a matching account, at any
@@ -463,6 +463,9 @@ var reference = []docGroup{
       is unknown, one row per commodity - computed once from the same fold, so the formats
       cannot disagree; a filtered reading is summarized as filtered. In the ledger form it is a
       trailing comment, which ledger tools and the import reader both ignore.
+      Lines print by date by default; -sort amount orders them by amount instead (-desc for
+      largest first), a display choice over the same fold, so the health line never changes.
+      It does not apply to -format ledger, which stays in its canonical date order.
       -basis chooses the lens: cash (the default) books only money that moved; accrual also
       books every open invoice and bill, and lets the line that pays one clear its receivable
       or payable. The basis is a read-time choice over one log, so the same books read either
@@ -532,10 +535,12 @@ var reference = []docGroup{
 		{[]string{"accounts"}, `  accounts set <account> -meta <k=v> ... [-actor <name>]
       Attach metadata to an account: a letterhead address, a display name, a customer's mailing
       address. A document like an invoice reads it when it renders.
-  accounts list
+  accounts list [-sort amount [-desc]]
       The account folder: every account you hold -- the bank, card, and loan accounts money is read
       from -- with its display name, what it holds now, and where it stands against the bank. An
-      account is yours once a statement imports against it or a connector posts to it.
+      account is yours once a statement imports against it or a connector posts to it. Listed by name
+      by default; -sort amount orders by balance instead (-desc for largest first). An account holding
+      more than one commodity sorts by the sum of its balances.
 `},
 		{[]string{"reconcile"}, `  reconcile
       Check the books against the bank, to the penny. Every import records the balance the bank
@@ -2170,6 +2175,16 @@ func accountSetMeta(args []string) error {
 // holds now, and where it stands against the bank. It folds the owned-account set, the per-account
 // balances, and reconciliation into one list, so "what are my accounts" is one command.
 func accountList(args []string) error {
+	fs := flag.NewFlagSet("accounts list", flag.ExitOnError)
+	sortBy := fs.String("sort", "", "sort by: amount (the default is by account name)")
+	desc := fs.Bool("desc", false, "sort descending (with -sort amount)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *sortBy != "" && *sortBy != "amount" {
+		return fmt.Errorf("accounts list -sort takes: amount (the default is by name)")
+	}
+
 	log, closeLog, err := open()
 	if err != nil {
 		return err
@@ -2201,7 +2216,10 @@ func accountList(args []string) error {
 	for a := range owned {
 		accounts = append(accounts, a)
 	}
-	sort.Strings(accounts)
+	sort.Strings(accounts) // by name: the default, and the tie-break when sorting by amount
+	if *sortBy == "amount" {
+		accounts = orderAccountsByAmount(accounts, balances, *desc)
+	}
 
 	if len(accounts) == 0 {
 		fmt.Println("no accounts yet; import a statement or register a connector")
