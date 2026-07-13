@@ -25,6 +25,13 @@ type Rule struct {
 	Payee    string `json:"payee,omitempty"`
 	Category string `json:"category,omitempty"`
 
+	// Amount, when set, narrows the rule to lines of one magnitude: several payees that share a memo
+	// but differ only by amount (a property tax that is $175 for one house and $155 for another)
+	// become distinct rules on one pattern. It matches the line's magnitude, so the statement's
+	// debit/credit sign is not part of it. A nil Amount does not constrain, and a rule's identity is
+	// its pattern together with this predicate -- the set of lines it fires on.
+	Amount *model.Amount `json:"amount,omitempty"`
+
 	// TaxRate and TaxAccount make a vendor a taxed one: its charge already includes sales tax, so
 	// Apply extracts the tax from the total (tax-inclusive, net = total / (1 + rate)) and posts it
 	// to TaxAccount, leaving the pre-tax amount on the category. The rate is a percentage string
@@ -44,6 +51,19 @@ type Rule struct {
 // Engine applies an ordered rule set.
 type Engine struct {
 	rules []Rule
+}
+
+// amountMatches reports whether a line of amount got satisfies a rule's amount predicate want. Both
+// are taken as magnitudes, so a debit and the same-sized credit match one predicate, and the
+// commodities must agree (Equal is commodity-sensitive), so 175 USD does not answer a 175 CAD rule.
+func amountMatches(want, got model.Amount) bool {
+	if want.Units < 0 {
+		want = want.Negate()
+	}
+	if got.Units < 0 {
+		got = got.Negate()
+	}
+	return want.Equal(got)
 }
 
 // New compiles the rules. An invalid pattern is an error here rather than a surprise later.
@@ -88,6 +108,9 @@ func (e *Engine) Apply(tx model.Transaction) model.Entry {
 	// the first to supply a payee, a category, a tax, or a metadata key an earlier match left empty.
 	for _, r := range e.rules {
 		if !r.re.MatchString(tx.Description) {
+			continue
+		}
+		if r.Amount != nil && !amountMatches(*r.Amount, tx.Amount) {
 			continue
 		}
 		if payee == "" {

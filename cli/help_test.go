@@ -60,7 +60,7 @@ func TestUsageStylesEveryCommandUnderASection(t *testing.T) {
 	for _, name := range []string{
 		"init", "reset", "connectors register", "rules set", "import", "categorize", "void",
 		"match", "export", "books", "invoice raise", "bill receive", "policy set", "accounts set",
-		"reconcile", "receipt", "report", "help", "docs", "version",
+		"balance set", "reconcile", "receipt", "report", "help", "docs", "version",
 	} {
 		if !strings.Contains(out, name) {
 			t.Errorf("usage should list the %q command", name)

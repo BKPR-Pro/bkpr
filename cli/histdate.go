@@ -28,6 +28,18 @@ func parseHistDate(s string) (string, error) {
 	return "", fmt.Errorf("import: could not read the date %q; try 2026-02-01 or \"Feb 1, 2026\"", s)
 }
 
+// parseAsOf reads a written date into a time, accepting the same forms -from/-to do. It is what
+// `balance set -as-of` uses to date a hand-recorded balance.
+func parseAsOf(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	for _, layout := range histDateLayouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("could not read the date %q; try 2026-02-01 or \"Feb 1, 2026\"", s)
+}
+
 // backfillRange resolves the -from/-to flags into a normalized date pair. An empty from means no
 // explicit range (the relative -history is used instead). A from with no to reads up to today. A to
 // without a from is refused, since a range needs a start.

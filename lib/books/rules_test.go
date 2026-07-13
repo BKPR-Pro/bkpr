@@ -186,14 +186,14 @@ func TestRemoveRuleDropsIt(t *testing.T) {
 	log := newLog()
 	loaded(t, log, rule("acme", "Expenses:Materials"), rule("city water", "Expenses:Water"))
 
-	if err := books.RemoveRule(log, "human", "acme"); err != nil {
+	if err := books.RemoveRule(log, "human", "acme", nil); err != nil {
 		t.Fatalf("RemoveRule: %v", err)
 	}
 	assertOrder(t, log, "city water")
 }
 
 func TestRemovingAMissingRuleIsRefused(t *testing.T) {
-	if err := books.RemoveRule(newLog(), "human", "ghost"); err == nil {
+	if err := books.RemoveRule(newLog(), "human", "ghost", nil); err == nil {
 		t.Fatal("removed a rule that does not exist")
 	}
 }
@@ -202,7 +202,7 @@ func TestMoveRuleReorders(t *testing.T) {
 	log := newLog()
 	loaded(t, log, rule("water", "Expenses:Wrong"), rule("city water", "Expenses:Water"))
 
-	if err := books.MoveRule(log, "human", "city water", "water"); err != nil {
+	if err := books.MoveRule(log, "human", "city water", nil, "water"); err != nil {
 		t.Fatalf("MoveRule: %v", err)
 	}
 	assertOrder(t, log, "city water", "water")
@@ -212,7 +212,7 @@ func TestMoveRuleToTheEnd(t *testing.T) {
 	log := newLog()
 	loaded(t, log, rule("a", "Expenses:A"), rule("b", "Expenses:B"), rule("c", "Expenses:C"))
 
-	if err := books.MoveRule(log, "human", "a", ""); err != nil {
+	if err := books.MoveRule(log, "human", "a", nil, ""); err != nil {
 		t.Fatalf("MoveRule: %v", err)
 	}
 	assertOrder(t, log, "b", "c", "a")
@@ -222,7 +222,7 @@ func TestMoveRuleToTheEnd(t *testing.T) {
 func TestARuleCanBeRemovedAndAddedAgain(t *testing.T) {
 	log := newLog()
 	loaded(t, log, rule("acme", "Expenses:Materials"))
-	if err := books.RemoveRule(log, "human", "acme"); err != nil {
+	if err := books.RemoveRule(log, "human", "acme", nil); err != nil {
 		t.Fatal(err)
 	}
 	loaded(t, log, rule("acme", "Expenses:Repairs"))

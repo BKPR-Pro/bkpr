@@ -64,6 +64,8 @@ func main() {
 		err = policyCmd(os.Args[2:])
 	case "accounts":
 		err = accountCmd(os.Args[2:])
+	case "balance":
+		err = balanceCmd(os.Args[2:])
 	case "reconcile":
 		err = reconcileCmd(os.Args[2:])
 	case "receipt":
@@ -151,9 +153,9 @@ var usageSections = []usageSection{
 		{"connectors list", ""},
 	}},
 	{"RULES", []usageLine{
-		{"rules set", "<re> [-category <account>] [-payee <name>] [-tax-rate <pct> -tax-account <account>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]"},
-		{"rules rm", "<re>"},
-		{"rules mv", "<re> [-before <re>]"},
+		{"rules set", "<re> [-amount <amt>] [-category <account>] [-payee <name>] [-tax-rate <pct> -tax-account <account>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]"},
+		{"rules rm", "<re> [-amount <amt>]"},
+		{"rules mv", "<re> [-amount <amt>] [-before <re>]"},
 		{"rules list", ""},
 	}},
 	{"BOOKKEEPING", []usageLine{
@@ -186,6 +188,7 @@ var usageSections = []usageSection{
 		{"policy list", ""},
 		{"accounts set", "<account> -meta <k=v> ... [-actor <name>]"},
 		{"accounts list", "[-sort amount [-desc]]"},
+		{"balance set", "<account> <amount> [-as-of <YYYY-MM-DD>] [-actor <name>]"},
 		{"reconcile", ""},
 		{"receipt", "-tx <fingerprint> [-as invoice|receipt] [-format text|html] [-out <file>]"},
 		{"report", "[-income | -balance | -gains] [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
@@ -352,21 +355,26 @@ var reference = []docGroup{
 `},
 	}},
 	{"RULES  (deterministic categorization; first matching rule wins per field)", []docTopic{
-		{[]string{"rules"}, `  rules set <re> [-category <account>] [-payee <name>] [-tax-rate <pct> -tax-account <account>] [-meta <k=v> ...] [-before <re>] [-why <reason>]
+		{[]string{"rules"}, `  rules set <re> [-amount <amt>] [-category <account>] [-payee <name>] [-tax-rate <pct> -tax-account <account>] [-meta <k=v> ...] [-before <re>] [-why <reason>]
       Add a rule, or change one already matching this pattern. On an existing rule only the
       fields you name change, and since that reclassifies every past line it matched, it
       takes a -why. A new rule lands last unless -before places it ahead of another. Account
-      paths are free-form and may stop at Uncategorized wherever knowledge runs out. -tax-rate
-      and -tax-account (required together) mark a vendor whose charge already includes sales
-      tax: the rate is extracted from the total (net = total / (1 + rate)) onto the category,
-      the tax onto its account, e.g. -tax-rate 15% -tax-account "Assets:HST ITC". -meta
-      attaches opaque key=value pairs (repeatable) that a connector reads by name, e.g.
-      -meta rentapp.lease=31 tells the export which lease a matching rent deposit belongs to.
-      Either way it reports how many lines the books reclassified, so a pattern that catches
-      nothing (or too much) is visible the moment it is written.
-  rules rm  <re>                  Remove a rule.
-  rules mv  <re> [-before <re>]   Reorder a rule (-before omitted moves it last).
-  rules list                      Show the rules in order.
+      paths are free-form and may stop at Uncategorized wherever knowledge runs out. -amount
+      narrows a rule to lines of one magnitude, so several payees that share a memo but differ
+      only by amount become one rule each on the pattern (property tax $175 to one house, $155
+      to another); a bare amount is read as CAD, "175 USD" names another, and the sign is
+      ignored so a charge and its refund both match. A pattern and its amount together are a
+      rule's identity, so the same pattern takes as many amount-qualified rules as it has
+      amounts. -tax-rate and -tax-account (required together) mark a vendor whose charge
+      already includes sales tax: the rate is extracted from the total (net = total / (1 +
+      rate)) onto the category, the tax onto its account, e.g. -tax-rate 15% -tax-account
+      "Assets:HST ITC". -meta attaches opaque key=value pairs (repeatable) that a connector
+      reads by name, e.g. -meta rentapp.lease=31 tells the export which lease a matching rent
+      deposit belongs to. Either way it reports how many lines the books reclassified, so a
+      pattern that catches nothing (or too much) is visible the moment it is written.
+  rules rm  <re> [-amount <amt>]              Remove a rule (-amount picks the variant).
+  rules mv  <re> [-amount <amt>] [-before <re>]   Reorder a rule (-before omitted moves it last).
+  rules list                                  Show the rules in order.
 `},
 	}},
 	{"BOOKKEEPING", []docTopic{
@@ -541,6 +549,14 @@ var reference = []docGroup{
       account is yours once a statement imports against it or a connector posts to it. Listed by name
       by default; -sort amount orders by balance instead (-desc for largest first). An account holding
       more than one commodity sorts by the sum of its balances.
+`},
+		{[]string{"balance"}, `  balance set <account> <amount> [-as-of <YYYY-MM-DD>] [-actor <name>]
+      Record what an account held on a date, by hand -- the anchor reconcile checks against, for an
+      account no connector reports (one imported from CSV or ledger). A connector records this on
+      every import; this is the same fact entered by hand. The amount carries its commodity, e.g.
+      "100.00 CAD". A liability is entered as the statement shows it, a positive amount owing, and
+      stored negative, so a hand-set anchor signs the same way a scraped one does. Without -as-of the
+      balance is dated today. The first balance for an account anchors it; see reconcile.
 `},
 		{[]string{"reconcile"}, `  reconcile
       Check the books against the bank, to the penny. Every import records the balance the bank
@@ -1214,6 +1230,7 @@ func ruleSetOne(args []string) error {
 	r.Match = pattern
 	fs.StringVar(&r.Category, "category", "", "account to post the line to")
 	fs.StringVar(&r.Payee, "payee", "", "payee to record on the entry")
+	amount := fs.String("amount", "", "narrow the rule to lines of this magnitude, e.g. 175 (a bare amount is read as CAD; \"175 USD\" names another); its pattern and amount together are the rule's identity")
 	fs.StringVar(&r.TaxRate, "tax-rate", "", "sales tax the total already includes, e.g. 15%; splits the tax onto -tax-account")
 	fs.StringVar(&r.TaxAccount, "tax-account", "", "account the extracted tax posts to, e.g. \"Assets:HST ITC\"")
 	fs.Var(&meta, "meta", "key=value carried onto the entry, repeatable, e.g. rentapp.lease=31")
@@ -1221,6 +1238,9 @@ func ruleSetOne(args []string) error {
 	why := fs.String("why", "", "why the rule changed; changing one reclassifies every line it matched")
 	actor := fs.String("actor", "human", "who is authoring this rule; the log records who decided")
 	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	if r.Amount, err = parseRuleAmount(*amount); err != nil {
 		return err
 	}
 
@@ -1290,13 +1310,33 @@ func reclassified(was, now map[string]string) int {
 // fields move, and metadata merges per key rather than replacing the bag, so naming one key leaves
 // the others. On a new rule the given fields stand and before places it. actor records who decided,
 // so a model's rules are told apart from a person's.
+// parseRuleAmount reads a rule's -amount value into an amount predicate, or nil when none was given.
+// A value that names its commodity ("175 USD") is taken as written; a bare number ("175") is read as
+// CAD, the book's functional currency, so the common case stays terse.
+func parseRuleAmount(s string) (*model.Amount, error) {
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	var a model.Amount
+	var err error
+	if len(strings.Fields(s)) >= 2 {
+		a, err = model.ParseAmount(s)
+	} else {
+		a, err = model.NewAmount(s, "CAD")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
 func upsertRule(log *eventlog.Log, r rules.Rule, provided map[string]bool, before, why, actor string) error {
 	current, err := books.Rules(log)
 	if err != nil {
 		return err
 	}
 	for _, existing := range current {
-		if existing.Match != r.Match {
+		if !books.SameRule(existing, r) {
 			continue
 		}
 		merged := existing
@@ -1350,7 +1390,16 @@ func mergeMeta(base, overlay map[string]string) map[string]string {
 }
 
 func ruleRemove(args []string) error {
-	match, _, err := firstArg(args, "the rule to remove, by its match pattern")
+	match, rest, err := firstArg(args, "the rule to remove, by its match pattern")
+	if err != nil {
+		return err
+	}
+	fs := flag.NewFlagSet("rules rm", flag.ExitOnError)
+	amount := fs.String("amount", "", "the amount predicate of the variant to remove, when the pattern has several")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	amt, err := parseRuleAmount(*amount)
 	if err != nil {
 		return err
 	}
@@ -1365,7 +1414,7 @@ func ruleRemove(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := books.RemoveRule(log, "human", match); err != nil {
+	if err := books.RemoveRule(log, "human", match, amt); err != nil {
 		return err
 	}
 	now, err := entriesByTx(log)
@@ -1383,7 +1432,12 @@ func ruleMove(args []string) error {
 	}
 	fs := flag.NewFlagSet("rules mv", flag.ExitOnError)
 	before := fs.String("before", "", "move it ahead of this rule; omit to move it to the end")
+	amount := fs.String("amount", "", "the amount predicate of the variant to move, when the pattern has several")
 	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	amt, err := parseRuleAmount(*amount)
+	if err != nil {
 		return err
 	}
 
@@ -1397,7 +1451,7 @@ func ruleMove(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := books.MoveRule(log, "human", match, *before); err != nil {
+	if err := books.MoveRule(log, "human", match, amt, *before); err != nil {
 		return err
 	}
 	now, err := entriesByTx(log)
@@ -1419,12 +1473,24 @@ func ruleList(args []string) error {
 	if err != nil {
 		return err
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "MATCH\tPAYEE\tCATEGORY")
+	renderRules(os.Stdout, set)
+	return nil
+}
+
+// renderRules writes the rule set as a table. The amount column carries a rule's predicate when it
+// has one, so two rules on one pattern that split by amount read as distinct rows rather than
+// identical ones.
+func renderRules(out io.Writer, set []rules.Rule) {
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "MATCH\tAMOUNT\tPAYEE\tCATEGORY")
 	for _, r := range set {
-		fmt.Fprintf(w, "%s\t%s\t%s\n", r.Match, r.Payee, r.Category)
+		amount := ""
+		if r.Amount != nil {
+			amount = r.Amount.String()
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.Match, amount, r.Payee, r.Category)
 	}
-	return w.Flush()
+	w.Flush()
 }
 
 // rawPosting is an account and an unparsed quantity from a -post flag. The quantity becomes an
