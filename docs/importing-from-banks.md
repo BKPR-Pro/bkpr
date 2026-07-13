@@ -131,9 +131,17 @@ its balance owing, which `readBalance` must negate to the books' sign, and RBC m
 differently than chequing's Withdrawals/Deposits -- capture one and extend the same way. **Simplii**
 is pinned: its chequing and line of credit are read through the stealth path (see above), one reader
 for both since Funds in/out already matches the books' sign for the asset and the (negatively shown)
-liability alike. **PC Financial** is still a stub: pin its selectors (marked `TODO(pcfinancial)`) the
-same way, fastest via `npx playwright codegen <bank url>` -- sign in, open an account, read the
-selectors into the functions.
+liability alike. **PC Financial** is pinned too, on the normal path (unlike its CIBC sibling Simplii, a
+plain browser reaches it -- no bot wall). Its sign-in form sits inside a ThreatMetrix iframe
+(`#tmx_tags_iframe`) with a two-step flow -- username/password, then a "choose a verification method"
+select whose SMS code the person types in the window; `signIn` fills across that frame and picks SMS,
+`isLoginWall` keys on the Username field in any frame
+(`TestPCFinancialSignsInAcrossTheThreatMetrixFrame`). Its Mastercard reader keys on the Angular
+`sortable-table`: a charge is tagged amount `positive` (it adds to the balance owing) and a payment
+`negative`, so the reader flips PC Financial's sense to the books' -- a charge negative, a payment
+positive -- and reads the "Current balance" tile as the owing magnitude; it pages back through the
+newest-first list until it passes `-from`, then keeps only rows within the window
+(`TestPCFinancialReadsTheMastercard`, `TestPCFinancialPagesBackToTheFromDate`).
 
 ## What to build next
 
@@ -141,8 +149,8 @@ selectors into the functions.
    person, finishing the full auto-login.
 2. Extend RBC to a card/loan account: verify the transactions layout and negate `readBalance` for a
    balance owing, so the books agree.
-3. Pin PC Financial the way RBC and Simplii were pinned. Until then its import fails loudly, and a
-   manual CSV export is the way in.
+3. PC Financial is pinned (login + Mastercard reader). If a second PC account is added (e.g. a PC Money
+   Account), verify its table matches or extend the reader the same way.
 4. Or, if a free token flow appears, an `fdx`/aggregator adapter as another `fetcherFor` case,
    leaving the seam and the rest of the tool unchanged.
 
