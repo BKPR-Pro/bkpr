@@ -80,11 +80,13 @@ func TestRBCReadsAWiderHistoryWindow(t *testing.T) {
 // An explicit from/to range drives the same filter as the relative window, so a backfill of a known
 // period reads the same way.
 func TestRBCReadsAnExplicitDateRange(t *testing.T) {
+	// A card's filter labels its date fields "Date Range From"/"Date Range To" rather than giving them
+	// the chequing's #rbc-dp ids, so this exercises the label path.
 	const page = `<!doctype html><html><body>
 	  <button id="filter" type="button">Filter</button>
 	  <div id="panel" style="display:none">
-	    <input id="rbc-dp-0" type="text" placeholder="Select...">
-	    <input id="rbc-dp-1" type="text" placeholder="Select...">
+	    <input aria-label="Date Range From" type="text">
+	    <input aria-label="Date Range To" type="text">
 	    <button id="apply" type="button" aria-label="Apply">Apply</button>
 	  </div>
 	  <table class="rbc-transaction-list-table"><tbody id="tb"></tbody></table>
@@ -94,8 +96,8 @@ func TestRBCReadsAnExplicitDateRange(t *testing.T) {
 	    document.getElementById('apply').addEventListener('click', function () {
 	      // Reveal a row only if both dates were entered, and stamp it with the typed from-date so the
 	      // test can confirm the explicit range reached the field.
-	      var f = document.getElementById('rbc-dp-0').value.trim()
-	      var t = document.getElementById('rbc-dp-1').value.trim()
+	      var f = document.querySelector('[aria-label="Date Range From"]').value.trim()
+	      var t = document.querySelector('[aria-label="Date Range To"]').value.trim()
 	      if (f !== '' && t !== '') {
 	        document.getElementById('tb').innerHTML =
 	          '<tr data-role="transaction-list-table-transaction" class="rbc-transaction-list-transaction-new">' +
