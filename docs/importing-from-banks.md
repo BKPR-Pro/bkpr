@@ -131,16 +131,21 @@ its balance owing, which `readBalance` must negate to the books' sign, and RBC m
 differently than chequing's Withdrawals/Deposits -- capture one and extend the same way. **Simplii**
 is pinned: its chequing and line of credit are read through the stealth path (see above), one reader
 for both since Funds in/out already matches the books' sign for the asset and the (negatively shown)
-liability alike. **PC Financial** is pinned too, on the normal path (unlike its CIBC sibling Simplii, a
-plain browser reaches it -- no bot wall). Its sign-in form sits inside a ThreatMetrix iframe
-(`#tmx_tags_iframe`) with a two-step flow -- username/password, then a "choose a verification method"
-select whose SMS code the person types in the window; `signIn` fills across that frame and picks SMS,
-`isLoginWall` keys on the Username field in any frame
-(`TestPCFinancialSignsInAcrossTheThreatMetrixFrame`). Its Mastercard reader keys on the Angular
-`sortable-table`: a charge is tagged amount `positive` (it adds to the balance owing) and a payment
-`negative`, so the reader flips PC Financial's sense to the books' -- a charge negative, a payment
-positive -- and reads the "Current balance" tile as the owing magnitude; it pages back through the
-newest-first list until it passes `-from`, then keeps only rows within the window
+liability alike. **PC Financial** is pinned too, and takes the **stealth path** like its CIBC sibling
+Simplii: it also sits behind Akamai, which rejects a headless browser at sign-in (a headless run fails
+`net::ERR_HTTP2_PROTOCOL_ERROR`) -- a headed browser passes, which is why a plain `playwright codegen`
+works but the harness's headless-first normal path does not, so its profile sets `stealth: true`. Its
+sign-in form sits inside a ThreatMetrix iframe (`#tmx_tags_iframe`) with a two-step flow --
+username/password, then a "choose a verification method" select whose SMS code the person types in the
+window; `signIn` fills across that frame, picks SMS, and waits for the authenticated `<app-auth-header>`
+(not merely the form leaving, which is also true of the verification page between), `isLoginWall` keys
+on the Username field in any frame (`TestPCFinancialSignsInAcrossTheThreatMetrixFrame`). The account has
+no stable deep link (Akamai flags a direct `/transactions` navigation), so its `-url` is the sign-in
+page and its account-path clicks "Transactions" in the top nav. Its Mastercard reader keys on the
+Angular `sortable-table`: a charge is tagged amount `positive` (it adds to the balance owing) and a
+payment `negative`, so the reader flips PC Financial's sense to the books' -- a charge negative, a
+payment positive -- and reads the "Current balance" tile as the owing magnitude; it pages back through
+the newest-first list until it passes `-from`, then keeps only rows within the window
 (`TestPCFinancialReadsTheMastercard`, `TestPCFinancialPagesBackToTheFromDate`).
 
 ## What to build next
