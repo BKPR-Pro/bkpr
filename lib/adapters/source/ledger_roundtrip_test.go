@@ -56,6 +56,52 @@ func TestLedgerPostingCommentRoundTrips(t *testing.T) {
 	}
 }
 
+// A note on the source (elided) leg -- the one bookkeeper infers and does not price -- must survive
+// the writer and reader like a note on any other leg. It renders after the account on the elided
+// line, reads back onto the transaction, and re-renders byte-identically. Hand-kept books leave such
+// notes on the account the movement came from ("1000 CAD", "Cash on hand"), and dropping them lost
+// the writer's own words on import.
+func TestLedgerSourcePostingCommentRoundTrips(t *testing.T) {
+	cad := func(cents int64) model.Amount { return model.Amount{Units: cents, Scale: 2, Commodity: "CAD"} }
+	date, err := time.Parse("2006/01/02", "2026/06/17")
+	if err != nil {
+		t.Fatalf("date: %v", err)
+	}
+
+	txs := []model.Transaction{{
+		ID: "s-1", Account: "Expenses:Consulting:Compensation:Dallas Read", Date: date,
+		Amount: cad(100000), Description: "Dallas Read", Comment: "1000 CAD",
+	}}
+	entries := []model.Entry{{Payee: "Dallas Read", Postings: []model.Posting{
+		{Account: "Assets:Consulting:Chequing", Amount: cad(-48908), Comment: "On the 26th"},
+		{Account: "Liabilities:Consulting:RBC Mastercard", Amount: cad(-51092), Comment: "For Huntsman summer camp"},
+	}}}
+
+	var first bytes.Buffer
+	if err := ledger.WriteAll(&first, txs, entries); err != nil {
+		t.Fatalf("WriteAll: %v", err)
+	}
+
+	gotTxs, _, err := source.ReadLedger(bytes.NewReader(first.Bytes()))
+	if err != nil {
+		t.Fatalf("re-import failed: %v", err)
+	}
+	if len(gotTxs) != 1 {
+		t.Fatalf("read back %d lines, want 1", len(gotTxs))
+	}
+	if c := gotTxs[0].Comment; c != "1000 CAD" {
+		t.Errorf("source leg came back with %q, want the note carried", c)
+	}
+
+	var second bytes.Buffer
+	if err := ledger.WriteAll(&second, gotTxs, entries); err != nil {
+		t.Fatalf("re-render failed: %v", err)
+	}
+	if first.String() != second.String() {
+		t.Fatalf("source-note round trip is not byte-identical:\n--- wrote ---\n%s\n--- re-rendered ---\n%s", first.String(), second.String())
+	}
+}
+
 // A cost-basis line the ledger writer emits must read back through the source reader and re-render
 // byte-identically. The reader's own @@ tests hand-author their ledger text, so nothing ties the
 // writer's actual output to the reader; this drives real ledger.WriteAll bytes through ReadLedger.

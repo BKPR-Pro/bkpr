@@ -213,13 +213,13 @@ func twoSpaceGap(s string) int {
 }
 
 func reconstruct(date time.Time, description string, postings []posting, seen map[string]int) (model.Transaction, []model.Posting, error) {
-	var elided []string
+	var elided []posting // the amountless leg(s); at most one is allowed, and it is the source account
 	var priced []posting // every posting that carries an amount, i.e. the categorized side
 	sums := map[string]model.Amount{}
 	var commodities []string // map iteration order is random; remainders must be reported stably
 	for _, p := range postings {
 		if !p.priced {
-			elided = append(elided, p.account)
+			elided = append(elided, p)
 			continue
 		}
 		priced = append(priced, p)
@@ -254,6 +254,7 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 
 	var account string
 	var amount model.Amount
+	var sourceComment string  // the note on the source leg, the one the books infer
 	var categorized []posting // the postings the file categorized the line into, the source excluded
 	switch {
 	case len(elided) > 1:
@@ -262,7 +263,8 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 		return model.Transaction{}, nil, fmt.Errorf("cannot add %s and %s in one entry without a price", remainders[0].Commodity, remainders[1].Commodity)
 	case len(elided) == 1:
 		// the source is the amountless posting, so every priced posting is categorization
-		account = elided[0]
+		account = elided[0].account
+		sourceComment = elided[0].comment
 		amount = sums[commodities[0]].Negate()
 		if len(remainders) == 1 {
 			amount = remainders[0].Negate()
@@ -274,7 +276,7 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 		// fully priced and balanced: ledger's convention writes the source account last, so every
 		// posting before it is categorization
 		last := postings[len(postings)-1]
-		account, amount = last.account, last.amount
+		account, amount, sourceComment = last.account, last.amount, last.comment
 		categorized = postings[:len(postings)-1]
 	}
 	fp := Fingerprint(account, date, amount, description)
@@ -286,6 +288,7 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 		Date:        date,
 		Amount:      amount,
 		Description: description,
+		Comment:     sourceComment,
 	}
 	side := make([]model.Posting, 0, len(categorized))
 	for _, p := range categorized {

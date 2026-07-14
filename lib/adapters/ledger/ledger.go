@@ -80,8 +80,9 @@ func writeEntry(w io.Writer, tx model.Transaction, e model.Entry) error {
 	}
 
 	// The transaction already knows which account its statement came from, so that posting is
-	// elided and its amount inferred. Nothing else can name it, and nothing else can unbalance it.
-	_, err := fmt.Fprintf(w, "  %s\n", tx.Account)
+	// elided and its amount inferred. Nothing else can name it, and nothing else can unbalance it. A
+	// note the writer left on that source leg rides along after the account, read back as its comment.
+	_, err := fmt.Fprintf(w, "  %s%s\n", tx.Account, sourceNote(tx))
 	return err
 }
 
@@ -92,4 +93,14 @@ func note(p model.Posting) string {
 		return ""
 	}
 	return "  ; " + p.Comment
+}
+
+// sourceNote renders the note on the elided source leg, the same "  ; text" suffix as any other
+// posting note. It is empty when the line carries none, so a source account with no note is written
+// unchanged.
+func sourceNote(tx model.Transaction) string {
+	if tx.Comment == "" {
+		return ""
+	}
+	return "  ; " + tx.Comment
 }

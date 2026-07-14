@@ -46,6 +46,26 @@ func TestImportRecordsEveryLine(t *testing.T) {
 	}
 }
 
+// A note on the source leg is part of what a line arrived carrying, so it must survive the log: the
+// import stores it and the fold reads it back, or a ledger file's note on the account a movement came
+// from would be lost the moment it was recorded.
+func TestImportKeepsTheSourceLegNote(t *testing.T) {
+	log := newLog()
+	tx := line("a", 1, -6240, "SHELL GAS #123")
+	tx.Comment = "cash on hand"
+
+	if _, err := books.Import(log, "statement:march.csv", []model.Transaction{tx}); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	txs, err := books.Transactions(log)
+	if err != nil {
+		t.Fatalf("Transactions: %v", err)
+	}
+	if len(txs) != 1 || txs[0].Comment != "cash on hand" {
+		t.Fatalf("source note lost across the log: %+v", txs)
+	}
+}
+
 // Statements overlap. A line already in the log is skipped rather than booked a second time,
 // which is the whole of conflict class two.
 func TestReimportingAnOverlappingStatementIsANoOp(t *testing.T) {

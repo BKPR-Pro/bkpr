@@ -35,6 +35,7 @@ type importedData struct {
 	Amount      model.Amount      `json:"amount"`
 	Description string            `json:"description"`
 	Raw         map[string]string `json:"raw,omitempty"`
+	Comment     string            `json:"comment,omitempty"` // a note on the source leg, carried from the file
 }
 
 // ImportResult reports what one statement did to the log.
@@ -65,6 +66,7 @@ func Import(log *eventlog.Log, actor string, txs []model.Transaction) (ImportRes
 			Amount:      tx.Amount,
 			Description: tx.Description,
 			Raw:         tx.Raw,
+			Comment:     tx.Comment,
 		})
 		if err != nil {
 			return result, fmt.Errorf("books: %s: %w", tx.ID, err)
@@ -119,6 +121,7 @@ func Transactions(log *eventlog.Log) ([]model.Transaction, error) {
 			Amount:      data.Amount,
 			Description: data.Description,
 			Raw:         data.Raw,
+			Comment:     data.Comment,
 		})
 	}
 

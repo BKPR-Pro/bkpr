@@ -28,6 +28,13 @@ type Transaction struct {
 	Amount      Amount            // signed; negative is money out. Carries its own commodity.
 	Description string            // the raw memo the bank gave us
 	Raw         map[string]string // the original columns, kept for auditing
+
+	// Comment is a free-text note on the source (elided) leg: the posting against this line's own
+	// account, which the books infer rather than spell out. It is commentary, not data, and takes no
+	// part in balancing or the fingerprint, so it never changes a line's identity. The ledger adapters
+	// render it after the account on the elided line and read it back, so a note left on the account a
+	// movement came from survives a round trip. Empty on an ordinary line.
+	Comment string `json:"comment,omitempty"`
 }
 
 // Posting is one side of an entry: an account, and a signed amount.
