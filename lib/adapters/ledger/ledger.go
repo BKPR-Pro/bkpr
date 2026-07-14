@@ -72,7 +72,7 @@ func writeEntry(w io.Writer, tx model.Transaction, e model.Entry) error {
 	// The entry is titled with the payee, so when a rule renamed one the raw description would be
 	// lost, and with it the fingerprint and every rule keyed on it. The memo note keeps the line's
 	// own fact in the artifact; ledger tools read it as an ordinary entry note.
-	if tx.Description != "" && tx.Description != e.Payee {
+	if tx.Description != "" && tx.Description != e.Payee && tx.Description != title {
 		if _, err := fmt.Fprintf(w, "  ; memo: %s\n", tx.Description); err != nil {
 			return err
 		}

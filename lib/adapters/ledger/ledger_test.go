@@ -135,6 +135,26 @@ func TestInvoiceNumberRendersAsTheLedgerCode(t *testing.T) {
 	}
 }
 
+// A line whose raw description is just its coded title -- the shape a hand-kept "(2073) DNSimple"
+// import leaves once the code is lifted into its own field -- writes no memo, because the memo would
+// only repeat the header. A description that differs for a real reason still shows.
+func TestNoRedundantMemoForACodedTitle(t *testing.T) {
+	tx := chequing(1, 900000, "(2073) DNSimple")
+	e := model.Entry{
+		Payee:    "DNSimple",
+		Invoice:  "2073",
+		Postings: []model.Posting{{Account: "Income:Consulting:Contract:DNSimple", Amount: cad(-900000)}},
+	}
+	if got := write(t, tx, e); strings.Contains(got, "; memo:") {
+		t.Errorf("a description that is just the coded title should write no memo:\n%s", got)
+	}
+
+	e.Invoice, tx = "", chequing(1, 900000, "RAW BANK LINE 88")
+	if got := write(t, tx, e); !strings.Contains(got, "; memo: RAW BANK LINE 88") {
+		t.Errorf("a genuinely different description should still write a memo:\n%s", got)
+	}
+}
+
 // Every line bookkeeper writes came off a bank statement, so every line has cleared the bank.
 // The pending flag means the bank has not reported a transaction yet, and nothing here is that.
 func TestEveryEntryIsCleared(t *testing.T) {
