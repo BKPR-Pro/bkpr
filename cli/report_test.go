@@ -359,6 +359,83 @@ func TestParseRates(t *testing.T) {
 	}
 }
 
+// A subsection that gathers more than one account is subtotaled, so a reader sees what the grouping
+// came to without adding the lines by hand. The subtotal is labelled by the subsection and sums the
+// leaves above it.
+func TestWithSubtotalsSumsMultiAccountSubsections(t *testing.T) {
+	rows := []reportRow{
+		{Account: "Expenses:Fuel", Amount: cad2(6240)},
+		{Account: "Expenses:Real Estate:Insurance", Amount: cad2(20000)},
+		{Account: "Expenses:Real Estate:Interest", Amount: cad2(151174)},
+	}
+	lines := withSubtotals(rows)
+
+	var sub *statementLine
+	for i := range lines {
+		if lines[i].Subtotal {
+			if sub != nil {
+				t.Fatalf("want a single subtotal, got another: %+v", lines[i])
+			}
+			sub = &lines[i]
+		}
+	}
+	if sub == nil || sub.Label != "Total Real Estate" || sub.Amount.String() != "1711.74 CAD" {
+		t.Fatalf("subtotal = %+v, want Total Real Estate 1711.74 CAD", sub)
+	}
+	// A subsection of a single account (Fuel) is left alone: its subtotal would repeat the line.
+	if got := lines[0].Label; got != "Expenses:Fuel" || lines[0].Subtotal {
+		t.Errorf("first line = %+v, want the lone Fuel leaf with no subtotal", lines[0])
+	}
+}
+
+// A subsection holding two commodities is subtotaled once per commodity, because they do not sum.
+func TestWithSubtotalsSplitsByCommodity(t *testing.T) {
+	rows := []reportRow{
+		{Account: "Assets:Brokerage:AAPL", Amount: model.Amount{Units: 10, Commodity: "AAPL"}},
+		{Account: "Assets:Brokerage:Cash", Amount: cad2(50000)},
+	}
+	subs := map[string]string{}
+	for _, ln := range withSubtotals(rows) {
+		if ln.Subtotal {
+			subs[ln.Amount.Commodity] = ln.Amount.String()
+		}
+	}
+	if subs["AAPL"] != "10 AAPL" || subs["CAD"] != "500.00 CAD" {
+		t.Errorf("subtotals = %+v, want one per commodity", subs)
+	}
+}
+
+// The text income statement shows a subsection's subtotal beneath its leaves.
+func TestReportTextShowsSubsectionSubtotals(t *testing.T) {
+	tx1, e1 := bs(1, "Expenses:Real Estate:Interest", cad2(151174), post("Assets:Bank:Chequing", cad2(-151174)))
+	tx2, e2 := bs(2, "Expenses:Real Estate:Insurance", cad2(20000), post("Assets:Bank:Chequing", cad2(-20000)))
+	stmt := buildReport([]model.Transaction{tx1, tx2}, []model.Entry{e1, e2}, time.Time{}, time.Time{}, "", nil)
+
+	var buf bytes.Buffer
+	renderIncomeText(&buf, stmt)
+	if !strings.Contains(buf.String(), "Total Real Estate") {
+		t.Errorf("text income statement missing the subsection subtotal:\n%s", buf.String())
+	}
+}
+
+// The HTML balance sheet carries a subsection subtotal too, marked so a stylesheet can set it apart.
+func TestReportHTMLShowsSubsectionSubtotals(t *testing.T) {
+	tx1, e1 := bs(1, "Assets:Bank:Chequing", cad2(160000), post("Income:Rent", cad2(-160000)))
+	tx2, e2 := bs(2, "Assets:Bank:Savings", cad2(40000), post("Income:Rent", cad2(-40000)))
+	stmt := buildBalanceSheet([]model.Transaction{tx1, tx2}, []model.Entry{e1, e2}, time.Time{}, "", nil)
+
+	var buf bytes.Buffer
+	if err := renderReportHTML(&buf, reportView{Balance: &stmt}); err != nil {
+		t.Fatalf("renderReportHTML: %v", err)
+	}
+	html := buf.String()
+	for _, want := range []string{"Total Bank", "2000.00 CAD", "subtotal"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("balance sheet HTML missing %q:\n%s", want, html)
+		}
+	}
+}
+
 // The HTML form carries the same statements as a self-contained page.
 func TestRenderReportHTML(t *testing.T) {
 	tx1, e1 := bs(1, "Assets:Bank:Chequing", cad2(160000), post("Income:Rent:123 Main", cad2(-160000)))

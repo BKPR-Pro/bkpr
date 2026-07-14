@@ -286,6 +286,64 @@ func buildBalanceSheet(txs []model.Transaction, entries []model.Entry, asOf time
 	return sheet
 }
 
+// statementLine is one printed row of a statement section: a leaf account, or the Subtotal of a
+// subsection that sums the leaves above it. A subsection is the level below a section -- "Real
+// Estate" under "Expenses" -- and its subtotal lets a reader see what the grouping came to without
+// adding the lines by hand.
+type statementLine struct {
+	Label    string // a leaf's account path, or "Total <subsection>" for a subtotal
+	Amount   model.Amount
+	Subtotal bool
+}
+
+// subsectionOf returns the subsection an account rolls up to: its first two colon-segments, e.g.
+// "Expenses:Real Estate" for "Expenses:Real Estate:Interest". An account with only a section (or a
+// bare name) is its own subsection.
+func subsectionOf(account string) string {
+	parts := strings.SplitN(account, ":", 3)
+	if len(parts) < 2 {
+		return account
+	}
+	return parts[0] + ":" + parts[1]
+}
+
+// withSubtotals turns sorted leaf rows into the lines a section prints: every leaf, and after each
+// subsection that gathers more than one account, a per-commodity subtotal. Rows arrive sorted by
+// account, so a subsection's leaves are contiguous. A subsection of a single account gets no
+// subtotal -- it would only repeat the line -- and commodities are subtotaled apart, because a
+// share and a dollar do not sum.
+func withSubtotals(rows []reportRow) []statementLine {
+	lines := make([]statementLine, 0, len(rows))
+	for i := 0; i < len(rows); {
+		sub := subsectionOf(rows[i].Account)
+		accounts := map[string]bool{}
+		totals := map[string]model.Amount{}
+		var order []string
+		j := i
+		for j < len(rows) && subsectionOf(rows[j].Account) == sub {
+			r := rows[j]
+			lines = append(lines, statementLine{Label: r.Account, Amount: r.Amount})
+			accounts[r.Account] = true
+			if _, seen := totals[r.Amount.Commodity]; !seen {
+				order = append(order, r.Amount.Commodity)
+			}
+			totals[r.Amount.Commodity] = plus(totals[r.Amount.Commodity], r.Amount)
+			j++
+		}
+		if len(accounts) > 1 {
+			label := sub
+			if idx := strings.Index(sub, ":"); idx >= 0 {
+				label = sub[idx+1:]
+			}
+			for _, c := range order {
+				lines = append(lines, statementLine{Label: "Total " + label, Amount: totals[c], Subtotal: true})
+			}
+		}
+		i = j
+	}
+	return lines
+}
+
 // matches reports whether an account is in scope: everything when filter is empty, else those whose
 // path contains it.
 func matches(account, filter string) bool {
@@ -652,13 +710,19 @@ func renderIncomeText(out io.Writer, stmt incomeStatement) {
 	w.Flush()
 }
 
+// writeRows prints a section's leaves and, beneath each multi-account subsection, its subtotal --
+// the subtotal de-dented from the leaves so it reads as the summary of the group above it.
 func writeRows(w *tabwriter.Writer, rows []reportRow) {
 	if len(rows) == 0 {
 		fmt.Fprintln(w, "  (none)")
 		return
 	}
-	for _, r := range rows {
-		fmt.Fprintf(w, "  %s\t%s\n", r.Account, r.Amount)
+	for _, ln := range withSubtotals(rows) {
+		if ln.Subtotal {
+			fmt.Fprintf(w, "  %s\t%s\n", ln.Label, ln.Amount)
+		} else {
+			fmt.Fprintf(w, "    %s\t%s\n", ln.Label, ln.Amount)
+		}
 	}
 }
 
@@ -721,6 +785,8 @@ var reportTemplate = template.Must(template.New("report").Parse(`<!doctype html>
   th.amt, td.amt { text-align: right; }
   .amt { text-align: right; font-variant-numeric: tabular-nums; }
   .total td { border-top: 2px solid #000; font-weight: bold; }
+  .subtotal td { font-weight: bold; }
+  .subtotal td:first-child { border-top: 1px solid #ccc; }
   .none { color: #999; }
   @media print { body { margin: 0; } }
 </style>
@@ -728,20 +794,20 @@ var reportTemplate = template.Must(template.New("report").Parse(`<!doctype html>
 <h2>Income statement</h2>
 <div class="period">{{.IncomePeriod}}</div>
 <h3>Income</h3>
-<table>{{range .Income.Income}}<tr><td>{{.Account}}</td><td class="amt">{{.Amount}}</td></tr>{{else}}<tr><td class="none">(none)</td><td></td></tr>{{end}}</table>
+<table>{{range .IncomeLines}}<tr{{if .Subtotal}} class="subtotal"{{end}}><td>{{.Label}}</td><td class="amt">{{.Amount}}</td></tr>{{else}}<tr><td class="none">(none)</td><td></td></tr>{{end}}</table>
 <h3>Expenses</h3>
-<table>{{range .Income.Expenses}}<tr><td>{{.Account}}</td><td class="amt">{{.Amount}}</td></tr>{{else}}<tr><td class="none">(none)</td><td></td></tr>{{end}}</table>
+<table>{{range .ExpenseLines}}<tr{{if .Subtotal}} class="subtotal"{{end}}><td>{{.Label}}</td><td class="amt">{{.Amount}}</td></tr>{{else}}<tr><td class="none">(none)</td><td></td></tr>{{end}}</table>
 <table>{{range .Income.Net}}<tr class="total"><td>Net</td><td class="amt">{{.}}</td></tr>{{end}}</table>
 {{end}}
 {{if .Balance}}
 <h2>Balance sheet</h2>
 <div class="period">{{.BalanceAsOf}}</div>
 <h3>Assets</h3>
-<table>{{range .Balance.Assets}}<tr><td>{{.Account}}</td><td class="amt">{{.Amount}}</td></tr>{{else}}<tr><td class="none">(none)</td><td></td></tr>{{end}}</table>
+<table>{{range .AssetLines}}<tr{{if .Subtotal}} class="subtotal"{{end}}><td>{{.Label}}</td><td class="amt">{{.Amount}}</td></tr>{{else}}<tr><td class="none">(none)</td><td></td></tr>{{end}}</table>
 <h3>Liabilities</h3>
-<table>{{range .Balance.Liabilities}}<tr><td>{{.Account}}</td><td class="amt">{{.Amount}}</td></tr>{{else}}<tr><td class="none">(none)</td><td></td></tr>{{end}}</table>
-{{if .Balance.Equity}}<h3>Equity</h3>
-<table>{{range .Balance.Equity}}<tr><td>{{.Account}}</td><td class="amt">{{.Amount}}</td></tr>{{end}}</table>{{end}}
+<table>{{range .LiabilityLines}}<tr{{if .Subtotal}} class="subtotal"{{end}}><td>{{.Label}}</td><td class="amt">{{.Amount}}</td></tr>{{else}}<tr><td class="none">(none)</td><td></td></tr>{{end}}</table>
+{{if .EquityLines}}<h3>Equity</h3>
+<table>{{range .EquityLines}}<tr{{if .Subtotal}} class="subtotal"{{end}}><td>{{.Label}}</td><td class="amt">{{.Amount}}</td></tr>{{end}}</table>{{end}}
 <table>{{range .Balance.Net}}<tr class="total"><td>Net worth</td><td class="amt">{{.}}</td></tr>{{end}}</table>
 {{end}}
 {{if .Gains}}
@@ -758,18 +824,28 @@ var reportTemplate = template.Must(template.New("report").Parse(`<!doctype html>
 // renderReportHTML renders the statements as one HTML page.
 func renderReportHTML(w io.Writer, v reportView) error {
 	data := struct {
-		Income       *incomeStatement
-		IncomePeriod string
-		Balance      *balanceSheet
-		BalanceAsOf  string
-		Gains        *gainsSchedule
-		GainsPeriod  string
+		Income         *incomeStatement
+		IncomePeriod   string
+		IncomeLines    []statementLine
+		ExpenseLines   []statementLine
+		Balance        *balanceSheet
+		BalanceAsOf    string
+		AssetLines     []statementLine
+		LiabilityLines []statementLine
+		EquityLines    []statementLine
+		Gains          *gainsSchedule
+		GainsPeriod    string
 	}{Income: v.Income, Balance: v.Balance, Gains: v.Gains}
 	if v.Income != nil {
 		data.IncomePeriod = periodLabel(v.Income.From, v.Income.To)
+		data.IncomeLines = withSubtotals(v.Income.Income)
+		data.ExpenseLines = withSubtotals(v.Income.Expenses)
 	}
 	if v.Balance != nil {
 		data.BalanceAsOf = asOfLabel(v.Balance.AsOf)
+		data.AssetLines = withSubtotals(v.Balance.Assets)
+		data.LiabilityLines = withSubtotals(v.Balance.Liabilities)
+		data.EquityLines = withSubtotals(v.Balance.Equity)
 	}
 	if v.Gains != nil {
 		data.GainsPeriod = periodLabel(v.Gains.From, v.Gains.To)
