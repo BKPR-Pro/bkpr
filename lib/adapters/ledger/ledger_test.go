@@ -65,6 +65,47 @@ func TestTheMemoNoteAppearsOnlyWhenARuleRenamedThePayee(t *testing.T) {
 	}
 }
 
+// A posting's comment is rendered inline after the amount as an ordinary ledger note, so a person
+// can leave a reason on one leg of a split. A commentless posting is unchanged, so nothing else drifts.
+func TestPostingCommentIsWrittenInline(t *testing.T) {
+	tx := chequing(2, -8420, "ACME HARDWARE #4471")
+	e := model.Entry{
+		Payee: "Acme Hardware",
+		Postings: []model.Posting{
+			{Account: "Expenses:Repairs:Materials", Amount: cad(6000), Comment: "lumber for the deck"},
+			{Account: "Expenses:Repairs:Tools", Amount: cad(2420)},
+		},
+	}
+
+	got := write(t, tx, e)
+
+	if !strings.Contains(got, "  Expenses:Repairs:Materials  60.00 CAD  ; lumber for the deck\n") {
+		t.Errorf("the commented leg should carry its note inline:\n%s", got)
+	}
+	if !strings.Contains(got, "  Expenses:Repairs:Tools  24.20 CAD\n") {
+		t.Errorf("the uncommented leg should carry no note:\n%s", got)
+	}
+}
+
+// A priced posting carries its note after the @@ cost, so the cost form and the comment coexist.
+func TestPostingCommentFollowsTheCost(t *testing.T) {
+	tx := model.Transaction{
+		Date: on(1), Amount: model.Amount{Units: -100000, Scale: 2, Commodity: "USD"},
+		Description: "BUY AAPL", Account: "Assets:Bank",
+	}
+	cost := model.Amount{Units: 100000, Scale: 2, Commodity: "USD"}
+	e := model.Entry{
+		Payee: "Broker",
+		Postings: []model.Posting{
+			{Account: "Assets:Brokerage:AAPL", Amount: model.Amount{Units: 10, Commodity: "AAPL"}, Cost: &cost, Comment: "opening lot"},
+		},
+	}
+
+	if got := write(t, tx, e); !strings.Contains(got, "  Assets:Brokerage:AAPL  10 AAPL @@ 1000.00 USD  ; opening lot\n") {
+		t.Errorf("the note should follow the @@ cost:\n%s", got)
+	}
+}
+
 // Money into the source account credits income. The sign flips relative to the statement line.
 func TestIncomeEntry(t *testing.T) {
 	tx := chequing(5, 160000, "E-TRANSFER FROM J SMITH")

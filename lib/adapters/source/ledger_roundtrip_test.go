@@ -10,6 +10,52 @@ import (
 	"github.com/dallasread/bookkeeper/lib/model"
 )
 
+// A comment left on one leg of a split must survive the writer and the reader: it renders inline,
+// reads back onto the same posting, and re-renders byte-identically. This is what makes a note a
+// person leaves on their books durable across an export/import round trip.
+func TestLedgerPostingCommentRoundTrips(t *testing.T) {
+	cad := func(cents int64) model.Amount { return model.Amount{Units: cents, Scale: 2, Commodity: "CAD"} }
+	date, err := time.Parse("2006/01/02", "2026/03/02")
+	if err != nil {
+		t.Fatalf("date: %v", err)
+	}
+
+	txs := []model.Transaction{{
+		ID: "c-1", Account: "Assets:Bank:Chequing", Date: date, Amount: cad(-8420), Description: "Acme Hardware",
+	}}
+	entries := []model.Entry{{Payee: "Acme Hardware", Postings: []model.Posting{
+		{Account: "Expenses:Repairs:Materials", Amount: cad(6000), Comment: "lumber for the deck"},
+		{Account: "Expenses:Repairs:Tools", Amount: cad(2420)},
+	}}}
+
+	var first bytes.Buffer
+	if err := ledger.WriteAll(&first, txs, entries); err != nil {
+		t.Fatalf("WriteAll: %v", err)
+	}
+
+	_, gotEntries, err := source.ReadLedger(bytes.NewReader(first.Bytes()))
+	if err != nil {
+		t.Fatalf("re-import failed: %v", err)
+	}
+	if len(gotEntries) != 1 || len(gotEntries[0].Postings) != 2 {
+		t.Fatalf("read back %+v, want one entry with two postings", gotEntries)
+	}
+	if c := gotEntries[0].Postings[0].Comment; c != "lumber for the deck" {
+		t.Errorf("commented leg came back with %q, want the note carried", c)
+	}
+	if c := gotEntries[0].Postings[1].Comment; c != "" {
+		t.Errorf("uncommented leg came back with %q, want no note", c)
+	}
+
+	var second bytes.Buffer
+	if err := ledger.WriteAll(&second, txs, gotEntries); err != nil {
+		t.Fatalf("re-render failed: %v", err)
+	}
+	if first.String() != second.String() {
+		t.Fatalf("comment round trip is not byte-identical:\n--- wrote ---\n%s\n--- re-rendered ---\n%s", first.String(), second.String())
+	}
+}
+
 // A cost-basis line the ledger writer emits must read back through the source reader and re-render
 // byte-identically. The reader's own @@ tests hand-author their ledger text, so nothing ties the
 // writer's actual output to the reader; this drives real ledger.WriteAll bytes through ReadLedger.

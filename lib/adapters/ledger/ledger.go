@@ -69,12 +69,12 @@ func writeEntry(w io.Writer, tx model.Transaction, e model.Entry) error {
 			if cost.Units < 0 {
 				cost = cost.Negate()
 			}
-			if _, err := fmt.Fprintf(w, "  %s  %s @@ %s\n", p.Account, p.Amount, cost); err != nil {
+			if _, err := fmt.Fprintf(w, "  %s  %s @@ %s%s\n", p.Account, p.Amount, cost, note(p)); err != nil {
 				return err
 			}
 			continue
 		}
-		if _, err := fmt.Fprintf(w, "  %s  %s\n", p.Account, p.Amount); err != nil {
+		if _, err := fmt.Fprintf(w, "  %s  %s%s\n", p.Account, p.Amount, note(p)); err != nil {
 			return err
 		}
 	}
@@ -83,4 +83,13 @@ func writeEntry(w io.Writer, tx model.Transaction, e model.Entry) error {
 	// elided and its amount inferred. Nothing else can name it, and nothing else can unbalance it.
 	_, err := fmt.Fprintf(w, "  %s\n", tx.Account)
 	return err
+}
+
+// note renders a posting's inline comment, an "  ; text" suffix ledger-cli reads as an ordinary
+// posting note. It is empty when the posting carries no comment, so a plain leg is written unchanged.
+func note(p model.Posting) string {
+	if p.Comment == "" {
+		return ""
+	}
+	return "  ; " + p.Comment
 }

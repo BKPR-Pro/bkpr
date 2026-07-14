@@ -41,6 +41,12 @@ type Posting struct {
 	Account string  `json:"account"`
 	Amount  Amount  `json:"amount"`
 	Cost    *Amount `json:"cost,omitempty"`
+
+	// Comment is a free-text note on this one leg, carried alongside the account and amount. It is
+	// commentary, never data: nothing in the core reads it, it takes no part in balancing, and it is
+	// empty on an ordinary posting. The ledger adapters render it inline after the amount and read it
+	// back, so a reason left on a split survives a round trip.
+	Comment string `json:"comment,omitempty"`
 }
 
 // value is what the posting contributes toward balancing the line, in the statement's commodity. A

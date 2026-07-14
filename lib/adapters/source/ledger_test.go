@@ -186,18 +186,41 @@ func TestReadLedgerRefusesAFullyPricedEntryThatDoesNotBalance(t *testing.T) {
 	}
 }
 
-// Ledger allows a comment after an amount or a payee; the note is dropped, not parsed as data.
-func TestReadLedgerStripsInlineComments(t *testing.T) {
+// A comment on the entry header has no posting to belong to, so it is dropped: the payee and the
+// reconstructed amount ignore it entirely.
+func TestReadLedgerDropsAHeaderComment(t *testing.T) {
 	txs := readLedger(t, `2026/03/01  * Acme Hardware  ; paid in person
-  Expenses:Materials  84.20 CAD  ; two boxes of screws
+  Expenses:Materials  84.20 CAD
   Assets:Bank:Chequing
 `)
 	tx := txs[0]
 	if tx.Description != "Acme Hardware" {
-		t.Errorf("description = %q, want the inline comment stripped", tx.Description)
+		t.Errorf("description = %q, want the header comment dropped", tx.Description)
 	}
 	if tx.Amount.String() != "-84.20 CAD" {
 		t.Errorf("amount = %q, want -84.20 CAD", tx.Amount)
+	}
+}
+
+// An inline note on a posting is that leg's comment, kept as data rather than dropped: the amount
+// still parses cleanly with the note split off, and the note lands on the posting it followed.
+func TestReadLedgerCarriesAPostingComment(t *testing.T) {
+	_, entries, err := source.ReadLedger(strings.NewReader(`2026/03/01  * Acme Hardware
+  Expenses:Materials  84.20 CAD  ; two boxes of screws
+  Assets:Bank:Chequing
+`))
+	if err != nil {
+		t.Fatalf("ReadLedger: %v", err)
+	}
+	if len(entries) != 1 || len(entries[0].Postings) != 1 {
+		t.Fatalf("got %+v, want one entry with one posting", entries)
+	}
+	p := entries[0].Postings[0]
+	if p.Amount.String() != "84.20 CAD" {
+		t.Errorf("amount = %q, want 84.20 CAD with the note split off", p.Amount)
+	}
+	if p.Comment != "two boxes of screws" {
+		t.Errorf("comment = %q, want the inline note carried onto the posting", p.Comment)
 	}
 }
 

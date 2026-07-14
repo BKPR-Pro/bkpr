@@ -87,10 +87,12 @@ func ReadLedger(r io.Reader) ([]model.Transaction, []model.Entry, error) {
 			if !haveEntry {
 				return nil, nil, fmt.Errorf("ledger line %d: a posting before any entry", n)
 			}
-			p, err := parsePosting(stripComment(trimmed))
+			code, comment := splitComment(trimmed)
+			p, err := parsePosting(code)
 			if err != nil {
 				return nil, nil, fmt.Errorf("ledger line %d: %w", n, err)
 			}
+			p.comment = comment
 			postings = append(postings, p)
 		case strings.HasPrefix(line, "account ") || strings.HasPrefix(line, "~"):
 			// a directive or a periodic template, not a statement line
@@ -120,13 +122,23 @@ func ReadLedger(r io.Reader) ([]model.Transaction, []model.Entry, error) {
 	return txs, entries, nil
 }
 
-// stripComment drops an inline "; ..." note from a header or posting line: everything after the
-// amount (or the payee) is commentary, never data.
+// stripComment drops an inline "; ..." note from a header line: a comment on the entry header has
+// no posting to belong to, so everything after the payee is commentary the reader discards.
 func stripComment(s string) string {
+	code, _ := splitComment(s)
+	return code
+}
+
+// splitComment separates a line's code from its inline "; ..." note, returning the code trimmed of
+// trailing space and the note trimmed of surrounding space. On a posting the note is that leg's
+// comment, kept as data; on a header stripComment throws it away. A line with no ";" yields an
+// empty note.
+func splitComment(s string) (code, note string) {
 	if i := strings.IndexByte(s, ';'); i >= 0 {
+		note = strings.TrimSpace(s[i+1:])
 		s = s[:i]
 	}
-	return strings.TrimRight(s, " \t")
+	return strings.TrimRight(s, " \t"), note
 }
 
 // posting is one line of an entry: an account, and an amount unless it is the elided (balancing) one.
@@ -136,6 +148,7 @@ type posting struct {
 	account string
 	amount  model.Amount
 	cost    *model.Amount
+	comment string
 	priced  bool
 }
 
@@ -276,7 +289,7 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 	}
 	side := make([]model.Posting, 0, len(categorized))
 	for _, p := range categorized {
-		side = append(side, model.Posting{Account: p.account, Amount: p.amount, Cost: p.cost})
+		side = append(side, model.Posting{Account: p.account, Amount: p.amount, Cost: p.cost, Comment: p.comment})
 	}
 	return tx, side, nil
 }
