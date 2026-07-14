@@ -70,7 +70,7 @@ func buildInvoice(tx model.Transaction, entry model.Entry, meta map[string]map[s
 	summable := true
 	for _, p := range entry.Postings {
 		charge := p.Amount.Negate()
-		doc.Items = append(doc.Items, invoiceItem{Label: leaf(p.Account), Amount: charge.String()})
+		doc.Items = append(doc.Items, invoiceItem{Label: itemLabel(p), Amount: charge.String()})
 		if total.Commodity == "" {
 			total = charge
 			continue
@@ -102,6 +102,16 @@ func partyFor(account, fallbackName string, meta map[string]map[string]string) p
 		p.Address = strings.Split(addr, "\n")
 	}
 	return p
+}
+
+// itemLabel is what one line item reads as on the document: the note left on the posting when there
+// is one, since a person writes an item's description there, and otherwise the account's leaf. A
+// split can describe some legs and leave others to their account name.
+func itemLabel(p model.Posting) string {
+	if p.Comment != "" {
+		return p.Comment
+	}
+	return leaf(p.Account)
 }
 
 // leaf is the last segment of an account path, the human label for a posting on the document.

@@ -48,6 +48,30 @@ func TestBuildInvoiceUsesAccountMetadataForTheLetterhead(t *testing.T) {
 	}
 }
 
+// A note on a posting is the human description of that line item, so an invoice shows it in place of
+// the bare account leaf. A person writing item descriptions as posting comments wants the invoice to
+// read as those words, not as the account they were filed under. An uncommented leg still shows its
+// leaf, so a split with only some items described stays readable.
+func TestBuildInvoiceLabelsItemsWithThePostingNote(t *testing.T) {
+	tx := cadTx("abc123", 160000) // $1600 received
+	entry := model.Entry{Payee: "J. Smith", Postings: []model.Posting{
+		{Account: "Income:Consulting", Amount: model.Amount{Units: -120000, Scale: 2, Commodity: "CAD"}, Comment: "Website redesign, phase 2"},
+		{Account: "Income:Consulting:Hosting", Amount: model.Amount{Units: -40000, Scale: 2, Commodity: "CAD"}},
+	}}
+
+	doc := buildInvoice(tx, entry, nil, "invoice")
+
+	if len(doc.Items) != 2 {
+		t.Fatalf("items = %+v, want 2", doc.Items)
+	}
+	if doc.Items[0].Label != "Website redesign, phase 2" {
+		t.Errorf("described item label = %q, want the posting note", doc.Items[0].Label)
+	}
+	if doc.Items[1].Label != "Hosting" {
+		t.Errorf("uncommented item label = %q, want the account leaf", doc.Items[1].Label)
+	}
+}
+
 // Without metadata the biller falls back to the account path, so a document still renders.
 func TestBuildInvoiceFallsBackToTheAccountPath(t *testing.T) {
 	doc := buildInvoice(cadTx("x", 100), model.Entry{Payee: "Someone",
