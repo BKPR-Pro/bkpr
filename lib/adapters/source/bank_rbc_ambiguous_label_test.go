@@ -15,6 +15,7 @@ import (
 // real "22 Lisgar - Loan" import that stalled: the label was present, but on a hidden option first.
 // Skipped where Node or Playwright is not installed.
 func TestRBCWalksPastAHiddenOptionWithTheSameLabel(t *testing.T) {
+	requireBrowserTests(t)
 	account, err := os.ReadFile("testdata/rbc_account.html")
 	if err != nil {
 		t.Fatal(err)

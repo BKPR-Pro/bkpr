@@ -15,6 +15,7 @@ import (
 // the transactions are read -- proving credentials flow from Go to the browser and drive a login
 // without a person. Skipped where Node or Playwright is not installed.
 func TestRBCSignsInWithCredentials(t *testing.T) {
+	requireBrowserTests(t)
 	loginForm, err := os.ReadFile("testdata/rbc_login_form.html")
 	if err != nil {
 		t.Fatal(err)
@@ -55,6 +56,7 @@ func TestRBCSignsInWithCredentials(t *testing.T) {
 // Without credentials and with no person present, an expired session still fails fast rather than
 // hanging on a login form it cannot fill.
 func TestRBCWithoutCredentialsIsSessionExpired(t *testing.T) {
+	requireBrowserTests(t)
 	url := serveFixture(t, "rbc_login_form.html")
 
 	_, err := execBankScript(Bank{Institution: "rbc", LoginURL: url, DefaultCurrency: "CAD", Interactive: false}, nil)

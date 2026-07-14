@@ -14,6 +14,7 @@ import (
 // password are filled and SMS is chosen, so the test passes only if that whole cross-frame flow
 // actually ran.
 func TestPCFinancialSignsInAcrossTheThreatMetrixFrame(t *testing.T) {
+	requireBrowserTests(t)
 	const loginHTML = `<!doctype html><html><body>
 	  <input aria-label="Username" name="username" type="text">
 	  <input aria-label="Password" name="password" type="password">
@@ -112,6 +113,7 @@ func pcfRow(desc, date, amount, amountClass string) string {
 // positive -- and read the "Current balance" tile as the owing magnitude. This pins those against the
 // real account DOM.
 func TestPCFinancialReadsTheMastercard(t *testing.T) {
+	requireBrowserTests(t)
 	body := `
 	  <balance-block><div class="balance-block transactions-lrg dollar"><div class="balance-block-content">
 	    <div class="description-container"><p class="description tooltip">Current balance</p></div>
@@ -174,6 +176,7 @@ func TestPCFinancialReadsTheMastercard(t *testing.T) {
 // then keeps only rows on/after it. The fixture puts an older row on page 2 (revealed by Next), so the
 // test passes only if the reader both advanced the paginator and dropped the out-of-window row.
 func TestPCFinancialPagesBackToTheFromDate(t *testing.T) {
+	requireBrowserTests(t)
 	page1 := pcfRow("RECENT BUY", "Jul 10, 2026", "$40.00", "positive") +
 		pcfRow("Payment RBC", "Jul 5, 2026", "$500.00", "negative")
 	page2 := pcfRow("OLD BUY", "Feb 5, 2026", "$88.00", "positive")

@@ -12,6 +12,7 @@ import (
 // looking at the HTML the browser saw instead of guessing. The snapshot's directory is made
 // self-ignoring, since the page holds real statement data that must not be committed.
 func TestBankScriptWritesASnapshot(t *testing.T) {
+	requireBrowserTests(t)
 	url := serveFixture(t, "rbc_account.html")
 	dir := t.TempDir()
 
@@ -41,6 +42,7 @@ func TestBankScriptWritesASnapshot(t *testing.T) {
 // not guessed at. Here a login wall with no credentials and no person present fails, and the snapshot
 // of that wall must be written before the run gives up.
 func TestBankScriptSnapshotsOnFailure(t *testing.T) {
+	requireBrowserTests(t)
 	url := serveFixture(t, "rbc_login_form.html")
 	dir := t.TempDir()
 
@@ -60,6 +62,7 @@ func TestBankScriptSnapshotsOnFailure(t *testing.T) {
 // A real run reports its stages through the Progress callback, so the CLI can show a live status
 // instead of a silent hang.
 func TestBankScriptReportsProgress(t *testing.T) {
+	requireBrowserTests(t)
 	url := serveFixture(t, "rbc_account.html")
 
 	var stages []string

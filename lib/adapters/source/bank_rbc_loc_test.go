@@ -26,6 +26,7 @@ func options(n int, extra ...string) string {
 // sign -- a Credit (payment) positive, a Debit (advance) negative -- and the balance is the owing
 // amount (the books' negation happens on the Go/CLI side).
 func TestRBCReadsALegacyLineOfCredit(t *testing.T) {
+	requireBrowserTests(t)
 	days := options(31)
 	months := options(12)
 	years := `<option value="2025">2025</option><option value="2026">2026</option><option value="2027">2027</option>`

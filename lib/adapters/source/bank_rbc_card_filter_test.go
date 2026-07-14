@@ -12,6 +12,7 @@ import (
 // clicked, and the row only appears after the whole chain runs -- so the test fails if the Posted
 // search step is skipped.
 func TestRBCCardWidensViaPostedSearch(t *testing.T) {
+	requireBrowserTests(t)
 	const page = `<!doctype html><html><body>
 	  <table aria-label="Table 2: Posted transactions details">
 	    <tbody><tr><td><button id="posted" type="button">Search</button></td></tr></tbody>

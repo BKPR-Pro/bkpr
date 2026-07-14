@@ -49,6 +49,7 @@ func skipIfNoBrowser(t *testing.T, err error) {
 // selector or format drift is caught here instead of by an empty statement. Skipped where Node or
 // Playwright is not installed, since then no browser can drive the page.
 func TestRBCScriptReadsAccountPage(t *testing.T) {
+	requireBrowserTests(t)
 	url := serveFixture(t, "rbc_account.html")
 
 	out, err := execBankScript(Bank{Institution: "rbc", LoginURL: url, DefaultCurrency: "CAD"}, nil)
@@ -103,6 +104,7 @@ func TestRBCScriptReadsAccountPage(t *testing.T) {
 // recognizes it and the run fails as a session that needs refreshing (EX_TEMPFAIL -> ErrSessionExpired)
 // rather than reading the login page as an empty statement.
 func TestRBCScriptDetectsLoginWall(t *testing.T) {
+	requireBrowserTests(t)
 	url := serveFixture(t, "rbc_login.html")
 
 	_, err := execBankScript(Bank{Institution: "rbc", LoginURL: url, DefaultCurrency: "CAD", Interactive: false}, nil)

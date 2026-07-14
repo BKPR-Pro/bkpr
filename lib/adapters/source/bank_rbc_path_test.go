@@ -13,6 +13,7 @@ import (
 // no URL of its own. rbc.js types the credentials, clears 2-step by matching the question keyword, and
 // the harness walks the account path. Skipped where Node or Playwright is not installed.
 func TestRBCSignsInClears2StepAndWalksThePath(t *testing.T) {
+	requireBrowserTests(t)
 	account, err := os.ReadFile("testdata/rbc_account.html")
 	if err != nil {
 		t.Fatal(err)

@@ -93,6 +93,7 @@ func TestReadBankUnknownInstitution(t *testing.T) {
 // with an unreachable site) an import fails loudly rather than silently recording nothing. Skipped
 // where Node itself is not installed.
 func TestScriptsFailLoudlyWithoutABrowser(t *testing.T) {
+	requireBrowserTests(t)
 	// An unreachable URL so the run fails quickly even where Playwright happens to be installed, and
 	// non-interactive so it never tries to open a browser.
 	_, err := execBankScript(Bank{Institution: "rbc", LoginURL: "http://127.0.0.1:0/"}, nil)

@@ -12,6 +12,7 @@ import (
 // reverse of a chequing. As a liability the books hold it negative, so a charge must come out negative
 // and a payment positive.
 func TestRBCReadsAVisaCard(t *testing.T) {
+	requireBrowserTests(t)
 	const page = `<!doctype html><html><body>
 	  <table class="rbc-transaction-list-table"><tbody>
 	    <tr data-role="transaction-list-table-transaction" class="rbc-transaction-list-transaction-new">
@@ -69,6 +70,7 @@ func TestRBCReadsAVisaCard(t *testing.T) {
 // card reads $0.00, which must be recorded as a real balance (not treated as "no balance"), so the CLI
 // can reconcile the card to zero.
 func TestRBCReadsACardZeroBalance(t *testing.T) {
+	requireBrowserTests(t)
 	const page = `<!doctype html><html><body>
 	  <div class="mini-statement--with-tooltip current-balance">
 	    <span class="label">Current Balance:</span>

@@ -11,6 +11,7 @@ import (
 // import records the balance -- owing, so negative once the CLI applies the liability sign -- and
 // reads zero transactions rather than failing.
 func TestRBCReadsABalanceOnlyLoan(t *testing.T) {
+	requireBrowserTests(t)
 	const page = `<!doctype html><html><body class="template-legacy">
 	  <h1 id="pagetitle">22 Lisgar - Loan</h1>
 	  <table>

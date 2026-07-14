@@ -12,6 +12,7 @@ import (
 // both date fields hold a value -- so the test passes only if the panel was opened, both fields were
 // filled, Apply ran, and Show More paged the rest in.
 func TestRBCReadsAWiderHistoryWindow(t *testing.T) {
+	requireBrowserTests(t)
 	const page = `<!doctype html><html><body>
 	  <button id="filter" type="button">Filter</button>
 	  <div id="panel" style="display:none">
@@ -80,6 +81,7 @@ func TestRBCReadsAWiderHistoryWindow(t *testing.T) {
 // An explicit from/to range drives the same filter as the relative window, so a backfill of a known
 // period reads the same way.
 func TestRBCReadsAnExplicitDateRange(t *testing.T) {
+	requireBrowserTests(t)
 	// A card's filter labels its date fields "Date Range From"/"Date Range To" rather than giving them
 	// the chequing's #rbc-dp ids, so this exercises the label path.
 	const page = `<!doctype html><html><body>

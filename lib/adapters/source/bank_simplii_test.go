@@ -33,6 +33,7 @@ func signedInSimplii(body string) string {
 // the account picker + transactions appear -- so the test passes only if the cross-frame fill and
 // submit actually happened, then the reader runs.
 func TestSimpliiSignsInAcrossFramesThenReads(t *testing.T) {
+	requireBrowserTests(t)
 	const cardHTML = `<!doctype html><html><body>
 	  <input data-test-id="card-number-input" type="text">
 	  <input data-test-id="password-input" type="password">
@@ -104,6 +105,7 @@ func TestSimpliiSignsInAcrossFramesThenReads(t *testing.T) {
 // credit (whose balance Simplii shows negative) and the asset chequing alike. Runs through the stealth
 // path (patchright + real Chrome), so it is skipped where that tooling is absent.
 func TestSimpliiReadsALineOfCredit(t *testing.T) {
+	requireBrowserTests(t)
 	body := `
 	  <div class="tombstone"><div class="row">
 	    <div class="box-small balance"><span>Balance:</span><em>−$49,671.86</em></div>
@@ -180,6 +182,7 @@ func TestSimpliiReadsALineOfCredit(t *testing.T) {
 // the From date holds the requested start, so the test passes only if -from actually reached the
 // date fields.
 func TestSimpliiReadsAWiderHistoryWindow(t *testing.T) {
+	requireBrowserTests(t)
 	months := padOptions(12)
 	days := padOptions(31)
 	years := `<option value="2025">2025</option><option value="2026">2026</option>`
@@ -250,6 +253,7 @@ func TestSimpliiReadsAWiderHistoryWindow(t *testing.T) {
 // The chequing uses tr.transaction-row (the LOC uses bare tr); keying off td.date reads both. As an
 // asset its balance is positive and taken as-is.
 func TestSimpliiReadsChequing(t *testing.T) {
+	requireBrowserTests(t)
 	body := `
 	  <div class="tombstone"><div class="row tombstone-regular">
 	    <div class="box-small"><span>Balance:</span><em>$1,000.00</em></div>
