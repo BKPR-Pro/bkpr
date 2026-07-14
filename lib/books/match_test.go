@@ -201,13 +201,13 @@ func TestTwoAssertedOppositeLinesAreNotFusedAsATransfer(t *testing.T) {
 	importOne(t, log, lineIn("bill", "Assets:Bank:Chequing", 12, -100000, "RBC Mastercard"))
 
 	// The paycheck: money left chequing into the shareholder loan, with a note on the leg.
-	if err := books.Categorize(log, "human", "carried", "pay", "", "Dallas Read",
+	if err := books.Categorize(log, "human", "carried", "pay", "", "Dallas Read", "",
 		[]model.Posting{{Account: "Assets:Bank:Chequing", Amount: cad(-100000), Comment: "Paycheque"}}); err != nil {
 		t.Fatalf("Categorize pay: %v", err)
 	}
 	// The card payment: money left chequing to the card. It names the card, not the shareholder loan,
 	// so the two do not mutually name each other and only the loose fold could pair them.
-	if err := books.Categorize(log, "human", "carried", "bill", "", "RBC Mastercard",
+	if err := books.Categorize(log, "human", "carried", "bill", "", "RBC Mastercard", "",
 		[]model.Posting{{Account: "Liabilities:Card", Amount: cad(100000)}}); err != nil {
 		t.Fatalf("Categorize bill: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestACrossCurrencyTransferBooksOnce(t *testing.T) {
 	importOne(t, log, crossLeg("u", "Assets:USD", 2, usd(74000), "FX FROM CAD"))
 
 	price := cad(100000)
-	if err := books.Categorize(log, "human", "", "c", "", "Transfer to USD",
+	if err := books.Categorize(log, "human", "", "c", "", "Transfer to USD", "",
 		[]model.Posting{{Account: "Assets:USD", Amount: usd(74000), Cost: &price}}); err != nil {
 		t.Fatalf("Categorize: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestACrossCurrencyPairWithoutTheCostTieBooksBoth(t *testing.T) {
 	importOne(t, log, crossLeg("c", "Assets:Chequing:CAD", 1, cad(-100000), "DINNER"))
 	importOne(t, log, crossLeg("u", "Assets:USD", 2, usd(74000), "REFUND"))
 
-	if err := books.Categorize(log, "human", "", "c", "", "Dinner", whole("Expenses:Food", -100000)); err != nil {
+	if err := books.Categorize(log, "human", "", "c", "", "Dinner", "", whole("Expenses:Food", -100000)); err != nil {
 		t.Fatalf("Categorize: %v", err)
 	}
 

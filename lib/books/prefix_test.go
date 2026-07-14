@@ -81,7 +81,7 @@ func TestCategorizeByPrefixKeysToTheFullFingerprint(t *testing.T) {
 		t.Fatalf("Transaction: %v", err)
 	}
 	post := []model.Posting{{Account: "Expenses:Travel:Fuel", Amount: tx.Amount.Negate()}}
-	if err := Categorize(log, "human", "", "aaaa1111b", "", "Fuel Stop", post); err != nil {
+	if err := Categorize(log, "human", "", "aaaa1111b", "", "Fuel Stop", "", post); err != nil {
 		t.Fatalf("Categorize: %v", err)
 	}
 

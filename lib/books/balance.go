@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/dallasread/bookkeeper/lib/eventlog"
@@ -170,7 +171,7 @@ func Balances(log *eventlog.Log) (map[string]map[string]model.Amount, error) {
 		}
 	}
 	for i, tx := range txs {
-		add(tx.Account, tx.Amount)
+		add(entries[i].SourceAccount(tx), tx.Amount)
 		for _, p := range entries[i].Postings {
 			add(p.Account, p.Amount)
 		}
@@ -180,8 +181,11 @@ func Balances(log *eventlog.Log) (map[string]map[string]model.Amount, error) {
 
 // accountBalanceAsOf folds the kept ledger into one account's balance on a date, in one commodity: the
 // source amounts of its own lines plus the postings other entries make into it (a transfer booked from
-// the far side lands here as a posting), counting only what is dated on or before asOf. This mirrors
-// the balance sheet, narrowed to one account.
+// the far side lands here as a posting), counting only what is dated on or before asOf. It rolls the
+// subtree up -- an account carries its descendants too -- so a parent a connector registered on
+// reconciles to the sum of the purpose children its charges route to, which is what lets one physical
+// card be split by purpose and still tie to its one bank balance. This mirrors the balance sheet,
+// narrowed to one account and everything filed under it.
 func accountBalanceAsOf(txs []model.Transaction, entries []model.Entry, account string, asOf time.Time, commodity string) model.Amount {
 	sum := model.Amount{Commodity: commodity}
 	add := func(a model.Amount) {
@@ -192,15 +196,16 @@ func accountBalanceAsOf(txs []model.Transaction, entries []model.Entry, account 
 			sum = next
 		}
 	}
+	within := func(a string) bool { return a == account || strings.HasPrefix(a, account+":") }
 	for i, tx := range txs {
 		if tx.Date.After(asOf) {
 			continue
 		}
-		if tx.Account == account {
+		if within(entries[i].SourceAccount(tx)) {
 			add(tx.Amount)
 		}
 		for _, p := range entries[i].Postings {
-			if p.Account == account {
+			if within(p.Account) {
 				add(p.Amount)
 			}
 		}

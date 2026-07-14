@@ -135,6 +135,24 @@ func TestBalanceSheetHoldsAssetsAndOwesLiabilities(t *testing.T) {
 	}
 }
 
+// A routed entry's source leg lands where it was routed, so the balance sheet agrees with the
+// account list and reconcile: a card charge registered on the parent but routed to a purpose child
+// owes on the child, and the parent holds nothing of it directly.
+func TestBalanceSheetPutsARoutedLegOnTheChild(t *testing.T) {
+	tx := model.Transaction{Date: on(1), Account: "Liabilities:PC Mastercard", Amount: cad2(-10000)}
+	e := model.Entry{Source: "Liabilities:PC Mastercard:9 Schoodic", Postings: []model.Posting{post("Expenses:Materials:9 Schoodic", cad2(10000))}}
+	sheet := buildBalanceSheet([]model.Transaction{tx}, []model.Entry{e}, time.Time{}, "", nil)
+
+	if got := rowAmount(t, sheet.Liabilities, "Liabilities:PC Mastercard:9 Schoodic"); got != "100.00 CAD" {
+		t.Errorf("routed child owes %q, want 100.00 CAD", got)
+	}
+	for _, r := range sheet.Liabilities {
+		if r.Account == "Liabilities:PC Mastercard" {
+			t.Errorf("the registered parent shows %s directly, want none: the leg routed to the child", r.Amount)
+		}
+	}
+}
+
 // Shares sit on the balance sheet in their own commodity, not as a dollar figure.
 func TestBalanceSheetHoldsShares(t *testing.T) {
 	cost := model.Amount{Units: 100000, Scale: 2, Commodity: "USD"}

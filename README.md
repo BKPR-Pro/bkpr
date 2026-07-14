@@ -815,7 +815,9 @@ that prices a stock purchase), so a later conversion back realizes the exchange 
 
 A bank import reads the account's balance at the same time as its lines and records it — ground truth
 to check the books against. `bkpr reconcile` folds the books to that date and reports the difference per
-account. The first balance for an account **anchors** it: imports rarely reach the day it was opened,
+account. An account carries its **subtree**, so a parent with no lines of its own reconciles to the sum
+of its children; that is what lets one card be registered on a parent and split by purpose beneath it
+(see [Splitting one card by purpose](#splitting-one-card-by-purpose)). The first balance for an account **anchors** it: imports rarely reach the day it was opened,
 so the anchor derives that opening balance (the bank's figure less what the books fold to on that
 date) and the account matches by definition. Every balance after is a real check — with the opening
 figure fixed, the books at the later date must equal the bank's number exactly, and any delta is
@@ -826,6 +828,41 @@ nothing, and it needs nothing typed in — the scrape supplies the truth.
 now, and where it stands against the bank. An account is yours once a statement imports against it or
 a connector posts to it — the same owned-account set that tells an internal transfer from a payment
 out to the world.
+
+### Splitting one card by purpose
+
+One physical card can be split by purpose in the books: a single PC Mastercard whose debt is filed by
+property and business line (`9 Schoodic`, `128 Milltown`, `Consulting`). But a connector reconciles one
+account to one bank balance, and a rule that only names the category assigns the offset (the expense)
+while the **card leg** stays on the single account the connector registered on. So every charge lumps
+onto one card account, and the purpose split is lost.
+
+`-source` routes the card leg. A rule names where the elided card leg lands, keyed off the same match
+that names the category:
+
+```sh
+bkpr rules set "kent" -category "Expenses:Real Estate:Materials:9 Schoodic" -source "Liabilities:PC Mastercard:9 Schoodic"
+```
+
+Register the connector on the **parent** `Liabilities:PC Mastercard`, add one rule per purpose, and each
+matching charge self-routes: the offset to its expense, the card leg to its purpose child. A one-off
+that no pattern would catch takes the same flag on `categorize`, alongside the category or split it is
+correcting:
+
+```sh
+bkpr categorize 0d76f1f1 -category "Expenses:...:Consulting" -source "Liabilities:PC Mastercard:Consulting"
+```
+
+Reconcile is what makes this hold. A parent rolls its subtree up: the connector records one bank balance
+on `Liabilities:PC Mastercard`, its children carry the purpose slices, and reconcile sums the whole
+subtree against that one figure. So a card split five ways still ties to the penny, and the debt stays
+broken out by what it is for. Routing to an account that sits under nothing you hold **warns** rather
+than refuses, since only a child of the reconciling parent rolls up to it.
+
+The split survives the artifact. `bkpr books -format ledger` renders the routed leg on the child, so
+`ledger -f books.ledger bal` reads the same balance bookkeeper does, and a `; registered:` note names
+the account the line was imported on, so an export/import round trip restores both the routing and the
+line's fingerprint rather than collapsing the charge back onto the parent.
 
 ## Books
 

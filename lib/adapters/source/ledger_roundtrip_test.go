@@ -102,6 +102,66 @@ func TestLedgerSourcePostingCommentRoundTrips(t *testing.T) {
 	}
 }
 
+// A routed entry -- one whose card leg was sent to a purpose sub-account off the account it was
+// imported on -- must survive the round trip whole. The elided leg renders on the child, so an
+// external ledger tool reads the same balance bookkeeper does; a "registered:" tag names the account
+// the line was imported on, so the reader restores both the routing (Entry.Source = the child) and
+// the registered account the line's fingerprint keys on (tx.Account = the parent), rather than
+// collapsing the charge onto the child and drifting its fingerprint.
+func TestLedgerRoutedSourceLegRoundTrips(t *testing.T) {
+	cad := func(cents int64) model.Amount { return model.Amount{Units: cents, Scale: 2, Commodity: "CAD"} }
+	date, err := time.Parse("2006/01/02", "2026/03/05")
+	if err != nil {
+		t.Fatalf("date: %v", err)
+	}
+
+	txs := []model.Transaction{{
+		ID: "r-1", Account: "Liabilities:PC Mastercard", Date: date, Amount: cad(-10000), Description: "Kent Building Supplies",
+	}}
+	entries := []model.Entry{{
+		Payee:    "Kent Building Supplies",
+		Source:   "Liabilities:PC Mastercard:9 Schoodic Street",
+		Postings: []model.Posting{{Account: "Expenses:Real Estate:Materials:9 Schoodic Street", Amount: cad(10000)}},
+	}}
+
+	var first bytes.Buffer
+	if err := ledger.WriteAll(&first, txs, entries); err != nil {
+		t.Fatalf("WriteAll: %v", err)
+	}
+	// The child, not the parent, carries the elided leg in the file, so `ledger bal` agrees with us.
+	if !bytes.Contains(first.Bytes(), []byte("Liabilities:PC Mastercard:9 Schoodic Street")) {
+		t.Fatalf("routed leg not rendered on the child:\n%s", first.String())
+	}
+
+	gotTxs, gotEntries, err := source.ReadLedger(bytes.NewReader(first.Bytes()))
+	if err != nil {
+		t.Fatalf("re-import failed: %v", err)
+	}
+	if len(gotTxs) != 1 {
+		t.Fatalf("read back %d lines, want 1", len(gotTxs))
+	}
+	if gotTxs[0].Account != "Liabilities:PC Mastercard" {
+		t.Errorf("tx.Account = %q, want the registered parent (so the fingerprint holds)", gotTxs[0].Account)
+	}
+	if gotEntries[0].Source != "Liabilities:PC Mastercard:9 Schoodic Street" {
+		t.Errorf("Entry.Source = %q, want the routed child recovered", gotEntries[0].Source)
+	}
+	if gotTxs[0].Comment != "" {
+		t.Errorf("tx.Comment = %q, want none: the registered tag is not a user note", gotTxs[0].Comment)
+	}
+	if !gotEntries[0].Balances(gotTxs[0]) {
+		t.Error("the recovered entry should still balance its line")
+	}
+
+	var second bytes.Buffer
+	if err := ledger.WriteAll(&second, gotTxs, gotEntries); err != nil {
+		t.Fatalf("re-render failed: %v", err)
+	}
+	if first.String() != second.String() {
+		t.Fatalf("routed round trip is not byte-identical:\n--- wrote ---\n%s\n--- re-rendered ---\n%s", first.String(), second.String())
+	}
+}
+
 // Standalone comment lines inside an entry -- not attached to any posting, the worksheet a person
 // keeps beside a line -- must survive the round trip. They render as their own "; text" lines under
 // the header, read back onto the entry in order, and re-render byte-identically, internal alignment

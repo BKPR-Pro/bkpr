@@ -33,6 +33,7 @@ type ruleData struct {
 	Amount     *model.Amount     `json:"amount,omitempty"`
 	Payee      string            `json:"payee,omitempty"`
 	Category   string            `json:"category,omitempty"`
+	Source     string            `json:"source,omitempty"`
 	TaxRate    string            `json:"tax_rate,omitempty"`
 	TaxAccount string            `json:"tax_account,omitempty"`
 	Metadata   map[string]string `json:"metadata,omitempty"`
@@ -119,7 +120,7 @@ func ruleFrom(recordID string, data ruleData) rules.Rule {
 		match = recordID
 	}
 	return rules.Rule{
-		Match: match, Amount: data.Amount, Payee: data.Payee, Category: data.Category,
+		Match: match, Amount: data.Amount, Payee: data.Payee, Category: data.Category, Source: data.Source,
 		TaxRate: data.TaxRate, TaxAccount: data.TaxAccount, Metadata: data.Metadata,
 	}
 }
@@ -128,7 +129,7 @@ func ruleFrom(recordID string, data ruleData) rules.Rule {
 // pattern and amount too, since the record id is now a composite key rather than the pattern.
 func dataFrom(r rules.Rule, before, why string) ruleData {
 	return ruleData{
-		Match: r.Match, Amount: r.Amount, Payee: r.Payee, Category: r.Category,
+		Match: r.Match, Amount: r.Amount, Payee: r.Payee, Category: r.Category, Source: r.Source,
 		TaxRate: r.TaxRate, TaxAccount: r.TaxAccount, Metadata: r.Metadata, Before: before, Why: why,
 	}
 }

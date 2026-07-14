@@ -47,6 +47,44 @@ func TestARuleNamesThePayeeAndTheAccountToPostTo(t *testing.T) {
 	}
 }
 
+// A rule can route the source (card/liability) leg to a sub-account, so a physical card imported on
+// one registered account self-routes each matching charge to its purpose child. Routing changes only
+// where the elided leg lands, never how much, so the categorized side still balances the whole line.
+func TestARuleRoutesTheSourceLegToASubAccount(t *testing.T) {
+	e := engine(t, rules.Rule{Match: `kent`, Category: "Expenses:Materials:9 Schoodic", Source: "Liabilities:PC Mastercard:9 Schoodic"})
+
+	line := tx("KENT BUILDING SUPPLIES")
+	got := e.Apply(line)
+
+	if got.Source != "Liabilities:PC Mastercard:9 Schoodic" {
+		t.Errorf("Source = %q, want the routed sub-account", got.Source)
+	}
+	if got.SourceAccount(line) != "Liabilities:PC Mastercard:9 Schoodic" {
+		t.Errorf("SourceAccount = %q, want the routed leg to land on the child", got.SourceAccount(line))
+	}
+	if !got.Balances(line) {
+		t.Error("routing moves the leg, not the amount: the entry must still balance the line")
+	}
+}
+
+// Source is first-wins per field like every other: a specific rule routes the leg while a later,
+// broader rule still names the payee it left empty.
+func TestSourceIsFirstWinsPerField(t *testing.T) {
+	e := engine(t,
+		rules.Rule{Match: `kent`, Category: "Expenses:Materials:9 Schoodic", Source: "Liabilities:PC Mastercard:9 Schoodic"},
+		rules.Rule{Match: `building`, Source: "Liabilities:PC Mastercard:Wrong", Payee: "Kent Building Supplies"},
+	)
+
+	got := e.Apply(tx("KENT BUILDING SUPPLIES"))
+
+	if got.Source != "Liabilities:PC Mastercard:9 Schoodic" {
+		t.Errorf("Source = %q, want the earlier rule's route", got.Source)
+	}
+	if got.Payee != "Kent Building Supplies" {
+		t.Errorf("payee = %q, want the later rule to fill the gap", got.Payee)
+	}
+}
+
 // The statement's sign is from the source account's point of view, so the categorized posting
 // takes the opposite one. Money out of the account is money into an expense.
 func TestThePostingTakesTheOppositeSignOfTheStatementLine(t *testing.T) {

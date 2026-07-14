@@ -155,7 +155,7 @@ var usageSections = []usageSection{
 		{"connectors list", ""},
 	}},
 	{"RULES", []usageLine{
-		{"rules set", "<re> [-amount <amt>] [-category <account>] [-payee <name>] [-tax-rate <pct> -tax-account <account>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]"},
+		{"rules set", "<re> [-amount <amt>] [-category <account>] [-payee <name>] [-source <account>] [-tax-rate <pct> -tax-account <account>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]"},
 		{"rules rm", "<re> [-amount <amt>]"},
 		{"rules mv", "<re> [-amount <amt>] [-before <re>]"},
 		{"rules list", ""},
@@ -167,7 +167,7 @@ var usageSections = []usageSection{
 		{"import", "<file> -format csv|ledger|jsonl"},
 		{"import", "<connector> [-relogin] [-history <days> | -from <date> [-to <date>]]"},
 		{"import", "-all [-relogin] [-history <days> | -from <date> [-to <date>]]"},
-		{"categorize", "<fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-invoice <n>] [-why <reason>] [-actor <name>]"},
+		{"categorize", "<fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-invoice <n>] [-source <account>] [-why <reason>] [-actor <name>]"},
 		{"comment", "<fingerprint> (-text <note> | -remove) [-account <a>] [-why <reason>] [-actor <name>]"},
 		{"void", "<fingerprint> [-why <reason>] [-actor <name>]"},
 		{"match", "<fingerprint> (-with <fingerprint> | -break) [-actor <name>]"},
@@ -358,7 +358,7 @@ var reference = []docGroup{
 `},
 	}},
 	{"RULES  (deterministic categorization; first matching rule wins per field)", []docTopic{
-		{[]string{"rules"}, `  rules set <re> [-amount <amt>] [-category <account>] [-payee <name>] [-tax-rate <pct> -tax-account <account>] [-meta <k=v> ...] [-before <re>] [-why <reason>]
+		{[]string{"rules"}, `  rules set <re> [-amount <amt>] [-category <account>] [-payee <name>] [-source <account>] [-tax-rate <pct> -tax-account <account>] [-meta <k=v> ...] [-before <re>] [-why <reason>]
       Add a rule, or change one already matching this pattern. On an existing rule only the
       fields you name change, and since that reclassifies every past line it matched, it
       takes a -why. A new rule lands last unless -before places it ahead of another. Account
@@ -371,10 +371,13 @@ var reference = []docGroup{
       amounts. -tax-rate and -tax-account (required together) mark a vendor whose charge
       already includes sales tax: the rate is extracted from the total (net = total / (1 +
       rate)) onto the category, the tax onto its account, e.g. -tax-rate 15% -tax-account
-      "Assets:HST ITC". -meta attaches opaque key=value pairs (repeatable) that a connector
-      reads by name, e.g. -meta rentapp.lease=31 tells the export which lease a matching rent
-      deposit belongs to. Either way it reports how many lines the books reclassified, so a
-      pattern that catches nothing (or too much) is visible the moment it is written.
+      "Assets:HST ITC". -source routes the matched line's card/liability leg to a sub-account
+      instead of the account it was imported on, so a physical card registered on one parent
+      splits by purpose: each charge self-routes to its purpose child, and the parent reconciles
+      to the one bank balance by rolling those children up. -meta attaches opaque key=value pairs
+      (repeatable) that a connector reads by name, e.g. -meta rentapp.lease=31 tells the export
+      which lease a matching rent deposit belongs to. Either way it reports how many lines the
+      books reclassified, so a pattern that catches nothing (or too much) is visible at once.
   rules rm  <re> [-amount <amt>]              Remove a rule (-amount picks the variant).
   rules mv  <re> [-amount <amt>] [-before <re>]   Reorder a rule (-before omitted moves it last).
   rules list                                  Show the rules in order.
@@ -430,7 +433,7 @@ var reference = []docGroup{
       file is a no-op, keyed by a fingerprint of its content.
 `},
 		{[]string{"categorize"}, `  categorize <fingerprint> (-category <account> | -post <account>=<amount> ... |
-             -sell <account>=<qty> ... -gain <account>) [-payee <name>] [-invoice <n>] [-why <reason>] [-actor <name>]
+             -sell <account>=<qty> ... -gain <account>) [-payee <name>] [-invoice <n>] [-source <account>] [-why <reason>] [-actor <name>]
       Assert the postings for one line, overriding the rule for that line only. Use -post
       more than once to split one charge across accounts. A -post amount may name its own
       commodity and an @@ total price, so a share bought with cash is
@@ -439,6 +442,9 @@ var reference = []docGroup{
       gain, is folded from your purchases: -sell "Assets:Brokerage:AAPL=10 AAPL" -gain "Income:Capital Gains".
       -invoice records the invoice or bill number for the line, the ledger (code); it renders as
       "(2073)" before the payee and reads back into its own field.
+      -source routes this line's card/liability leg to a sub-account instead of the account it was
+      imported on, e.g. -source "Liabilities:PC Mastercard:9 Schoodic"; the parent it rolls up to
+      still reconciles to the one bank balance. It is the per-line form of a rules -source route.
       -actor records who decided (default human), so a model driving this command is told
       apart from a person in the log; rules set and void take it too.
 `},
@@ -1274,6 +1280,7 @@ func ruleSetOne(args []string) error {
 	r.Match = pattern
 	fs.StringVar(&r.Category, "category", "", "account to post the line to")
 	fs.StringVar(&r.Payee, "payee", "", "payee to record on the entry")
+	fs.StringVar(&r.Source, "source", "", "route the matched line's card/liability leg to a sub-account, e.g. \"Liabilities:PC Mastercard:9 Schoodic\"; the parent it rolls up to still reconciles to the one bank balance")
 	amount := fs.String("amount", "", "narrow the rule to lines of this magnitude, e.g. 175 (a bare amount is read as CAD; \"175 USD\" names another); its pattern and amount together are the rule's identity")
 	fs.StringVar(&r.TaxRate, "tax-rate", "", "sales tax the total already includes, e.g. 15%; splits the tax onto -tax-account")
 	fs.StringVar(&r.TaxAccount, "tax-account", "", "account the extracted tax posts to, e.g. \"Assets:HST ITC\"")
@@ -1301,6 +1308,7 @@ func ruleSetOne(args []string) error {
 	}
 	defer closeLog()
 
+	warnUnrootedSource(log, r.Source)
 	was, err := entriesByTx(log)
 	if err != nil {
 		return err
@@ -1389,6 +1397,9 @@ func upsertRule(log *eventlog.Log, r rules.Rule, provided map[string]bool, befor
 		}
 		if provided["payee"] {
 			merged.Payee = r.Payee
+		}
+		if provided["source"] {
+			merged.Source = r.Source
 		}
 		if provided["tax-rate"] {
 			merged.TaxRate = r.TaxRate
@@ -1526,13 +1537,13 @@ func ruleList(args []string) error {
 // identical ones.
 func renderRules(out io.Writer, set []rules.Rule) {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "MATCH\tAMOUNT\tPAYEE\tCATEGORY")
+	fmt.Fprintln(w, "MATCH\tAMOUNT\tPAYEE\tCATEGORY\tSOURCE")
 	for _, r := range set {
 		amount := ""
 		if r.Amount != nil {
 			amount = r.Amount.String()
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.Match, amount, r.Payee, r.Category)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.Match, amount, r.Payee, r.Category, r.Source)
 	}
 	w.Flush()
 }
@@ -1607,6 +1618,7 @@ func categorize(args []string) error {
 	category := fs.String("category", "", "post the whole line to this one account")
 	payee := fs.String("payee", "", "the payee to record on the entry")
 	invoice := fs.String("invoice", "", "the invoice or bill number for this entry, the ledger (code)")
+	source := fs.String("source", "", "route this line's card/liability leg to a sub-account, e.g. \"Liabilities:PC Mastercard:9 Schoodic\"; the parent it rolls up to still reconciles to the one bank balance")
 	why := fs.String("why", "", "why this line is categorized so; recorded with the assertion")
 	gain := fs.String("gain", "", "on a sale, the account its capital gain or loss lands in, e.g. Income:Capital Gains")
 	actor := fs.String("actor", "human", "who is categorizing; the log records who decided")
@@ -1657,12 +1669,34 @@ func categorize(args []string) error {
 		return err
 	}
 
-	if err := books.Categorize(s.Log, *actor, *why, txID, *invoice, *payee, post); err != nil {
+	warnUnrootedSource(s.Log, *source)
+	if err := books.Categorize(s.Log, *actor, *why, txID, *invoice, *payee, *source, post); err != nil {
 		return err
 	}
 	// tx.ID rather than the argument: a quoted prefix echoes back as the whole fingerprint.
 	fmt.Printf("categorized %s\n", tx.ID)
 	return nil
+}
+
+// warnUnrootedSource flags a routed -source that has no owned ancestor to roll up into. Routing the
+// card leg to a sub-account is what lets a purpose-split card still reconcile to one bank balance,
+// but only when the child sits under an account that reconciles -- the registered parent. A source
+// hanging off nothing you hold will not tie out, so it is worth a heads-up. It never refuses: a
+// deliberate routing elsewhere is the author's call, and the source becomes owned once asserted.
+func warnUnrootedSource(log *eventlog.Log, source string) {
+	if source == "" {
+		return
+	}
+	owned, err := books.OwnedAccounts(log)
+	if err != nil {
+		return
+	}
+	for a := range owned {
+		if a != source && strings.HasPrefix(source, a+":") {
+			return // a reconciling ancestor already holds it
+		}
+	}
+	fmt.Fprintf(os.Stderr, "warning: -source %q sits under no account you hold, so it will not roll up to a bank balance in reconcile\n", source)
 }
 
 // commentCmd leaves a free-text note on one posting of a line, or clears it with -remove. The note

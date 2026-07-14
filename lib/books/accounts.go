@@ -98,6 +98,19 @@ func OwnedAccounts(log *eventlog.Log) (map[string]bool, error) {
 			owned[c.Account] = true
 		}
 	}
+	// A routed entry moves its source leg off the transaction's own account onto a sub-account, so
+	// that sub-account is one you hold too: it must show in the account list and reconcile, and the
+	// balance sheet only counts a leg landing on an owned account. Fold the entries to learn where
+	// each source leg actually lands, so a routing rule or categorization brings its child into view.
+	_, entries, err := categorized(log)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range entries {
+		if e.Source != "" {
+			owned[e.Source] = true
+		}
+	}
 	return owned, nil
 }
 

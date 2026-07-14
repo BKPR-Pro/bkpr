@@ -52,7 +52,7 @@ func ReadLedger(r io.Reader) ([]model.Transaction, []model.Entry, error) {
 		if memo != "" {
 			description = memo
 		}
-		tx, side, err := reconstruct(date, description, postings, seen)
+		tx, side, routedSource, err := reconstruct(date, description, postings, seen)
 		if err != nil {
 			return fmt.Errorf("ledger entry at line %d (%s): %w", entryLine, payee, err)
 		}
@@ -60,8 +60,10 @@ func ReadLedger(r io.Reader) ([]model.Transaction, []model.Entry, error) {
 		// The entry title is the payee the file names, kept distinct from the memo the line
 		// fingerprints on, so a carried assertion reads as the file wrote it. Standalone notes inside
 		// the entry ride along as block comments, in the order the file wrote them. The pending flag is
-		// the entry's own accounting state, carried back so a "!" line is not re-asserted cleared.
-		entries = append(entries, model.Entry{Payee: payee, Invoice: invoice, Pending: pending, Postings: side, BlockComments: blockComments})
+		// the entry's own accounting state, carried back so a "!" line is not re-asserted cleared. A
+		// routed source leg (one the file sent to a sub-account, named by a "registered:" tag) is
+		// carried as the entry's Source, so re-import lands the leg on the same child.
+		entries = append(entries, model.Entry{Payee: payee, Invoice: invoice, Pending: pending, Postings: side, Source: routedSource, BlockComments: blockComments})
 		haveEntry, invoice, pending, memo, postings, blockComments = false, "", false, "", nil, nil
 		return nil
 	}
@@ -283,7 +285,7 @@ func twoSpaceGap(s string) int {
 	return -1
 }
 
-func reconstruct(date time.Time, description string, postings []posting, seen map[string]int) (model.Transaction, []model.Posting, error) {
+func reconstruct(date time.Time, description string, postings []posting, seen map[string]int) (model.Transaction, []model.Posting, string, error) {
 	var elided []posting // the amountless leg(s); at most one is allowed, and it is the source account
 	var priced []posting // every posting that carries an amount, i.e. the categorized side
 	sums := map[string]model.Amount{}
@@ -307,12 +309,12 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 		}
 		next, err := prev.Add(v)
 		if err != nil {
-			return model.Transaction{}, nil, err
+			return model.Transaction{}, nil, "", err
 		}
 		sums[v.Commodity] = next
 	}
 	if len(sums) == 0 {
-		return model.Transaction{}, nil, fmt.Errorf("entry has no priced postings")
+		return model.Transaction{}, nil, "", fmt.Errorf("entry has no priced postings")
 	}
 
 	// a commodity whose legs cancel among themselves asks nothing of the statement account
@@ -329,9 +331,9 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 	var categorized []posting // the postings the file categorized the line into, the source excluded
 	switch {
 	case len(elided) > 1:
-		return model.Transaction{}, nil, fmt.Errorf("need at most one amountless posting for the statement account, found %d", len(elided))
+		return model.Transaction{}, nil, "", fmt.Errorf("need at most one amountless posting for the statement account, found %d", len(elided))
 	case len(remainders) > 1:
-		return model.Transaction{}, nil, fmt.Errorf("cannot add %s and %s in one entry without a price", remainders[0].Commodity, remainders[1].Commodity)
+		return model.Transaction{}, nil, "", fmt.Errorf("cannot add %s and %s in one entry without a price", remainders[0].Commodity, remainders[1].Commodity)
 	case len(elided) == 1:
 		// the source is the amountless posting, so every priced posting is categorization
 		account = elided[0].account
@@ -342,7 +344,7 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 		}
 		categorized = priced
 	case len(remainders) != 0:
-		return model.Transaction{}, nil, fmt.Errorf("entry with every posting priced sums to %s, not zero", remainders[0])
+		return model.Transaction{}, nil, "", fmt.Errorf("entry with every posting priced sums to %s, not zero", remainders[0])
 	default:
 		// fully priced and balanced: ledger's convention writes the source account last, so every
 		// posting before it is categorization
@@ -350,6 +352,19 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 		account, amount, sourceComment = last.account, last.amount, last.comment
 		categorized = postings[:len(postings)-1]
 	}
+
+	// A routed leg names, in a "registered:" tag, the account the line was imported on. The account
+	// shown on the leg is the purpose child the charge routed to; the tag holds the parent the line's
+	// fingerprint keys on. Restore both, so the round trip preserves the routing and the fingerprint
+	// rather than collapsing the charge onto the child. A leg with no tag -- a hand-kept child line --
+	// is left exactly as written, its own account.
+	var routedSource string
+	if registered, rest, ok := cutRegisteredTag(sourceComment); ok && registered != "" {
+		routedSource = account
+		account = registered
+		sourceComment = rest
+	}
+
 	fp := Fingerprint(account, date, amount, description)
 	seen[fp]++
 
@@ -365,5 +380,26 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 	for _, p := range categorized {
 		side = append(side, model.Posting{Account: p.account, Amount: p.amount, Cost: p.cost, Comment: p.comment})
 	}
-	return tx, side, nil
+	return tx, side, routedSource, nil
+}
+
+// registeredTag marks the inline note on a routed source leg that names the account the line was
+// imported on. The writer in package ledger emits the same marker; the two are a matched pair.
+const registeredTag = "registered:"
+
+// cutRegisteredTag splits a source leg's note into the account the line was imported on and the
+// writer's own note, when a "registered: <account>" tag is present. The writer joins any note and the
+// tag with " ; ", the tag last, so this finds the segment that starts with the marker and returns the
+// rest as the plain comment. Without the tag the whole note is the comment and ok is false.
+func cutRegisteredTag(comment string) (registered, rest string, ok bool) {
+	parts := strings.Split(comment, " ; ")
+	for i, p := range parts {
+		if acct, found := strings.CutPrefix(p, registeredTag+" "); found {
+			others := make([]string, 0, len(parts)-1)
+			others = append(others, parts[:i]...)
+			others = append(others, parts[i+1:]...)
+			return strings.TrimSpace(acct), strings.TrimSpace(strings.Join(others, " ; ")), true
+		}
+	}
+	return "", comment, false
 }

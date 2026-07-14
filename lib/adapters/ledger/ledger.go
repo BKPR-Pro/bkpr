@@ -142,9 +142,18 @@ func writeEntry(w io.Writer, tx model.Transaction, e model.Entry) error {
 	// The transaction already knows which account its statement came from, so that posting is
 	// elided and its amount inferred. Nothing else can name it, and nothing else can unbalance it. A
 	// note the writer left on that source leg rides along after the account, read back as its comment.
-	_, err := fmt.Fprintf(w, "  %s%s\n", tx.Account, sourceNote(tx))
+	// A routed entry sends the leg to a purpose sub-account instead: the child carries it here so an
+	// external ledger tool reads the same balance bookkeeper does, and a "registered:" tag names the
+	// account the line was imported on, so a re-import restores the routing and the fingerprint rather
+	// than collapsing the charge onto the child.
+	_, err := fmt.Fprintf(w, "  %s%s\n", e.SourceAccount(tx), sourceLegNote(tx, e))
 	return err
 }
+
+// registeredTag prefixes the inline note that names the account a routed leg was imported on, so the
+// reader can tell it from an ordinary source-leg comment and restore both the routing and the line's
+// fingerprint. The reader in package source recognizes the same marker.
+const registeredTag = "registered:"
 
 // note renders a posting's inline comment, an "  ; text" suffix ledger-cli reads as an ordinary
 // posting note. It is empty when the posting carries no comment, so a plain leg is written unchanged.
@@ -155,12 +164,21 @@ func note(p model.Posting) string {
 	return "  ; " + p.Comment
 }
 
-// sourceNote renders the note on the elided source leg, the same "  ; text" suffix as any other
-// posting note. It is empty when the line carries none, so a source account with no note is written
-// unchanged.
-func sourceNote(tx model.Transaction) string {
-	if tx.Comment == "" {
+// sourceLegNote renders the inline note on the elided source leg: any note the writer left, and --
+// when the leg was routed to a sub-account -- a "registered: <account>" tag naming the account the
+// line was imported on. The tag is what lets the reader restore the routing and keep the line's
+// fingerprint, which keys on that account, across an export/import round trip. The two share one
+// "  ; ..." suffix, the writer's note first, so a routed leg that also carries a note keeps both.
+func sourceLegNote(tx model.Transaction, e model.Entry) string {
+	var parts []string
+	if tx.Comment != "" {
+		parts = append(parts, tx.Comment)
+	}
+	if e.Source != "" && e.Source != tx.Account {
+		parts = append(parts, registeredTag+" "+tx.Account)
+	}
+	if len(parts) == 0 {
 		return ""
 	}
-	return "  ; " + tx.Comment
+	return "  ; " + strings.Join(parts, " ; ")
 }

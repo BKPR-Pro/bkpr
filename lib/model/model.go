@@ -106,6 +106,15 @@ type Entry struct {
 	// learn where to export. Empty when no rule supplied any.
 	Metadata map[string]string
 
+	// Source, when set, is where this entry's elided leg lands instead of the transaction's own
+	// registered account: the sub-account a rule or a categorization routed the source (card,
+	// liability) leg to. A physical card imported on one registered account can then be split by
+	// purpose -- each charge's card leg routed to its purpose child -- while the postings still carry
+	// only the categorized side. It changes where the leg is booked, never how much: the postings
+	// still account for the whole line, so Balances is unaffected. Empty on an ordinary entry, whose
+	// leg stays on the transaction's account. See SourceAccount.
+	Source string
+
 	// Gain names the account that absorbs a sale's capital gain or loss, e.g. Income:Capital Gains.
 	// It is set only on a disposal: the shares leaving are valued at their cost base, and whatever
 	// is left over between that base and the proceeds is the realized gain. The base, and so the
@@ -119,6 +128,17 @@ type Entry struct {
 	// own note line under the header and read them back in order, so a block of notes survives a round
 	// trip. Empty on an ordinary entry.
 	BlockComments []string
+}
+
+// SourceAccount is the account this entry's elided leg lands on: the routed Source when a rule or a
+// categorization moved it to a sub-account, otherwise the transaction's own registered account. It
+// is the one place that decides where the inferred source leg is booked, so the balance sheet, the
+// per-account balance, and the ledger render all agree on it.
+func (e Entry) SourceAccount(tx Transaction) string {
+	if e.Source != "" {
+		return e.Source
+	}
+	return tx.Account
 }
 
 // Balances reports whether the postings account for the whole statement line. The statement's sign

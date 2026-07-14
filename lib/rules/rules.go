@@ -25,6 +25,14 @@ type Rule struct {
 	Payee    string `json:"payee,omitempty"`
 	Category string `json:"category,omitempty"`
 
+	// Source, when set, routes the elided source (card, liability) leg to a sub-account instead of the
+	// transaction's own registered account. A physical card imported on one account is then split by
+	// purpose: each matching charge's card leg self-routes to its purpose child, while Category still
+	// names where the offset lands. It is first-wins per field like the others, and it moves where the
+	// leg is booked, never how much, so the entry still accounts for the whole line. Empty leaves the
+	// leg on the account the line came from.
+	Source string `json:"source,omitempty"`
+
 	// Amount, when set, narrows the rule to lines of one magnitude: several payees that share a memo
 	// but differ only by amount (a property tax that is $175 for one house and $155 for another)
 	// become distinct rules on one pattern. It matches the line's magnitude, so the statement's
@@ -100,7 +108,7 @@ func New(rs []Rule) (*Engine, error) {
 // it, and turns the result into an entry. Every line posts: one no rule matches goes to
 // Uncategorized rather than being withheld, or guessed into Expenses or Income.
 func (e *Engine) Apply(tx model.Transaction) model.Entry {
-	var payee, category, taxAccount string
+	var payee, category, source, taxAccount string
 	var taxNum, taxDen int64
 	var metadata map[string]string
 
@@ -118,6 +126,9 @@ func (e *Engine) Apply(tx model.Transaction) model.Entry {
 		}
 		if category == "" {
 			category = r.Category
+		}
+		if source == "" {
+			source = r.Source
 		}
 		if taxDen == 0 && r.taxDen != 0 {
 			taxAccount, taxNum, taxDen = r.TaxAccount, r.taxNum, r.taxDen
@@ -153,6 +164,7 @@ func (e *Engine) Apply(tx model.Transaction) model.Entry {
 	return model.Entry{
 		Payee:    payee,
 		Postings: postings,
+		Source:   source,
 		Metadata: metadata,
 	}
 }

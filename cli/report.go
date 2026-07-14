@@ -168,7 +168,7 @@ func buildReport(txs []model.Transaction, entries []model.Entry, from, to time.T
 		if !inRange(tx.Date, from, to) {
 			continue
 		}
-		fold(tx.Account, tx.Amount, nil)
+		fold(entries[i].SourceAccount(tx), tx.Amount, nil)
 		for _, p := range entries[i].Postings {
 			fold(p.Account, p.Amount, p.Cost)
 		}
@@ -244,7 +244,7 @@ func buildBalanceSheet(txs []model.Transaction, entries []model.Entry, asOf time
 		if !asOf.IsZero() && tx.Date.After(asOf) {
 			continue
 		}
-		add(tx.Account, tx.Amount, nil)
+		add(entries[i].SourceAccount(tx), tx.Amount, nil)
 		for _, p := range entries[i].Postings {
 			add(p.Account, p.Amount, p.Cost)
 		}
