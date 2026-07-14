@@ -53,7 +53,7 @@ func TestMergeLogCombinesTwoBooks(t *testing.T) {
 	if err := AddRule(theirs, "human", rules.Rule{Match: "coffee", Category: "Expenses:Meals"}, ""); err != nil {
 		t.Fatalf("AddRule: %v", err)
 	}
-	if err := Categorize(theirs, "model:claude", "", "card-coffee", "Coffee House", []model.Posting{
+	if err := Categorize(theirs, "model:claude", "", "card-coffee", "", "Coffee House", []model.Posting{
 		{Account: "Expenses:Meals:Coffee", Amount: cadAmount(500)},
 	}); err != nil {
 		t.Fatalf("Categorize: %v", err)
@@ -162,7 +162,7 @@ func TestMergeLogPairsATransferSeenByBothBooks(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Import: %v", err)
 	}
-	if err := Categorize(chequing, "human", "", "out", "", []model.Posting{
+	if err := Categorize(chequing, "human", "", "out", "", "", []model.Posting{
 		{Account: "Assets:Bank:Savings", Amount: cadAmount(50000)},
 	}); err != nil {
 		t.Fatalf("Categorize out: %v", err)
@@ -174,7 +174,7 @@ func TestMergeLogPairsATransferSeenByBothBooks(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Import: %v", err)
 	}
-	if err := Categorize(savings, "human", "", "in", "", []model.Posting{
+	if err := Categorize(savings, "human", "", "in", "", "", []model.Posting{
 		{Account: "Assets:Bank:Chequing", Amount: cadAmount(-50000)},
 	}); err != nil {
 		t.Fatalf("Categorize in: %v", err)

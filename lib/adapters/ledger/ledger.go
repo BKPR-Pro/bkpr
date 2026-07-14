@@ -59,7 +59,14 @@ func writeEntry(w io.Writer, tx model.Transaction, e model.Entry) error {
 	if e.Pending {
 		flag = "!"
 	}
-	if _, err := fmt.Fprintf(w, "%s  %s %s\n", tx.Date.Format("2006/01/02"), flag, e.Payee); err != nil {
+	// The invoice or bill number, when the entry carries one, is written as the ledger transaction
+	// code -- "(2073)" before the payee -- which ledger tools read as the check/invoice number and the
+	// reader lifts back into its own field on the way in.
+	title := e.Payee
+	if e.Invoice != "" {
+		title = "(" + e.Invoice + ") " + e.Payee
+	}
+	if _, err := fmt.Fprintf(w, "%s  %s %s\n", tx.Date.Format("2006/01/02"), flag, title); err != nil {
 		return err
 	}
 	// The entry is titled with the payee, so when a rule renamed one the raw description would be

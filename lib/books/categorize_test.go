@@ -60,7 +60,7 @@ func TestAnAssertionOverridesTheRuleForThatLine(t *testing.T) {
 	loaded(t, log, rule("acme", "Expenses:Real Estate:Materials:Uncategorized"))
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE"))
 
-	err := books.Categorize(log, "human", "the receipt was Unit 1", "a", "Acme Hardware",
+	err := books.Categorize(log, "human", "the receipt was Unit 1", "a", "", "Acme Hardware",
 		whole("Expenses:Real Estate:Materials:45 Sample Avenue:Unit 1", -8420))
 	if err != nil {
 		t.Fatalf("Categorize: %v", err)
@@ -83,7 +83,7 @@ func TestAnAssertionTouchesOnlyItsOwnLine(t *testing.T) {
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE"))
 	importOne(t, log, line("b", 9, -4000, "ACME HARDWARE"))
 
-	if err := books.Categorize(log, "human", "", "a", "Acme", whole("Expenses:Materials:Unit 1", -8420)); err != nil {
+	if err := books.Categorize(log, "human", "", "a", "", "Acme", whole("Expenses:Materials:Unit 1", -8420)); err != nil {
 		t.Fatalf("Categorize: %v", err)
 	}
 
@@ -97,8 +97,8 @@ func TestTheLaterAssertionWins(t *testing.T) {
 	log := newLog()
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE"))
 
-	books.Categorize(log, "human", "", "a", "Acme", whole("Expenses:Unit 1", -8420))
-	if err := books.Categorize(log, "human", "actually Unit 2", "a", "Acme", whole("Expenses:Unit 2", -8420)); err != nil {
+	books.Categorize(log, "human", "", "a", "", "Acme", whole("Expenses:Unit 1", -8420))
+	if err := books.Categorize(log, "human", "actually Unit 2", "a", "", "Acme", whole("Expenses:Unit 2", -8420)); err != nil {
 		t.Fatalf("Categorize: %v", err)
 	}
 
@@ -113,7 +113,7 @@ func TestASplitAssertionCategorizesToSeveralAccounts(t *testing.T) {
 	log := newLog()
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE"))
 
-	err := books.Categorize(log, "human", "", "a", "Acme", []model.Posting{
+	err := books.Categorize(log, "human", "", "a", "", "Acme", []model.Posting{
 		{Account: "Expenses:Materials:Unit 1", Amount: cad(4000)},
 		{Account: "Expenses:Materials:Unit 2", Amount: cad(4420)},
 	})
@@ -132,7 +132,7 @@ func TestAnUnbalancedAssertionIsRefused(t *testing.T) {
 	log := newLog()
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE"))
 
-	err := books.Categorize(log, "human", "", "a", "Acme", []model.Posting{
+	err := books.Categorize(log, "human", "", "a", "", "Acme", []model.Posting{
 		{Account: "Expenses:Materials:Unit 1", Amount: cad(4000)},
 	})
 	if err == nil {
@@ -157,7 +157,7 @@ func TestAMixedCommodityAssertionIsRefused(t *testing.T) {
 	log := newLog()
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE")) // CAD
 
-	err := books.Categorize(log, "human", "", "a", "Acme", []model.Posting{
+	err := books.Categorize(log, "human", "", "a", "", "Acme", []model.Posting{
 		{Account: "Assets:Brokerage", Amount: model.Amount{Units: 10, Scale: 0, Commodity: "AAPL"}},
 	})
 	if err == nil {
@@ -177,7 +177,7 @@ func TestAPricedAssertionBuysSharesAgainstCash(t *testing.T) {
 	importOne(t, log, buy)
 
 	cost := model.Amount{Units: 100000, Scale: 2, Commodity: "USD"}
-	err := books.Categorize(log, "human", "opened the position", "buy", "Bought Apple",
+	err := books.Categorize(log, "human", "opened the position", "buy", "", "Bought Apple",
 		[]model.Posting{{Account: "Assets:Brokerage:AAPL", Amount: model.Amount{Units: 10, Commodity: "AAPL"}, Cost: &cost}})
 	if err != nil {
 		t.Fatalf("Categorize: %v", err)
@@ -214,7 +214,7 @@ func priced(units int64, symbol string, cents int64) model.Posting {
 func TestASaleBooksTheGainAgainstTheCostBase(t *testing.T) {
 	log := newLog()
 	buy := brokerage(t, log, "buy", 1, -100000, "BOUGHT 10 AAPL")
-	if err := books.Categorize(log, "human", "opened", buy.ID, "Bought Apple", []model.Posting{priced(10, "AAPL", 100000)}); err != nil {
+	if err := books.Categorize(log, "human", "opened", buy.ID, "", "Bought Apple", []model.Posting{priced(10, "AAPL", 100000)}); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 	sell := brokerage(t, log, "sell", 30, 120000, "SOLD 10 AAPL") // $1200 proceeds
@@ -252,7 +252,7 @@ func TestASaleBooksTheGainAgainstTheCostBase(t *testing.T) {
 func TestCorrectingAPurchaseMovesTheGain(t *testing.T) {
 	log := newLog()
 	buy := brokerage(t, log, "buy", 1, -100000, "BOUGHT 10 AAPL") // $1000 left the cash account
-	books.Categorize(log, "human", "", buy.ID, "Bought Apple", []model.Posting{priced(10, "AAPL", 100000)})
+	books.Categorize(log, "human", "", buy.ID, "", "Bought Apple", []model.Posting{priced(10, "AAPL", 100000)})
 	sell := brokerage(t, log, "sell", 30, 120000, "SOLD 10 AAPL") // $1200 proceeds
 	books.Sell(log, "human", "", sell.ID, "Sold Apple", "Income:Capital Gains",
 		[]model.Posting{{Account: "Assets:Brokerage:AAPL", Amount: model.Amount{Units: 10, Commodity: "AAPL"}}})
@@ -264,7 +264,7 @@ func TestCorrectingAPurchaseMovesTheGain(t *testing.T) {
 	// Of that $1000, $50 was a fee, not cost base. Re-split the buy so the shares cost $950. The
 	// base drops, so the sale's gain grows to $250, and the sale line is never touched.
 	fee := model.Amount{Units: 5000, Scale: 2, Commodity: "USD"}
-	err := books.Categorize(log, "human", "$50 of the line was a fee", buy.ID, "Bought Apple", []model.Posting{
+	err := books.Categorize(log, "human", "$50 of the line was a fee", buy.ID, "", "Bought Apple", []model.Posting{
 		priced(10, "AAPL", 95000),
 		{Account: "Expenses:Brokerage:Fees", Amount: fee},
 	})
@@ -297,9 +297,9 @@ func TestAFIFOAccountBooksTheOldestLotsGain(t *testing.T) {
 		t.Fatalf("SetPolicy: %v", err)
 	}
 	b1 := brokerage(t, log, "b1", 1, -100000, "BUY 10 @ 100")
-	books.Categorize(log, "human", "", b1.ID, "Buy1", []model.Posting{priced(10, "AAPL", 100000)})
+	books.Categorize(log, "human", "", b1.ID, "", "Buy1", []model.Posting{priced(10, "AAPL", 100000)})
 	b2 := brokerage(t, log, "b2", 10, -140000, "BUY 10 @ 140")
-	books.Categorize(log, "human", "", b2.ID, "Buy2", []model.Posting{priced(10, "AAPL", 140000)})
+	books.Categorize(log, "human", "", b2.ID, "", "Buy2", []model.Posting{priced(10, "AAPL", 140000)})
 	sell := brokerage(t, log, "sell", 30, 80000, "SELL 5") // $800 proceeds
 
 	err := books.Sell(log, "human", "", sell.ID, "Sold Apple", "Income:Capital Gains",
@@ -319,7 +319,7 @@ func TestAFIFOAccountBooksTheOldestLotsGain(t *testing.T) {
 func TestSellingMoreThanHeldIsRefused(t *testing.T) {
 	log := newLog()
 	buy := brokerage(t, log, "buy", 1, -100000, "BOUGHT 10 AAPL")
-	books.Categorize(log, "human", "", buy.ID, "Bought Apple", []model.Posting{priced(10, "AAPL", 100000)})
+	books.Categorize(log, "human", "", buy.ID, "", "Bought Apple", []model.Posting{priced(10, "AAPL", 100000)})
 	sell := brokerage(t, log, "sell", 30, 120000, "SOLD 11 AAPL")
 
 	err := books.Sell(log, "human", "", sell.ID, "Sold Apple", "Income:Capital Gains",
@@ -335,7 +335,7 @@ func TestCategorizingAnUnknownTransactionIsRefused(t *testing.T) {
 	log := newLog()
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE"))
 
-	if err := books.Categorize(log, "human", "", "nope", "X", whole("Expenses:X", -100)); err == nil {
+	if err := books.Categorize(log, "human", "", "nope", "", "X", whole("Expenses:X", -100)); err == nil {
 		t.Fatal("categorized a fingerprint that was never imported")
 	}
 }
@@ -346,7 +346,7 @@ func TestAnAssertionSurvivesARuleChange(t *testing.T) {
 	log := newLog()
 	loaded(t, log, rule("acme", "Expenses:Materials:Uncategorized"))
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE"))
-	books.Categorize(log, "human", "", "a", "Acme", whole("Expenses:Materials:Unit 1", -8420))
+	books.Categorize(log, "human", "", "a", "", "Acme", whole("Expenses:Materials:Unit 1", -8420))
 
 	// The rule now defaults hardware to Unit 2 for everyone.
 	if err := books.SetRule(log, "human", "", rule("acme", "Expenses:Materials:Unit 2")); err != nil {
@@ -394,7 +394,7 @@ func TestACarriedCategorizationIsOverriddenByAHuman(t *testing.T) {
 	books.CarryCategorizations(log, "import:acct.txt", "", []model.Transaction{tx},
 		[]model.Entry{{Payee: "Acme", Postings: whole("Expenses:Materials", -8420)}})
 
-	if err := books.Categorize(log, "human", "receipt was Unit 1", "a", "Acme",
+	if err := books.Categorize(log, "human", "receipt was Unit 1", "a", "", "Acme",
 		whole("Expenses:Materials:Unit 1", -8420)); err != nil {
 		t.Fatalf("Categorize: %v", err)
 	}

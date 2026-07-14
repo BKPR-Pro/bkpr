@@ -13,7 +13,7 @@ import (
 func TestCommentTheSolePosting(t *testing.T) {
 	log := newLog()
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE"))
-	if err := books.Categorize(log, "human", "", "a", "Acme Hardware", whole("Expenses:Repairs", -8420)); err != nil {
+	if err := books.Categorize(log, "human", "", "a", "", "Acme Hardware", whole("Expenses:Repairs", -8420)); err != nil {
 		t.Fatalf("Categorize: %v", err)
 	}
 
@@ -35,7 +35,7 @@ func TestCommentNamesOneLegOfASplit(t *testing.T) {
 		{Account: "Expenses:A", Amount: cad(4000)},
 		{Account: "Expenses:B", Amount: cad(6000)},
 	}
-	if err := books.Categorize(log, "human", "", "a", "Hardware", split); err != nil {
+	if err := books.Categorize(log, "human", "", "a", "", "Hardware", split); err != nil {
 		t.Fatalf("Categorize: %v", err)
 	}
 
@@ -56,7 +56,7 @@ func TestCommentNamesOneLegOfASplit(t *testing.T) {
 func TestCommentRemoveClearsTheNote(t *testing.T) {
 	log := newLog()
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE"))
-	if err := books.Categorize(log, "human", "", "a", "Acme Hardware", whole("Expenses:Repairs", -8420)); err != nil {
+	if err := books.Categorize(log, "human", "", "a", "", "Acme Hardware", whole("Expenses:Repairs", -8420)); err != nil {
 		t.Fatalf("Categorize: %v", err)
 	}
 	if err := books.Comment(log, "human", "", "a", "", "note to drop", false); err != nil {
@@ -98,7 +98,7 @@ func TestCommentOnARuleCategorizedLineAsserts(t *testing.T) {
 func TestCommentRejectsAnUnknownAccount(t *testing.T) {
 	log := newLog()
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE"))
-	if err := books.Categorize(log, "human", "", "a", "Acme Hardware", whole("Expenses:Repairs", -8420)); err != nil {
+	if err := books.Categorize(log, "human", "", "a", "", "Acme Hardware", whole("Expenses:Repairs", -8420)); err != nil {
 		t.Fatalf("Categorize: %v", err)
 	}
 
@@ -115,7 +115,7 @@ func TestCommentRejectsAnUnknownAccount(t *testing.T) {
 func TestCommentTheSourceLeg(t *testing.T) {
 	log := newLog()
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE"))
-	if err := books.Categorize(log, "human", "", "a", "Acme Hardware", whole("Expenses:Repairs", -8420)); err != nil {
+	if err := books.Categorize(log, "human", "", "a", "", "Acme Hardware", whole("Expenses:Repairs", -8420)); err != nil {
 		t.Fatalf("Categorize: %v", err)
 	}
 
@@ -165,7 +165,7 @@ func TestCommentOnTheSourceLegOverridesTheImportedNote(t *testing.T) {
 func TestCommentRefusesWhenTheSourceAccountIsAlsoAPosting(t *testing.T) {
 	log := newLog()
 	importOne(t, log, line("a", 2, -8420, "ACME HARDWARE"))
-	if err := books.Categorize(log, "human", "", "a", "Acme", whole("Assets:Bank:Chequing", -8420)); err != nil {
+	if err := books.Categorize(log, "human", "", "a", "", "Acme", whole("Assets:Bank:Chequing", -8420)); err != nil {
 		t.Fatalf("Categorize: %v", err)
 	}
 
@@ -183,7 +183,7 @@ func TestCommentRefusesAnAmbiguousSplit(t *testing.T) {
 		{Account: "Expenses:A", Amount: cad(4000)},
 		{Account: "Expenses:B", Amount: cad(6000)},
 	}
-	if err := books.Categorize(log, "human", "", "a", "Hardware", split); err != nil {
+	if err := books.Categorize(log, "human", "", "a", "", "Hardware", split); err != nil {
 		t.Fatalf("Categorize: %v", err)
 	}
 

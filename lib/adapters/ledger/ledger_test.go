@@ -119,6 +119,22 @@ func TestIncomeEntry(t *testing.T) {
 	}
 }
 
+// An entry's invoice or bill number is written as the ledger transaction code, "(2073)" before the
+// payee, so a number set as its own field renders where ledger tools read a check/invoice number.
+func TestInvoiceNumberRendersAsTheLedgerCode(t *testing.T) {
+	tx := chequing(1, 900000, "DNSimple")
+	e := model.Entry{
+		Payee:    "DNSimple",
+		Invoice:  "2073",
+		Postings: []model.Posting{{Account: "Income:Consulting:Contract:DNSimple", Amount: cad(-900000)}},
+	}
+
+	got := write(t, tx, e)
+	if !strings.Contains(got, "* (2073) DNSimple\n") {
+		t.Errorf("header should carry the invoice as a (code):\n%s", got)
+	}
+}
+
 // Every line bookkeeper writes came off a bank statement, so every line has cleared the bank.
 // The pending flag means the bank has not reported a transaction yet, and nothing here is that.
 func TestEveryEntryIsCleared(t *testing.T) {

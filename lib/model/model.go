@@ -85,6 +85,14 @@ type Entry struct {
 	Payee    string
 	Postings []Posting
 
+	// Invoice is the number of the invoice or bill this entry is billed under: your own number on
+	// income you raised, or the vendor's on a bill you paid. It is the ledger transaction code -- the
+	// "(2073)" in a header -- lifted out of the payee so it is a fact of its own rather than text buried
+	// in a name. It is metadata: nothing in the core reads it, it takes no part in balancing, and it is
+	// not part of the line's fingerprint, so numbering an entry never changes its identity. Empty when
+	// the entry carries no number.
+	Invoice string
+
 	// Pending marks an entry the bank has not cleared yet: an accrued invoice or bill whose cash has
 	// not arrived. It renders the ledger flag -- pending "!", cleared "*" -- and it is a render
 	// projection, not stored state: the fold sets it from settlement (an open accrual is pending, a

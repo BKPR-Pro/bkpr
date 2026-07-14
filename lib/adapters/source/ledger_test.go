@@ -38,11 +38,37 @@ func TestReadLedgerCarriesThePendingFlag(t *testing.T) {
 	if !entries[0].Pending {
 		t.Errorf("the ! entry came back not pending, want its pending state carried")
 	}
-	if entries[0].Payee != "(2073) DNSimple" {
-		t.Errorf("payee = %q, want the flag stripped but the code kept", entries[0].Payee)
+	if entries[0].Payee != "DNSimple" {
+		t.Errorf("payee = %q, want the flag and code stripped off the name", entries[0].Payee)
+	}
+	if entries[0].Invoice != "2073" {
+		t.Errorf("invoice = %q, want the (code) lifted into its own field", entries[0].Invoice)
 	}
 	if entries[1].Pending {
 		t.Errorf("the * entry came back pending, want a cleared entry not pending")
+	}
+}
+
+// The (code) in a header is the invoice or bill number: it is lifted out of the payee into its own
+// field, so a number is data rather than text buried in a name, and a payee with no code keeps its
+// whole name.
+func TestReadLedgerLiftsTheInvoiceCode(t *testing.T) {
+	_, entries, err := source.ReadLedger(strings.NewReader(`2026/04/01  * (2073) DNSimple
+  Income:Consulting:Contract:DNSimple  -9000.00 USD
+  Assets:Consulting:Chequing
+
+2026/04/02  * Swiss Chalet
+  Expenses:Consulting:Meals  53.08 CAD
+  Assets:Consulting:Chequing
+`))
+	if err != nil {
+		t.Fatalf("ReadLedger: %v", err)
+	}
+	if entries[0].Invoice != "2073" || entries[0].Payee != "DNSimple" {
+		t.Errorf("coded entry = {invoice %q, payee %q}, want {2073, DNSimple}", entries[0].Invoice, entries[0].Payee)
+	}
+	if entries[1].Invoice != "" || entries[1].Payee != "Swiss Chalet" {
+		t.Errorf("uncoded entry = {invoice %q, payee %q}, want {\"\", Swiss Chalet}", entries[1].Invoice, entries[1].Payee)
 	}
 }
 

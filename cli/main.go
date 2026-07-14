@@ -167,7 +167,7 @@ var usageSections = []usageSection{
 		{"import", "<file> -format csv|ledger|jsonl"},
 		{"import", "<connector> [-relogin] [-history <days> | -from <date> [-to <date>]]"},
 		{"import", "-all [-relogin] [-history <days> | -from <date> [-to <date>]]"},
-		{"categorize", "<fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]"},
+		{"categorize", "<fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-invoice <n>] [-why <reason>] [-actor <name>]"},
 		{"comment", "<fingerprint> (-text <note> | -remove) [-account <a>] [-why <reason>] [-actor <name>]"},
 		{"void", "<fingerprint> [-why <reason>] [-actor <name>]"},
 		{"match", "<fingerprint> (-with <fingerprint> | -break) [-actor <name>]"},
@@ -428,13 +428,15 @@ var reference = []docGroup{
       file is a no-op, keyed by a fingerprint of its content.
 `},
 		{[]string{"categorize"}, `  categorize <fingerprint> (-category <account> | -post <account>=<amount> ... |
-             -sell <account>=<qty> ... -gain <account>) [-payee <name>] [-why <reason>] [-actor <name>]
+             -sell <account>=<qty> ... -gain <account>) [-payee <name>] [-invoice <n>] [-why <reason>] [-actor <name>]
       Assert the postings for one line, overriding the rule for that line only. Use -post
       more than once to split one charge across accounts. A -post amount may name its own
       commodity and an @@ total price, so a share bought with cash is
       -post "Assets:Brokerage:AAPL=10 AAPL @@ 1000.00 USD". A sale instead names the shares
       it disposed of with -sell and where the gain lands with -gain; the cost base, and so the
       gain, is folded from your purchases: -sell "Assets:Brokerage:AAPL=10 AAPL" -gain "Income:Capital Gains".
+      -invoice records the invoice or bill number for the line, the ledger (code); it renders as
+      "(2073)" before the payee and reads back into its own field.
       -actor records who decided (default human), so a model driving this command is told
       apart from a person in the log; rules set and void take it too.
 `},
@@ -1585,6 +1587,7 @@ func categorize(args []string) error {
 	fs := flag.NewFlagSet("categorize", flag.ExitOnError)
 	category := fs.String("category", "", "post the whole line to this one account")
 	payee := fs.String("payee", "", "the payee to record on the entry")
+	invoice := fs.String("invoice", "", "the invoice or bill number for this entry, the ledger (code)")
 	why := fs.String("why", "", "why this line is categorized so; recorded with the assertion")
 	gain := fs.String("gain", "", "on a sale, the account its capital gain or loss lands in, e.g. Income:Capital Gains")
 	actor := fs.String("actor", "human", "who is categorizing; the log records who decided")
@@ -1635,7 +1638,7 @@ func categorize(args []string) error {
 		return err
 	}
 
-	if err := books.Categorize(s.Log, *actor, *why, txID, *payee, post); err != nil {
+	if err := books.Categorize(s.Log, *actor, *why, txID, *invoice, *payee, post); err != nil {
 		return err
 	}
 	// tx.ID rather than the argument: a quoted prefix echoes back as the whole fingerprint.

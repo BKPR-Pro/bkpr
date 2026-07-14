@@ -41,6 +41,39 @@ func TestCarryingKeepsAnEntrysBlockComments(t *testing.T) {
 	}
 }
 
+// An invoice or bill number the file names as a (code) must survive the whole import path: the
+// reader lifts it off the header, CarryCategorizations records it, and the fold hands it back on the
+// entry. Without threading it through the categorization event it is read but never stored, so the
+// number vanishes the moment the line is folded from the log.
+func TestCarryingKeepsAnEntrysInvoiceNumber(t *testing.T) {
+	log := newLog()
+
+	txs, entries, err := source.ReadLedger(strings.NewReader(`2026/04/01  * (2073) DNSimple
+  Income:Consulting:Contract:DNSimple  -9000.00 USD
+  Assets:Consulting:Chequing
+`))
+	if err != nil {
+		t.Fatalf("ReadLedger: %v", err)
+	}
+	if _, err := books.Import(log, "import:acct.txt", txs); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if _, _, err := books.CarryCategorizations(log, "import:acct.txt", "from acct.txt", txs, entries); err != nil {
+		t.Fatalf("CarryCategorizations: %v", err)
+	}
+
+	_, folded := ledger(t, log)
+	if len(folded) != 1 {
+		t.Fatalf("folded %d entries, want 1", len(folded))
+	}
+	if folded[0].Invoice != "2073" {
+		t.Fatalf("invoice number lost across the log: %q", folded[0].Invoice)
+	}
+	if folded[0].Payee != "DNSimple" {
+		t.Fatalf("payee = %q, want the code lifted off the name", folded[0].Payee)
+	}
+}
+
 // The whole point of carrying: a hand-kept ledger file already names its accounts, so importing it
 // and folding shows those accounts with no rule loaded and no manual categorize per line. This is
 // the end-to-end path the reader and the CarryCategorizations command exist to make honest.

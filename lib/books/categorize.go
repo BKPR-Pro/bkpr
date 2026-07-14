@@ -18,6 +18,7 @@ const ActionCategorized = "categorized"
 
 type categorizedData struct {
 	Payee         string          `json:"payee"`
+	Invoice       string          `json:"invoice,omitempty"` // the invoice or bill number, the ledger (code)
 	Postings      []model.Posting `json:"postings"`
 	Gain          string          `json:"gain,omitempty"`          // set on a sale: the account its capital gain lands in
 	BlockComments []string        `json:"blockComments,omitempty"` // standalone notes carried from a ledger file
@@ -29,7 +30,7 @@ type categorizedData struct {
 // The line must exist, so the fingerprint cannot orphan, and the postings must account for the
 // whole line, so the books stay balanced. Both are checked here rather than left for the render:
 // the books are the artifact, and a bad assertion should be refused at the moment it is made.
-func Categorize(log *eventlog.Log, actor, why, txID, payee string, postings []model.Posting) error {
+func Categorize(log *eventlog.Log, actor, why, txID, invoice, payee string, postings []model.Posting) error {
 	tx, err := Transaction(log, txID)
 	if err != nil {
 		return err
@@ -41,14 +42,14 @@ func Categorize(log *eventlog.Log, actor, why, txID, payee string, postings []mo
 	}
 
 	// tx.ID, not txID: the caller may have quoted a prefix, and the assertion must key to the line.
-	return assertCategorized(log, actor, why, tx.ID, payee, postings, nil)
+	return assertCategorized(log, actor, why, tx.ID, invoice, payee, postings, nil)
 }
 
 // assertCategorized records one categorization event, keyed by the transaction's fingerprint. It
 // is the shared tail of a hand correction and a carried-in categorization: both are the same fact
 // about one line, an assertion that overrides whatever the rules would have said.
-func assertCategorized(log *eventlog.Log, actor, why, txID, payee string, postings []model.Posting, blockComments []string) error {
-	data, err := json.Marshal(categorizedData{Payee: payee, Postings: postings, BlockComments: blockComments, Why: why})
+func assertCategorized(log *eventlog.Log, actor, why, txID, invoice, payee string, postings []model.Posting, blockComments []string) error {
+	data, err := json.Marshal(categorizedData{Payee: payee, Invoice: invoice, Postings: postings, BlockComments: blockComments, Why: why})
 	if err != nil {
 		return err
 	}
@@ -77,7 +78,7 @@ func CarryCategorizations(log *eventlog.Log, actor, why string, txs []model.Tran
 			skipped++
 			continue
 		}
-		if err := assertCategorized(log, actor, why, tx.ID, entry.Payee, entry.Postings, entry.BlockComments); err != nil {
+		if err := assertCategorized(log, actor, why, tx.ID, entry.Invoice, entry.Payee, entry.Postings, entry.BlockComments); err != nil {
 			return carried, skipped, err
 		}
 		carried++
@@ -233,7 +234,7 @@ func assertions(log *eventlog.Log) (map[string]model.Entry, error) {
 		if err := e.Decode(&data); err != nil {
 			return nil, fmt.Errorf("books: event %s: %w", e.ID, err)
 		}
-		out[e.RecordID] = model.Entry{Payee: data.Payee, Postings: data.Postings, Gain: data.Gain, BlockComments: data.BlockComments}
+		out[e.RecordID] = model.Entry{Payee: data.Payee, Invoice: data.Invoice, Postings: data.Postings, Gain: data.Gain, BlockComments: data.BlockComments}
 	}
 	return out, nil
 }

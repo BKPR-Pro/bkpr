@@ -162,10 +162,11 @@ func TestLedgerPendingFlagRoundTrips(t *testing.T) {
 
 	txs := []model.Transaction{{
 		ID: "p-1", Account: "Assets:Consulting:Chequing", Date: date,
-		Amount: usd(900000), Description: "(2073) DNSimple",
+		Amount: usd(900000), Description: "DNSimple",
 	}}
 	entries := []model.Entry{{
-		Payee:    "(2073) DNSimple",
+		Payee:    "DNSimple",
+		Invoice:  "2073",
 		Pending:  true,
 		Postings: []model.Posting{{Account: "Income:Consulting:Contract:DNSimple", Amount: usd(-900000)}},
 	}}
@@ -184,6 +185,9 @@ func TestLedgerPendingFlagRoundTrips(t *testing.T) {
 	}
 	if !gotEntries[0].Pending {
 		t.Errorf("the pending flag was lost on the round trip")
+	}
+	if gotEntries[0].Invoice != "2073" || gotEntries[0].Payee != "DNSimple" {
+		t.Errorf("invoice/payee = {%q, %q}, want the (code) lifted and round-tripped", gotEntries[0].Invoice, gotEntries[0].Payee)
 	}
 
 	var second bytes.Buffer
