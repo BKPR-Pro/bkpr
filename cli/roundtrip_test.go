@@ -17,11 +17,13 @@ import (
 // over and over. CSV in (every messy amount shape banks emit, duplicate lines included), rules
 // placing almost everything, a ledger-file statement joining it, the artifact rendered, and the
 // artifact imported into a second, empty book with the same rules — which must fold to the same
-// books: same fingerprints, same health line. Two things carry that equality: the artifact keeps
-// each line's raw description as a memo note, so the fingerprints regenerate, and a ledger file's
-// own categorization is carried in as an assertion, so a line no rule matches lands where the file
-// put it rather than in Uncategorized. The rule patterns themselves are still NOT in the artifact —
-// they live in the log, which is the backup.
+// books: same lines, same health line. Fingerprints scope to the door a line entered through, so
+// book two's ids regenerate under the artifact's own name rather than matching book one's; the
+// equality that survives the trip is content. Two things carry it: the artifact keeps each line's
+// raw description as a memo note, and a ledger file's own categorization is carried in as an
+// assertion, so a line no rule matches lands where the file put it rather than in Uncategorized.
+// The rule patterns themselves are still NOT in the artifact — they live in the log, which is the
+// backup.
 
 // lengthyCSV writes fourMonths of statement lines: ten a month, every amount shape the parser
 // accepts, and an identical pair on one day so the -1/-2 fingerprint suffixes are exercised.
@@ -163,7 +165,8 @@ func TestRoundTripLengthyBooks(t *testing.T) {
 	}
 
 	// Book two: empty, the same rules, and only the artifact as input. The memo notes carry each
-	// line's raw description, so the fingerprints regenerate identically and the rules fire the same.
+	// line's raw description, so the rules fire the same; the ids regenerate under the artifact's
+	// own name, one per line, since the artifact is the door these lines entered book two through.
 	bookHere(t)
 	theRules(t)
 	if err := importCmd([]string{artifact}); err != nil {
@@ -175,17 +178,18 @@ func TestRoundTripLengthyBooks(t *testing.T) {
 		t.Fatalf("book two folded to\n  %s\nwant the same books\n  %s", got, want)
 	}
 
-	ids1 := map[string]bool{}
-	for _, tx := range txs1 {
-		ids1[tx.ID] = true
-	}
 	if len(txs2) != len(txs1) {
 		t.Fatalf("book two has %d lines, book one %d", len(txs2), len(txs1))
 	}
+	ids2 := map[string]bool{}
 	for _, tx := range txs2 {
-		if !ids1[tx.ID] {
-			t.Errorf("fingerprint %s (%s) regenerated differently", tx.ID, tx.Description)
+		if tx.ID == "" {
+			t.Errorf("line %s (%s) has no fingerprint", tx.Date.Format("2006-01-02"), tx.Description)
 		}
+		if ids2[tx.ID] {
+			t.Errorf("fingerprint %s (%s) collided; a line would be lost", tx.ID, tx.Description)
+		}
+		ids2[tx.ID] = true
 	}
 
 	// One concrete line, checked all the way through: the rule renamed the payee, the memo kept

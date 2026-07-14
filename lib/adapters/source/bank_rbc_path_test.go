@@ -93,7 +93,7 @@ func TestRBCSignsInClears2StepAndWalksThePath(t *testing.T) {
 		t.Fatalf("sign-in + 2-step + navigation: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Assets:Bank:RBC", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Assets:Bank:RBC", "CAD")
 	if err != nil {
 		t.Fatalf("parsing rbc.js output %q: %v", out, err)
 	}

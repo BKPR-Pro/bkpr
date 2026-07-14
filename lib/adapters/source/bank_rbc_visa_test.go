@@ -46,7 +46,7 @@ func TestRBCReadsAVisaCard(t *testing.T) {
 		t.Fatalf("reading the Visa: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Liabilities:Consulting:RBC Visa", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:Consulting:RBC Visa", "CAD")
 	if err != nil {
 		t.Fatalf("parsing rbc.js output %q: %v", out, err)
 	}
@@ -102,7 +102,7 @@ func TestRBCReadsACardZeroBalance(t *testing.T) {
 		t.Fatalf("reading the card balance: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Liabilities:Consulting:RBC Visa", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:Consulting:RBC Visa", "CAD")
 	if err != nil {
 		t.Fatalf("parsing rbc.js output %q: %v", out, err)
 	}

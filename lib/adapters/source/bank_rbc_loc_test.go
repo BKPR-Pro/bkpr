@@ -80,7 +80,7 @@ func TestRBCReadsALegacyLineOfCredit(t *testing.T) {
 		t.Fatalf("reading the legacy LOC: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Liabilities:Real Estate:RBC LOC", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:Real Estate:RBC LOC", "CAD")
 	if err != nil {
 		t.Fatalf("parsing rbc.js output %q: %v", out, err)
 	}

@@ -58,7 +58,7 @@ func TestRBCScriptReadsAccountPage(t *testing.T) {
 		t.Fatalf("running rbc.js against the fixture: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Assets:Bank:RBC", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Assets:Bank:RBC", "CAD")
 	if err != nil {
 		t.Fatalf("parsing rbc.js output %q: %v", out, err)
 	}

@@ -82,7 +82,7 @@ func TestPCFinancialSignsInAcrossTheThreatMetrixFrame(t *testing.T) {
 
 	// The transaction reader is not exercised here (that is TestPCFinancialReadsTheMastercard); this
 	// test's point is that the cross-frame credentialed sign-in completes without error.
-	if _, err := parseBankOutput(out, "Liabilities:Personal:PC Mastercard", "CAD"); err != nil {
+	if _, err := parseBankOutput(out, "test-connector", "Liabilities:Personal:PC Mastercard", "CAD"); err != nil {
 		t.Fatalf("parsing pcfinancial.js output %q: %v", out, err)
 	}
 }
@@ -146,7 +146,7 @@ func TestPCFinancialReadsTheMastercard(t *testing.T) {
 		t.Fatalf("reading the PC Financial Mastercard: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Liabilities:Personal:PC Mastercard", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:Personal:PC Mastercard", "CAD")
 	if err != nil {
 		t.Fatalf("parsing pcfinancial.js output %q: %v", out, err)
 	}
@@ -220,7 +220,7 @@ func TestPCFinancialPagesBackToTheFromDate(t *testing.T) {
 		t.Fatalf("reading with a PC Financial history window: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Liabilities:Personal:PC Mastercard", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:Personal:PC Mastercard", "CAD")
 	if err != nil {
 		t.Fatalf("parsing pcfinancial.js output %q: %v", out, err)
 	}

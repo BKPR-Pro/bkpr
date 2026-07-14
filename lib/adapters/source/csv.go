@@ -16,8 +16,9 @@ import (
 	"github.com/dallasread/bookkeeper/lib/model"
 )
 
-// CSV is one account and how to read its statements. The account is its identity; the currency and
-// the column layout belong to that account, not to whoever runs an import. Banks disagree about
+// CSV is one account and how to read its statements. The account is where its lines land; the
+// currency and the column layout belong to that account, not to whoever runs an import. Banks
+// disagree about
 // column names, date formats, and whether amounts are one signed column or a debit/credit pair, so
 // this is configuration rather than code. A later OFX or aggregator source is a peer of this type.
 type CSV struct {
@@ -35,8 +36,9 @@ type CSV struct {
 
 var notAmount = regexp.MustCompile(`[^0-9.\-]`)
 
-// ReadCSV parses a statement into normalized transactions.
-func ReadCSV(r io.Reader, m CSV) ([]model.Transaction, error) {
+// ReadCSV parses a statement into normalized transactions, fingerprinted under scope -- the
+// statement file's own name, the door the lines entered through.
+func ReadCSV(r io.Reader, m CSV, scope string) ([]model.Transaction, error) {
 	if m.Amount == "" && m.Debit == "" && m.Credit == "" {
 		return nil, fmt.Errorf("source %s needs either an amount column or a debit/credit pair", m.Account)
 	}
@@ -92,7 +94,7 @@ func ReadCSV(r io.Reader, m CSV) ([]model.Transaction, error) {
 			Raw:         raw,
 		})
 	}
-	Identify(txs)
+	Identify(scope, txs)
 	return txs, nil
 }
 
@@ -167,12 +169,14 @@ func parseAmount(s, commodity string) (model.Amount, error) {
 	return amount, nil
 }
 
-// Fingerprint is the stable identity of a normalized line: a hash of the account, date, amount, and
-// normalized description. The same account and line always fingerprint the same, whatever source
-// read them, so a CSV and a bank import of one account produce interchangeable ids.
-func Fingerprint(account string, date time.Time, amount model.Amount, description string) string {
+// Fingerprint is the stable identity of a normalized line: a hash of the door it entered through
+// (a connector's name, a file's name), date, amount, and normalized description. The book account
+// the line lands in is deliberately not part of the hash, so re-pointing a connector to a new
+// account never moves its history's ids, and a backfill after the re-point still dedupes. The cost
+// is that identity is per-door: the same bank line read through two doors is two lines.
+func Fingerprint(scope string, date time.Time, amount model.Amount, description string) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
-		account,
+		scope,
 		date.Format("2006-01-02"),
 		amount.String(),
 		strings.Join(strings.Fields(strings.ToLower(description)), " "),
@@ -180,13 +184,14 @@ func Fingerprint(account string, date time.Time, amount model.Amount, descriptio
 	return hex.EncodeToString(sum[:])[:16]
 }
 
-// Identify assigns each transaction its fingerprint-based id, in order, disambiguating genuinely
-// identical lines on one day with a -N suffix so they stay distinct. A source builds transactions
-// without an id and calls this once, so the idempotency root is computed one way for every source.
-func Identify(txs []model.Transaction) {
+// Identify assigns each transaction its fingerprint-based id under one door's scope, in order,
+// disambiguating genuinely identical lines on one day with a -N suffix so they stay distinct. A
+// source builds transactions without an id and calls this once, so the idempotency root is
+// computed one way for every source.
+func Identify(scope string, txs []model.Transaction) {
 	seen := map[string]int{}
 	for i := range txs {
-		fp := Fingerprint(txs[i].Account, txs[i].Date, txs[i].Amount, txs[i].Description)
+		fp := Fingerprint(scope, txs[i].Date, txs[i].Amount, txs[i].Description)
 		seen[fp]++
 		txs[i].ID = fmt.Sprintf("%s-%d", fp, seen[fp])
 	}

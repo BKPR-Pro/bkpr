@@ -24,7 +24,7 @@ func TestReadsSignedAmountCSV(t *testing.T) {
 			"2026-03-01,ACME HARDWARE #4471,-84.20\n" +
 			"2026-03-02,RENT E-TRANSFER FROM J SMITH,1600.00\n")
 
-	txs, err := source.ReadCSV(in, signedMapping())
+	txs, err := source.ReadCSV(in, signedMapping(), "statement.csv")
 	if err != nil {
 		t.Fatalf("ReadCSV: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestParsesMessyAmounts(t *testing.T) {
 			"2026-03-02,B,(45.00)\n" +
 			"2026-03-03,C,+12\n")
 
-	txs, err := source.ReadCSV(in, signedMapping())
+	txs, err := source.ReadCSV(in, signedMapping(), "statement.csv")
 	if err != nil {
 		t.Fatalf("ReadCSV: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestDebitCreditColumns(t *testing.T) {
 		Debit: "Debit", Credit: "Credit", DateFormat: "2006-01-02",
 	}
 
-	txs, err := source.ReadCSV(in, m)
+	txs, err := source.ReadCSV(in, m, "statement.csv")
 	if err != nil {
 		t.Fatalf("ReadCSV: %v", err)
 	}
@@ -108,11 +108,11 @@ func TestIDsAreStableAndDistinguishIdenticalLines(t *testing.T) {
 		"2026-03-01,COFFEE HOUSE 12,-5.00\n" +
 		"2026-03-01,ACME HARDWARE,-5.00\n"
 
-	first, err := source.ReadCSV(strings.NewReader(body), signedMapping())
+	first, err := source.ReadCSV(strings.NewReader(body), signedMapping(), "statement.csv")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := source.ReadCSV(strings.NewReader(body), signedMapping())
+	second, err := source.ReadCSV(strings.NewReader(body), signedMapping(), "statement.csv")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,16 +133,47 @@ func TestIDsAreStableAndDistinguishIdenticalLines(t *testing.T) {
 	}
 }
 
+// The fingerprint keys on the door a line entered through (a file's name, a connector's name),
+// never on the book account it lands in. Re-pointing a connector to a new account must not move
+// its history's ids, or every backfill after the re-point re-lands the overlap as duplicates.
+func TestFingerprintKeysOnTheDoorNotTheAccount(t *testing.T) {
+	body := "Date,Description,Amount\n2026-03-01,MONTHLY FEE,-4.00\n"
+
+	repointed := signedMapping()
+	repointed.Account = "Assets:Bank:Chequing New"
+
+	before, err := source.ReadCSV(strings.NewReader(body), signedMapping(), "rbc-chequing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := source.ReadCSV(strings.NewReader(body), repointed, "rbc-chequing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before[0].ID != after[0].ID {
+		t.Errorf("re-pointing the account moved the ID (%q vs %q); a backfill would duplicate history",
+			before[0].ID, after[0].ID)
+	}
+
+	otherDoor, err := source.ReadCSV(strings.NewReader(body), signedMapping(), "rbc-visa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before[0].ID == otherDoor[0].ID {
+		t.Error("two doors produced one ID; the second account's real line would be skipped as a duplicate")
+	}
+}
+
 func TestMissingColumnIsAnError(t *testing.T) {
 	in := strings.NewReader("Date,Memo,Amount\n2026-03-01,X,-1.00\n")
-	if _, err := source.ReadCSV(in, signedMapping()); err == nil {
+	if _, err := source.ReadCSV(in, signedMapping(), "statement.csv"); err == nil {
 		t.Fatal("expected an error naming the missing Description column")
 	}
 }
 
 func TestBadDateIsAnError(t *testing.T) {
 	in := strings.NewReader("Date,Description,Amount\nnot-a-date,X,-1.00\n")
-	if _, err := source.ReadCSV(in, signedMapping()); err == nil {
+	if _, err := source.ReadCSV(in, signedMapping(), "statement.csv"); err == nil {
 		t.Fatal("expected an error for an unparseable date")
 	}
 }

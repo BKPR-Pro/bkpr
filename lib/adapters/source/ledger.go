@@ -22,8 +22,9 @@ import (
 // with the source account excluded, as a model.Entry parallel to the transaction. A file is
 // categorized data, not a raw statement, so an import can assert that categorization rather than
 // making the rules re-derive what the file plainly says. Fingerprints are regenerated from the
-// reconstructed line, so this is not a byte-identical round trip with the original import.
-func ReadLedger(r io.Reader) ([]model.Transaction, []model.Entry, error) {
+// reconstructed line under scope -- the ledger file's own name, the door the lines entered
+// through -- so this is not a byte-identical round trip with the original import.
+func ReadLedger(r io.Reader, scope string) ([]model.Transaction, []model.Entry, error) {
 	var txs []model.Transaction
 	var entries []model.Entry // entries[i] is the categorization the file gave txs[i]
 	seen := map[string]int{}  // fingerprint -> times seen, so identical lines stay distinct
@@ -52,7 +53,7 @@ func ReadLedger(r io.Reader) ([]model.Transaction, []model.Entry, error) {
 		if memo != "" {
 			description = memo
 		}
-		tx, side, routedSource, err := reconstruct(date, description, postings, seen)
+		tx, side, routedSource, err := reconstruct(scope, date, description, postings, seen)
 		if err != nil {
 			return fmt.Errorf("ledger entry at line %d (%s): %w", entryLine, payee, err)
 		}
@@ -285,7 +286,7 @@ func twoSpaceGap(s string) int {
 	return -1
 }
 
-func reconstruct(date time.Time, description string, postings []posting, seen map[string]int) (model.Transaction, []model.Posting, string, error) {
+func reconstruct(scope string, date time.Time, description string, postings []posting, seen map[string]int) (model.Transaction, []model.Posting, string, error) {
 	var elided []posting // the amountless leg(s); at most one is allowed, and it is the source account
 	var priced []posting // every posting that carries an amount, i.e. the categorized side
 	sums := map[string]model.Amount{}
@@ -354,10 +355,10 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 	}
 
 	// A routed leg names, in a "registered:" tag, the account the line was imported on. The account
-	// shown on the leg is the purpose child the charge routed to; the tag holds the parent the line's
-	// fingerprint keys on. Restore both, so the round trip preserves the routing and the fingerprint
-	// rather than collapsing the charge onto the child. A leg with no tag -- a hand-kept child line --
-	// is left exactly as written, its own account.
+	// shown on the leg is the purpose child the charge routed to; the tag holds the parent it was
+	// imported against. Restore both, so the round trip preserves the routing rather than collapsing
+	// the charge onto the child. A leg with no tag -- a hand-kept child line -- is left exactly as
+	// written, its own account.
 	var routedSource string
 	if registered, rest, ok := cutRegisteredTag(sourceComment); ok && registered != "" {
 		routedSource = account
@@ -365,7 +366,7 @@ func reconstruct(date time.Time, description string, postings []posting, seen ma
 		sourceComment = rest
 	}
 
-	fp := Fingerprint(account, date, amount, description)
+	fp := Fingerprint(scope, date, amount, description)
 	seen[fp]++
 
 	tx := model.Transaction{

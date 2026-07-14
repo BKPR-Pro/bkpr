@@ -10,7 +10,7 @@ import (
 
 func readLedger(t *testing.T, text string) []model.Transaction {
 	t.Helper()
-	txs, _, err := source.ReadLedger(strings.NewReader(text))
+	txs, _, err := source.ReadLedger(strings.NewReader(text), "books.ledger")
 	if err != nil {
 		t.Fatalf("ReadLedger: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestReadLedgerCarriesThePendingFlag(t *testing.T) {
 2026/04/02  * Swiss Chalet
   Expenses:Consulting:Meals  53.08 CAD
   Assets:Consulting:Chequing
-`))
+`), "books.ledger")
 	if err != nil {
 		t.Fatalf("ReadLedger: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestReadLedgerLiftsTheInvoiceCode(t *testing.T) {
 2026/04/02  * Swiss Chalet
   Expenses:Consulting:Meals  53.08 CAD
   Assets:Consulting:Chequing
-`))
+`), "books.ledger")
 	if err != nil {
 		t.Fatalf("ReadLedger: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestReadLedgerCarriesTheCategorization(t *testing.T) {
 	txs, entries, err := source.ReadLedger(strings.NewReader(`2026/03/01  * Acme Hardware
   Expenses:Materials  84.20 CAD
   Assets:Bank:Chequing
-`))
+`), "books.ledger")
 	if err != nil {
 		t.Fatalf("ReadLedger: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestReadLedgerCarriesEveryLegOfASplit(t *testing.T) {
   Expenses:A  10.00 CAD
   Expenses:B  15.00 CAD
   Assets:Bank:Chequing
-`))
+`), "books.ledger")
 	if err != nil {
 		t.Fatalf("ReadLedger: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestReadLedgerCategorizationExcludesTheSourceWhenFullyPriced(t *testing.T) 
 	txs, entries, err := source.ReadLedger(strings.NewReader(`2026/03/01  * X
   Expenses:A  10.00 CAD
   Assets:Bank:Chequing  -10.00 CAD
-`))
+`), "books.ledger")
 	if err != nil {
 		t.Fatalf("ReadLedger: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestReadLedgerRefusesAFullyPricedEntryThatDoesNotBalance(t *testing.T) {
 	_, _, err := source.ReadLedger(strings.NewReader(`2026/03/01  * X
   Expenses:A  10.00 CAD
   Assets:Bank:Chequing  -9.00 CAD
-`))
+`), "books.ledger")
 	if err == nil {
 		t.Fatal("a fully priced entry that does not balance; want an error")
 	}
@@ -263,7 +263,7 @@ func TestReadLedgerCarriesAPostingComment(t *testing.T) {
 	_, entries, err := source.ReadLedger(strings.NewReader(`2026/03/01  * Acme Hardware
   Expenses:Materials  84.20 CAD  ; two boxes of screws
   Assets:Bank:Chequing
-`))
+`), "books.ledger")
 	if err != nil {
 		t.Fatalf("ReadLedger: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestReadLedgerRefusesTwoUnbalancedCommodities(t *testing.T) {
   Income:Contract  -9000.00 USD
   Expenses:Fees  10.00 CAD
   Assets:Bank:Chequing
-`))
+`), "books.ledger")
 	if err == nil {
 		t.Fatal("two commodities with remainders; want an error")
 	}
@@ -375,7 +375,7 @@ func TestReadLedgerRefusesTwoElidedAccounts(t *testing.T) {
   Expenses:A  10.00 CAD
   Assets:Bank:Chequing
   Assets:Bank:Savings
-`))
+`), "books.ledger")
 	if err == nil {
 		t.Fatal("two amountless postings are ambiguous; want an error")
 	}
@@ -389,7 +389,7 @@ func TestReadLedgerPrefersTheMemoNoteOverThePayee(t *testing.T) {
   ; memo: ACME HARDWARE #4471
   Expenses:Repairs:Materials  84.20 CAD
   Assets:Bank:Chequing
-`))
+`), "books.ledger")
 	if err != nil {
 		t.Fatalf("ReadLedger: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestReadLedgerReadsAnAtAtPricedPosting(t *testing.T) {
 	txs, entries, err := source.ReadLedger(strings.NewReader(`2026/03/01  * Broker
   Assets:Brokerage:AAPL  10 AAPL @@ 1000.00 USD
   Assets:Bank  -1000.00 USD
-`))
+`), "books.ledger")
 	if err != nil {
 		t.Fatalf("ReadLedger: %v", err)
 	}
@@ -439,7 +439,7 @@ func TestReadLedgerRoundTripsAPricedPropertyPurchase(t *testing.T) {
   Assets:Real Estate:9 Schoodic Street   1 Property @@ 50000.00 CAD
   Expenses:Real Estate:Legal:9 Schoodic Street  5000.00 CAD
   Liabilities:Simplii LOC:9 Schoodic Street
-`))
+`), "books.ledger")
 	if err != nil {
 		t.Fatalf("ReadLedger: %v", err)
 	}
@@ -479,7 +479,7 @@ func TestReadLedgerRefusesAPerUnitPrice(t *testing.T) {
 	_, _, err := source.ReadLedger(strings.NewReader(`2026/03/01  * Broker
   Assets:Brokerage:AAPL  10 AAPL @ 100.00 USD
   Assets:Bank  -1000.00 USD
-`))
+`), "books.ledger")
 	if err == nil {
 		t.Fatal("a per-unit @ price should be refused on read")
 	}

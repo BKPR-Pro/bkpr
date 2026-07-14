@@ -94,8 +94,9 @@ The Go plumbing and the harness are **done** (`lib/adapters/source`):
   `fetcherFor` → `source.ReadBank`, which runs `scripts/<kind>.js` with Node, passing the connector's
   URL, account, currency, session-file path, and whether a person is present in the environment
   (`BK_IMPORT_*`). The script prints `[{date, description, amount, currency?}]` to stdout; Go
-  normalizes it and fingerprints via `source.Identify`, so a bank import and a CSV of one account are
-  interchangeable and idempotent. Several accounts at one bank share its script — and, when they share
+  normalizes it and fingerprints via `source.Identify` under the connector's name, so re-reading a
+  connector is idempotent and re-pointing its account never moves its history's ids (a CSV
+  fingerprints under its file name the same way). Several accounts at one bank share its script — and, when they share
   a login, its session — differing only by URL and account.
 - The session lifecycle (reuse headless, re-sign-in headed when expired, save, and fail fast when no
   one is present) is implemented in `scripts/harness.js` and verified end to end against a local

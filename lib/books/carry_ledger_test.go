@@ -20,7 +20,7 @@ func TestCarryingKeepsAnEntrysBlockComments(t *testing.T) {
   ; Store             55.78 CAD
   Expenses:Discretionary  1000.00 CAD
   Assets:Bank:Chequing
-`))
+`), "books.ledger")
 	if err != nil {
 		t.Fatalf("ReadLedger: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestCarryingKeepsAnEntrysInvoiceNumber(t *testing.T) {
 	txs, entries, err := source.ReadLedger(strings.NewReader(`2026/04/01  * (2073) DNSimple
   Income:Consulting:Contract:DNSimple  -9000.00 USD
   Assets:Consulting:Chequing
-`))
+`), "books.ledger")
 	if err != nil {
 		t.Fatalf("ReadLedger: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestImportingACategorizedLedgerNeedsNoManualCategorize(t *testing.T) {
 2026/03/03  * Rent
   Income:Rent  -168.00 CAD
   Assets:Bank:Chequing
-`))
+`), "books.ledger")
 	if err != nil {
 		t.Fatalf("ReadLedger: %v", err)
 	}

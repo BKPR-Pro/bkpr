@@ -33,7 +33,7 @@ func TestLedgerPostingCommentRoundTrips(t *testing.T) {
 		t.Fatalf("WriteAll: %v", err)
 	}
 
-	_, gotEntries, err := source.ReadLedger(bytes.NewReader(first.Bytes()))
+	_, gotEntries, err := source.ReadLedger(bytes.NewReader(first.Bytes()), "books.ledger")
 	if err != nil {
 		t.Fatalf("re-import failed: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestLedgerSourcePostingCommentRoundTrips(t *testing.T) {
 		t.Fatalf("WriteAll: %v", err)
 	}
 
-	gotTxs, _, err := source.ReadLedger(bytes.NewReader(first.Bytes()))
+	gotTxs, _, err := source.ReadLedger(bytes.NewReader(first.Bytes()), "books.ledger")
 	if err != nil {
 		t.Fatalf("re-import failed: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestLedgerRoutedSourceLegRoundTrips(t *testing.T) {
 		t.Fatalf("routed leg not rendered on the child:\n%s", first.String())
 	}
 
-	gotTxs, gotEntries, err := source.ReadLedger(bytes.NewReader(first.Bytes()))
+	gotTxs, gotEntries, err := source.ReadLedger(bytes.NewReader(first.Bytes()), "books.ledger")
 	if err != nil {
 		t.Fatalf("re-import failed: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestLedgerBlockCommentsRoundTrip(t *testing.T) {
 		t.Fatalf("WriteAll: %v", err)
 	}
 
-	_, gotEntries, err := source.ReadLedger(bytes.NewReader(first.Bytes()))
+	_, gotEntries, err := source.ReadLedger(bytes.NewReader(first.Bytes()), "books.ledger")
 	if err != nil {
 		t.Fatalf("re-import failed: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestLedgerPendingFlagRoundTrips(t *testing.T) {
 		t.Fatalf("WriteAll: %v", err)
 	}
 
-	_, gotEntries, err := source.ReadLedger(bytes.NewReader(first.Bytes()))
+	_, gotEntries, err := source.ReadLedger(bytes.NewReader(first.Bytes()), "books.ledger")
 	if err != nil {
 		t.Fatalf("re-import failed: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestLedgerCostBasisRoundTripsThroughTheWriter(t *testing.T) {
 		t.Fatalf("WriteAll: %v", err)
 	}
 
-	gotTxs, gotEntries, err := source.ReadLedger(bytes.NewReader(first.Bytes()))
+	gotTxs, gotEntries, err := source.ReadLedger(bytes.NewReader(first.Bytes()), "books.ledger")
 	if err != nil {
 		t.Fatalf("re-import of the writer's own output failed: %v", err)
 	}

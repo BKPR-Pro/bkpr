@@ -66,7 +66,7 @@ func TestRBCReadsAWiderHistoryWindow(t *testing.T) {
 		t.Fatalf("reading with a history window: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Assets:Bank:RBC", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Assets:Bank:RBC", "CAD")
 	if err != nil {
 		t.Fatalf("parsing rbc.js output %q: %v", out, err)
 	}
@@ -127,7 +127,7 @@ func TestRBCReadsAnExplicitDateRange(t *testing.T) {
 		t.Fatalf("reading with an explicit range: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Assets:Bank:RBC", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Assets:Bank:RBC", "CAD")
 	if err != nil {
 		t.Fatalf("parsing rbc.js output %q: %v", out, err)
 	}

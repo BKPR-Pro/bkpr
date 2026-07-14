@@ -58,7 +58,7 @@ func TestRBCCardWidensViaPostedSearch(t *testing.T) {
 		t.Fatalf("widening the card via the posted search: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Liabilities:Consulting:RBC Visa", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:Consulting:RBC Visa", "CAD")
 	if err != nil {
 		t.Fatalf("parsing rbc.js output %q: %v", out, err)
 	}

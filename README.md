@@ -360,8 +360,9 @@ read-only and regenerated whole.
 When a rule renamed a payee, the artifact keeps the line's raw description as a `; memo:` note (an
 ordinary ledger entry note), and the reader prefers it. An inline `; note` on a posting is read the
 same way, back onto that leg, so a note left with `comment` survives the round trip. That makes the
-trip honest: importing the artifact into an empty book regenerates the same fingerprints, and the
-same rules fold it to the same books — which is exactly what the round-trip test drives, end to end,
+trip honest: importing the artifact into an empty book regenerates each line whole (ids scope to
+the door a line entered through, so they regenerate under the artifact's own name), and the same
+rules fold it to the same books — which is exactly what the round-trip test drives, end to end,
 on every run.
 
 What the artifact deliberately does not carry is the rules, corrections, invoices, and connectors
@@ -861,8 +862,8 @@ than refuses, since only a child of the reconciling parent rolls up to it.
 
 The split survives the artifact. `bkpr books -format ledger` renders the routed leg on the child, so
 `ledger -f books.ledger bal` reads the same balance bookkeeper does, and a `; registered:` note names
-the account the line was imported on, so an export/import round trip restores both the routing and the
-line's fingerprint rather than collapsing the charge back onto the parent.
+the account the line was imported on, so an export/import round trip restores the routing rather than
+collapsing the charge back onto the parent.
 
 ## Books
 
@@ -909,8 +910,10 @@ statement line already knows which account it came from, and a line no rule matc
 - **Deterministic where money is recorded.** Every capability is a command with machine-readable,
   idempotent I/O, so a person or an agent runs the tool the same way. Whoever operates it proposes;
   code writes. The books stay a pure function of the log.
-- **Idempotent end to end.** Every line carries a stable fingerprint, so a re-import is always
-  safe. Two genuinely identical charges on one day stay two charges.
+- **Idempotent end to end.** Every line carries a stable fingerprint, scoped to the door it
+  entered through (a connector's name, a file's name) rather than the account it lands in, so a
+  re-import is always safe — even across re-pointing a connector to a new account. Two genuinely
+  identical charges on one day stay two charges.
 - **An amount is an exact quantity of a commodity.** Held as integer minor units, so no float ever
   touches the books, and the commodity may be a currency or a share. Ledger-cli's model, which is
   why the books can hold anything ledger can.

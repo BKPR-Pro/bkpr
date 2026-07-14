@@ -41,7 +41,7 @@ func TestRBCSignsInWithCredentials(t *testing.T) {
 		t.Fatalf("unattended rbc.js sign-in: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Assets:Bank:RBC", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Assets:Bank:RBC", "CAD")
 	if err != nil {
 		t.Fatalf("parsing rbc.js output %q: %v", out, err)
 	}

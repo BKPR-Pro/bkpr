@@ -38,7 +38,7 @@ func TestRBCReadsABalanceOnlyLoan(t *testing.T) {
 		t.Fatalf("reading the loan: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Liabilities:Real Estate:22 Lisgar - Loan", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:Real Estate:22 Lisgar - Loan", "CAD")
 	if err != nil {
 		t.Fatalf("parsing rbc.js output %q: %v", out, err)
 	}

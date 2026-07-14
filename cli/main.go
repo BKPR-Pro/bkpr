@@ -999,7 +999,7 @@ func importLedger(log *eventlog.Log, path string) error {
 		return err
 	}
 
-	txs, entries, err := source.ReadLedger(bytes.NewReader(raw))
+	txs, entries, err := source.ReadLedger(bytes.NewReader(raw), filepath.Base(path))
 	if err != nil {
 		return err
 	}
@@ -1074,7 +1074,7 @@ func importCSV(log *eventlog.Log, path string, args []string) error {
 	}
 	defer statement.Close()
 
-	txs, err := source.ReadCSV(statement, m)
+	txs, err := source.ReadCSV(statement, m, filepath.Base(path))
 	if err != nil {
 		return err
 	}

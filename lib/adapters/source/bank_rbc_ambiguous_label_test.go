@@ -60,7 +60,7 @@ func TestRBCWalksPastAHiddenOptionWithTheSameLabel(t *testing.T) {
 		t.Fatalf("walking the account path past the hidden option: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Liabilities:RBC Term Loan", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:RBC Term Loan", "CAD")
 	if err != nil {
 		t.Fatalf("parsing rbc.js output %q: %v", out, err)
 	}

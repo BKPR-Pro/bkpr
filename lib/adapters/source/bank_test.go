@@ -55,6 +55,31 @@ func TestReadBankNormalizesRows(t *testing.T) {
 	}
 }
 
+// A connector's lines fingerprint under its name, not the account they land in, so re-pointing a
+// connector to a new account keeps every id -- a backfill across the re-point still dedupes. Two
+// connectors reading an identical line stay distinct.
+func TestReadBankFingerprintsUnderTheConnectorName(t *testing.T) {
+	rows := []byte(`[{"date":"2026-03-01","description":"MONTHLY FEE","amount":"-4.00"}]`)
+
+	read := func(name, account string) string {
+		stubBank(t, rows, nil)
+		res, err := ReadBank(Bank{Name: name, Institution: "rbc", Account: account, DefaultCurrency: "CAD"})
+		if err != nil {
+			t.Fatalf("ReadBank: %v", err)
+		}
+		return res.Transactions[0].ID
+	}
+
+	before := read("rbc-chequing", "Assets:Bank:RBC")
+	after := read("rbc-chequing", "Assets:Consulting:RBC Chequing")
+	if before != after {
+		t.Errorf("re-pointing the account moved the ID (%q vs %q); a backfill would duplicate history", before, after)
+	}
+	if other := read("rbc-visa", "Assets:Bank:RBC"); other == before {
+		t.Error("two connectors produced one ID; the second account's real line would be skipped as a duplicate")
+	}
+}
+
 // A script may wrap its rows with the account's current balance; ReadBank carries it in the account's
 // currency for reconciliation.
 func TestReadBankCarriesTheScrapedBalance(t *testing.T) {

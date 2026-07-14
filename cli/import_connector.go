@@ -67,6 +67,7 @@ func fetcherFor(kind string, o fetchOpts) (connectorFetch, error) {
 	case source.SupportsBank(kind):
 		return func(c books.Connector) (fetchResult, error) {
 			res, err := source.ReadBank(source.Bank{
+				Name:            c.Name,
 				Institution:     c.Kind,
 				Account:         c.Account,
 				DefaultCurrency: c.Currency,

@@ -88,7 +88,7 @@ func TestSimpliiSignsInAcrossFramesThenReads(t *testing.T) {
 		t.Fatalf("signing in across frames: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Liabilities:Real Estate:Simplii LOC", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:Real Estate:Simplii LOC", "CAD")
 	if err != nil {
 		t.Fatalf("parsing simplii.js output %q: %v", out, err)
 	}
@@ -150,7 +150,7 @@ func TestSimpliiReadsALineOfCredit(t *testing.T) {
 		t.Fatalf("reading the Simplii LOC: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Liabilities:Real Estate:Simplii LOC", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:Real Estate:Simplii LOC", "CAD")
 	if err != nil {
 		t.Fatalf("parsing simplii.js output %q: %v", out, err)
 	}
@@ -238,7 +238,7 @@ func TestSimpliiReadsAWiderHistoryWindow(t *testing.T) {
 		t.Fatalf("reading with a Simplii history window: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Liabilities:Real Estate:Simplii LOC", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:Real Estate:Simplii LOC", "CAD")
 	if err != nil {
 		t.Fatalf("parsing simplii.js output %q: %v", out, err)
 	}
@@ -290,7 +290,7 @@ func TestSimpliiReadsChequing(t *testing.T) {
 		t.Fatalf("reading the Simplii chequing: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "Assets:Personal:Simplii Chequing", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Assets:Personal:Simplii Chequing", "CAD")
 	if err != nil {
 		t.Fatalf("parsing simplii.js output %q: %v", out, err)
 	}

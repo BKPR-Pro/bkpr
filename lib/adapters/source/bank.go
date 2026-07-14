@@ -56,6 +56,7 @@ func Banks() []string {
 // connector's token-env so several accounts on one login share it. Interactive says a person is
 // present to sign in again when the session has expired; Relogin forces a fresh sign-in.
 type Bank struct {
+	Name            string // the connector's name, the scope its lines fingerprint under
 	Institution     string
 	Account         string
 	DefaultCurrency string
@@ -116,9 +117,10 @@ type BankResult struct {
 	HasBalance   bool
 }
 
-// ReadBank imports one account's transactions from its bank, normalized and fingerprinted the same
-// way ReadCSV is, so a bank import and a CSV of one account are interchangeable and idempotent. It
-// also carries the account's scraped balance when the script reported one.
+// ReadBank imports one account's transactions from its bank, normalized and fingerprinted under
+// the connector's name the way ReadCSV fingerprints under a file's, so re-reading the same
+// connector is idempotent whatever account its lines land in. It also carries the account's
+// scraped balance when the script reported one.
 func ReadBank(b Bank) (BankResult, error) {
 	if !SupportsBank(b.Institution) {
 		return BankResult{}, fmt.Errorf("import: no bank importer for %q; known: %v", b.Institution, Banks())
@@ -131,7 +133,7 @@ func ReadBank(b Bank) (BankResult, error) {
 	if err != nil {
 		return BankResult{}, err
 	}
-	return parseBankOutput(out, b.Account, b.DefaultCurrency)
+	return parseBankOutput(out, b.Name, b.Account, b.DefaultCurrency)
 }
 
 // exitSessionExpired is the script's EX_TEMPFAIL exit: a real session that has expired, with no
@@ -281,9 +283,10 @@ type bankOutput struct {
 	Balance string    `json:"balance"`
 }
 
-// parseBankOutput turns the script's JSON into normalized, fingerprinted transactions and, when the
-// script reported one, the account's current balance in the account's currency.
-func parseBankOutput(data []byte, account, defaultCurrency string) (BankResult, error) {
+// parseBankOutput turns the script's JSON into normalized transactions fingerprinted under scope --
+// the connector's name, the door the lines entered through -- and, when the script reported one,
+// the account's current balance in the account's currency.
+func parseBankOutput(data []byte, scope, account, defaultCurrency string) (BankResult, error) {
 	data = bytes.TrimSpace(data)
 	var out bankOutput
 	if len(data) > 0 && data[0] == '[' { // a bare array: rows only, no balance
@@ -312,7 +315,7 @@ func parseBankOutput(data []byte, account, defaultCurrency string) (BankResult, 
 			Account: account, Date: date, Amount: amount, Description: r.Description,
 		})
 	}
-	Identify(txs)
+	Identify(scope, txs)
 
 	res := BankResult{Transactions: txs}
 	if bal := strings.TrimSpace(out.Balance); bal != "" {
