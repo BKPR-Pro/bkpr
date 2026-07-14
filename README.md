@@ -318,7 +318,9 @@ bkpr init
 details are supplied inline. A CSV does not name its own account, currency, or columns, so you give
 them; a ledger file names all of that itself and takes no options. The extension says which
 reader a file gets; `-format csv|ledger|jsonl` overrides it, so hand-kept books in a `.txt` file
-import as a ledger without renaming.
+import as a ledger without renaming. A ledger file's `account` directives come in too: each one's
+`address` lines (a business name, mailing address, or tax number) land in account metadata and are
+written back at the head of the regenerated artifact, so a hand-kept letterhead round-trips.
 
 ```sh
 bkpr import statements/march.csv -account "Assets:Bank:Chequing" -currency CAD -amount Amount
@@ -574,6 +576,31 @@ bkpr invoice settle 9617607456a06619 -tx 6afa3719db1eb739-1
 
 The receivable now nets to zero (debited when the invoice was raised, credited when the cash cleared
 it), and `Income:Consulting` is booked exactly once.
+
+**Invoice numbers are first-class.** `-invoice 2073` (on `invoice raise`, `bill receive`, or
+`categorize`) records the invoice or bill number as its own field, rendered as the ledger transaction
+code — `(2073)` before the party — where ledger tools read a check/invoice number. It is metadata, not
+part of the fingerprint, so numbering a line never changes its identity, and reading a `.ledger` file
+lifts a `(code)` back out of the payee into the field:
+
+```text
+2026/03/01  * (2073) J. Smith
+  Income:Consulting  -1600.00 CAD
+  Assets:Receivable
+```
+
+**A foreign invoice is cleared by the domestic cash that settled it.** Bill a US client 9000 USD and
+the deposit lands as CAD; `invoice settle` clears the whole USD receivable in its own commodity, priced
+at the CAD that actually arrived, so it nets to zero rather than being left holding two currencies:
+
+```text
+2026/04/06  * DNSimple
+  Assets:Receivable:DNSimple  -9000.00 USD @@ 12495.25 CAD
+  Assets:Consulting:Chequing
+```
+
+The `@@` price is the exact CAD the books kept for the settlement — the same shape a foreign holding
+records its cost in — so no rate is invented and the receivable clears exactly.
 
 Settling is **asserted, not guessed**. An internal transfer pairs automatically from the shape of the
 movement — the same amount the other way between two of your accounts — but a deposit's memo does not
@@ -951,8 +978,11 @@ there; a balance sheet is a position on a date, so that is where liabilities sit
 counts the source-account posting the entries elide, since that is where cash and debt actually
 accumulate. `-income` or `-balance` shows one; `-account` narrows by a substring of the path, so "123
 Main" reaches a property's rent and its repairs at once; `-from`/`-to` bound the period. Totals are
-per commodity, because a USD fee and CAD rent, or cash and shares, do not sum without a price. It is
-a fold, so it adds a view, not state.
+per commodity, because a USD fee and CAD rent, or cash and shares, do not sum without a price. Within
+each section, a subsection that gathers more than one account — the level below the section, so
+`Expenses:Real Estate` under Expenses — carries a subtotal per commodity, so a reader sees what each
+grouping came to without adding the lines by hand; a subsection of a single account is left alone. It
+is a fold, so it adds a view, not state.
 
 `report -gains` is the tax-time view off the same cost-basis fold: a disposal per row — date, shares,
 proceeds, cost base, and realized gain (a loss is negative) — with the total gain, for a year bounded

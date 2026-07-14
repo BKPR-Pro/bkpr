@@ -180,7 +180,7 @@ var usageSections = []usageSection{
 		{"invoice void", "<fingerprint> [-why <reason>] [-actor <name>]"},
 		{"invoice list", ""},
 		{"invoice aging", "[-as-of <YYYY-MM-DD>]"},
-		{"bill receive", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]"},
+		{"bill receive", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-invoice <n>] [-why <reason>] [-actor <name>]"},
 		{"bill settle", "<fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]"},
 		{"bill void", "<fingerprint> [-why <reason>] [-actor <name>]"},
 		{"bill list", ""},
@@ -386,11 +386,13 @@ var reference = []docGroup{
   import <file.ledger>
   import <file> -format csv|ledger|jsonl
       Read transactions in. A file is a one-time input: a CSV does not name its own account,
-      currency, or columns, so you supply them inline; a ledger file names all of that itself
-      (an entry's amountless posting is the account it came from; with every leg priced, its
-      last posting is). Directives, periodic (~) templates, and comments are skipped. The line
-      is imported raw and the rules place it, so a ledger file's own categorization is not
-      carried in. The extension says which reader a file gets; -format overrides it, so
+      currency, or columns, so you supply them inline and its lines are imported raw for the
+      rules to place; a ledger file names all of that itself (an entry's amountless posting is
+      the account it came from; with every leg priced, its last posting is) and already spells
+      out its categorization, which is carried in per line rather than re-derived (a line the
+      books cannot balance is left to the rules). An account directive's address lines are read
+      into that account's metadata, the same the letterhead uses; periodic (~) templates and
+      comments are skipped. The extension says which reader a file gets; -format overrides it, so
       hand-kept books in a .txt file import as a ledger without renaming. A registered
       connector is imported by name: it already carries its account
       and currency (from connectors register) and fetches its own lines, through the same
@@ -507,22 +509,28 @@ var reference = []docGroup{
 `},
 	}},
 	{"INVOICES AND BILLS  (value recognized before its cash; only shown on -basis accrual)", []docTopic{
-		{[]string{"invoice"}, `  invoice raise -party <name> -amount <amt> -category <Income:...> [-account <a>] [-date <d>] [-currency <c>]
+		{[]string{"invoice"}, `  invoice raise -party <name> -amount <amt> -category <Income:...> [-account <a>] [-date <d>] [-currency <c>] [-invoice <n>]
       Raise an invoice: revenue owed to you, earned and billed before the cash moves. It debits
       a receivable and credits income. -account names where it parks, defaulting to
       Assets:Receivable. -date is when the revenue was earned (default today), not when it will
-      be paid. The amount is a positive magnitude. Raising the same invoice twice is a no-op,
-      keyed by a fingerprint of its content, exactly as re-importing a statement is.
+      be paid. The amount is a positive magnitude. -invoice records the invoice number; it renders
+      as the ledger (code) -- "(2073)" before the party -- and is metadata, not part of the
+      fingerprint, so numbering an invoice never changes its identity. Raising the same invoice
+      twice is a no-op, keyed by a fingerprint of its content, exactly as re-importing a statement is.
 `},
-		{[]string{"bill"}, `  bill receive -party <name> -amount <amt> -category <Expenses:...> [-account <a>] [-date <d>] [-currency <c>]
+		{[]string{"bill"}, `  bill receive -party <name> -amount <amt> -category <Expenses:...> [-account <a>] [-date <d>] [-currency <c>] [-invoice <n>]
       Receive a bill: money you owe, the mirror of an invoice. It debits an expense and credits
-      a payable, defaulting to Liabilities:Payable. Everything else matches invoice raise.
+      a payable, defaulting to Liabilities:Payable. -invoice records the bill number (the vendor's
+      invoice number), rendered as the ledger (code). Everything else matches invoice raise.
 `},
 		{[]string{"invoice", "bill"}, `  invoice settle <fingerprint> (-tx <fingerprint> | -reopen)
   bill settle    <fingerprint> (-tx <fingerprint> | -reopen)
       Record that a bank line paid an invoice or bill, so on the accrual basis the cash clears
       the receivable or payable instead of booking the income or expense a second time (that
-      was booked when the accrual was raised). A memo does not reliably name which accrual a
+      was booked when the accrual was raised). When the cash is in a different currency than the
+      accrual -- a CAD deposit paying a USD invoice -- it clears the whole parked amount in its own
+      commodity, priced at the cash that actually landed (@@), so a foreign receivable nets to zero
+      rather than being left holding two currencies. A memo does not reliably name which accrual a
       line clears, so this pairing is recorded rather than guessed. -reopen unlinks it; a later
       settle supersedes.
 `},
@@ -557,7 +565,9 @@ var reference = []docGroup{
 `},
 		{[]string{"accounts"}, `  accounts set <account> -meta <k=v> ... [-actor <name>]
       Attach metadata to an account: a letterhead address, a display name, a customer's mailing
-      address. A document like an invoice reads it when it renders.
+      address. A document like an invoice reads it when it renders. Importing a ledger file
+      records the same metadata from its account directives, and regenerating the books writes
+      those directives back at the head of the file, so a hand-kept letterhead round-trips.
   accounts list [-sort amount [-desc]]
       The account folder: every account you hold -- the bank, card, and loan accounts money is read
       from -- with its display name, what it holds now, and where it stands against the bank. An
@@ -590,7 +600,9 @@ var reference = []docGroup{
       Fold the books into the company's full picture: an income statement over a period, a
       balance sheet as of its end, and the capital-gains schedule a filing wants. Each flag
       narrows to one statement; -basis reads the one log as cash or accrual, chosen at read time
-      and stored nowhere.
+      and stored nowhere. Within each section, a subsection that gathers more than one account --
+      the level below the section, "Expenses:Real Estate" under Expenses -- is subtotalled per
+      commodity, so a reader sees what each grouping came to without adding the lines by hand.
 `},
 	}},
 }
