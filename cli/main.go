@@ -54,6 +54,8 @@ func main() {
 		err = categorize(os.Args[2:])
 	case "void":
 		err = voidCmd(os.Args[2:])
+	case "comment":
+		err = commentCmd(os.Args[2:])
 	case "match":
 		err = match(os.Args[2:])
 	case "invoice":
@@ -166,6 +168,7 @@ var usageSections = []usageSection{
 		{"import", "<connector> [-relogin] [-history <days> | -from <date> [-to <date>]]"},
 		{"import", "-all [-relogin] [-history <days> | -from <date> [-to <date>]]"},
 		{"categorize", "<fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-why <reason>] [-actor <name>]"},
+		{"comment", "<fingerprint> (-text <note> | -remove) [-account <a>] [-why <reason>] [-actor <name>]"},
 		{"void", "<fingerprint> [-why <reason>] [-actor <name>]"},
 		{"match", "<fingerprint> (-with <fingerprint> | -break) [-actor <name>]"},
 		{"export", "<connector> [-confirm]"},
@@ -434,6 +437,14 @@ var reference = []docGroup{
       gain, is folded from your purchases: -sell "Assets:Brokerage:AAPL=10 AAPL" -gain "Income:Capital Gains".
       -actor records who decided (default human), so a model driving this command is told
       apart from a person in the log; rules set and void take it too.
+`},
+		{[]string{"comment"}, `  comment <fingerprint> (-text <note> | -remove) [-account <a>] [-why <reason>] [-actor <name>]
+      Leave a free-text note on one posting of a line, or clear it with -remove. The note is
+      commentary the books carry beside the account and amount: it renders inline in the ledger
+      artifact (Expenses:Repairs  84.20 CAD  ; the note) and reads back, so a reason left on a
+      split is durable. -account names which leg the note belongs to and is needed only when the
+      line splits across several; a line with one posting needs no -account. Commenting a line the
+      rules categorized freezes their answer for that one line, the way a correction does.
 `},
 		{[]string{"void"}, `  void <fingerprint> [-why <reason>] [-actor <name>]
       Annul a bad imported line. The imported fact stays in the log; a later fact supersedes
@@ -1627,6 +1638,41 @@ func categorize(args []string) error {
 	}
 	// tx.ID rather than the argument: a quoted prefix echoes back as the whole fingerprint.
 	fmt.Printf("categorized %s\n", tx.ID)
+	return nil
+}
+
+// commentCmd leaves a free-text note on one posting of a line, or clears it with -remove. The note
+// is commentary the books carry alongside the account and amount; it renders inline in the ledger
+// artifact and reads back, so a reason left on a split is durable. -account names which leg the note
+// belongs to and may be omitted only when the line has a single posting.
+func commentCmd(args []string) error {
+	txID, rest, err := firstArg(args, "the transaction fingerprint to comment on")
+	if err != nil {
+		return err
+	}
+	fs := flag.NewFlagSet("comment", flag.ExitOnError)
+	account := fs.String("account", "", "which posting the note belongs to; needed only when the line splits across several")
+	text := fs.String("text", "", "the note to leave on the posting")
+	remove := fs.Bool("remove", false, "clear the note from the posting instead of setting one")
+	why := fs.String("why", "", "why the note is left; recorded with the assertion")
+	actor := fs.String("actor", "human", "who is commenting; the log records who decided")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	if *remove == (*text != "") {
+		return fmt.Errorf("give -text to leave a note, or -remove to clear one, not both or neither")
+	}
+
+	s, err := store.Open(".")
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	if err := books.Comment(s.Log, *actor, *why, txID, *account, *text, *remove); err != nil {
+		return err
+	}
+	fmt.Printf("commented %s\n", txID)
 	return nil
 }
 

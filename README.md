@@ -356,9 +356,11 @@ a fold. `bkpr books -format ledger` writes the same format back out as the commi
 read-only and regenerated whole.
 
 When a rule renamed a payee, the artifact keeps the line's raw description as a `; memo:` note (an
-ordinary ledger entry note), and the reader prefers it. That makes the trip honest: importing the
-artifact into an empty book regenerates the same fingerprints, and the same rules fold it to the
-same books — which is exactly what the round-trip test drives, end to end, on every run.
+ordinary ledger entry note), and the reader prefers it. An inline `; note` on a posting is read the
+same way, back onto that leg, so a note left with `comment` survives the round trip. That makes the
+trip honest: importing the artifact into an empty book regenerates the same fingerprints, and the
+same rules fold it to the same books — which is exactly what the round-trip test drives, end to end,
+on every run.
 
 What the artifact deliberately does not carry is the rules, corrections, invoices, and connectors
 themselves. Those are facts, and facts live in the log: `.bkpr/log.jsonl` is the complete
@@ -685,6 +687,32 @@ An assertion is a fact about one transaction. It never generalizes into a rule, 
 hardware charge does not re-pin every future one, and it survives a later rule change: fixing the
 rule moves every line except the ones you have already spoken for. Assert twice and the later fact
 wins, with both kept in the log.
+
+### Leaving a note on a posting
+
+A correction changes where a line posts; a note just says something about it. `comment` leaves a
+free-text note on one posting — why a charge was split the way it was, a receipt to look for later —
+without touching the account or the amount:
+
+```sh
+bkpr comment 0d76f1f1 -text "lumber for the deck"
+```
+
+The note renders inline in the artifact as an ordinary ledger posting note, beside the amount:
+
+```text
+Expenses:Repairs:Materials  84.20 CAD  ; lumber for the deck
+```
+
+When the line splits across several postings, `-account` names which leg the note belongs to; a
+line with one posting needs no `-account`. `-remove` clears it. The note is commentary, not data: it
+never takes part in balancing, and it is not a fact the way a rule or a correction is — so it is not
+authored into the artifact by hand but carried in the log like the account and amount, and the
+inline comment you see is regenerated from it on every fold. That is why editing the artifact's
+comments is still pointless (they are overwritten), and why the note nonetheless survives an
+export/import round trip. Because a note is an assertion about one specific line, commenting a line
+the rules categorized freezes their answer for that line, exactly as a correction does; a later
+comment or correction supersedes, with both kept in the log.
 
 ### Undoing a bad import
 
