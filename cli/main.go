@@ -175,7 +175,7 @@ var usageSections = []usageSection{
 		{"books", "[-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re> ...] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-sort amount [-desc]] [-value <c> [-rate <C=n> ...]] [-stdout]"},
 	}},
 	{"INVOICES AND BILLS", []usageLine{
-		{"invoice raise", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-why <reason>] [-actor <name>]"},
+		{"invoice raise", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-invoice <n>] [-why <reason>] [-actor <name>]"},
 		{"invoice settle", "<fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]"},
 		{"invoice void", "<fingerprint> [-why <reason>] [-actor <name>]"},
 		{"invoice list", ""},
@@ -976,13 +976,16 @@ func importLog(log *eventlog.Log, path string) error {
 // file wrote it, rather than dropped for the rules to re-derive. An entry the books cannot balance
 // (a mixed-commodity placeholder) is left to the rules instead.
 func importLedger(log *eventlog.Log, path string) error {
-	f, err := os.Open(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
-	txs, entries, err := source.ReadLedger(f)
+	txs, entries, err := source.ReadLedger(bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	accounts, err := source.ReadLedgerAccounts(bytes.NewReader(raw))
 	if err != nil {
 		return err
 	}
@@ -995,8 +998,12 @@ func importLedger(log *eventlog.Log, path string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%d entries read: %d imported, %d already in the log; %d categorized from the file, %d left to the rules\n",
-		len(txs), result.Imported, result.Skipped, carried, skipped)
+	metaSet, err := books.ImportAccountMeta(log, actor, accounts)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%d entries read: %d imported, %d already in the log; %d categorized from the file, %d left to the rules; %d account(s) described\n",
+		len(txs), result.Imported, result.Skipped, carried, skipped, metaSet)
 	uncategorizedHint(log)
 	return nil
 }
@@ -1776,6 +1783,7 @@ func invoiceRaise(args []string) error {
 	category := fs.String("category", "", "the Income account the revenue is recognized in")
 	account := fs.String("account", "", "where it parks until paid; defaults to Assets:Receivable")
 	date := fs.String("date", "", "when the revenue was earned (YYYY-MM-DD); defaults to today")
+	number := fs.String("invoice", "", "the invoice number, rendered as the ledger (code)")
 	why := fs.String("why", "", "why this invoice was raised; recorded with it")
 	actor := fs.String("actor", "human", "who is raising it; the log records who decided")
 	if err := fs.Parse(args); err != nil {
@@ -1808,7 +1816,7 @@ func invoiceRaise(args []string) error {
 	defer closeLog()
 
 	inv, added, err := books.Raise(log, *actor, *why, books.Invoice{
-		Date: when, Party: *party, Amount: amt, Category: *category, Account: *account,
+		Date: when, Party: *party, Amount: amt, Category: *category, Account: *account, Number: *number,
 	})
 	if err != nil {
 		return err
@@ -1947,6 +1955,7 @@ func billReceive(args []string) error {
 	category := fs.String("category", "", "the Expenses account the expense is recognized in")
 	account := fs.String("account", "", "where it parks until paid; defaults to Liabilities:Payable")
 	date := fs.String("date", "", "when the expense was incurred (YYYY-MM-DD); defaults to today")
+	number := fs.String("invoice", "", "the bill number (the vendor's invoice number), rendered as the ledger (code)")
 	why := fs.String("why", "", "why this bill was received; recorded with it")
 	actor := fs.String("actor", "human", "who is recording it; the log records who decided")
 	if err := fs.Parse(args); err != nil {
@@ -1979,7 +1988,7 @@ func billReceive(args []string) error {
 	defer closeLog()
 
 	b, added, err := books.ReceiveBill(log, *actor, *why, books.Bill{
-		Date: when, Party: *party, Amount: amt, Category: *category, Account: *account,
+		Date: when, Party: *party, Amount: amt, Category: *category, Account: *account, Number: *number,
 	})
 	if err != nil {
 		return err

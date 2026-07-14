@@ -34,6 +34,7 @@ type Bill struct {
 	Amount   model.Amount // the magnitude owed; a positive quantity
 	Category string       // the Expenses account the expense is recognized in
 	Account  string       // the Liabilities:Payable account it parks in until paid
+	Number   string       // the bill number (the vendor's invoice number), rendered as the ledger (code)
 }
 
 // ReceiveBill records a bill: an expense incurred and billed before the cash leaves. It returns the
@@ -59,7 +60,7 @@ func ReceiveBill(log *eventlog.Log, actor, why string, bill Bill) (Bill, bool, e
 
 	data, err := json.Marshal(accrualData{
 		Date: bill.Date, Party: bill.Party, Amount: bill.Amount,
-		Category: bill.Category, Account: bill.Account, Why: why,
+		Category: bill.Category, Account: bill.Account, Number: bill.Number, Why: why,
 	})
 	if err != nil {
 		return Bill{}, false, err
@@ -135,7 +136,7 @@ func Bills(log *eventlog.Log) ([]Bill, error) {
 		}
 		out = append(out, Bill{
 			ID: e.RecordID, Date: data.Date, Party: data.Party,
-			Amount: data.Amount, Category: data.Category, Account: data.Account,
+			Amount: data.Amount, Category: data.Category, Account: data.Account, Number: data.Number,
 		})
 	}
 	return out, nil
@@ -180,7 +181,7 @@ func billLines(log *eventlog.Log) ([]accrualLine, error) {
 		out = append(out, accrualLine{
 			kind: CollectionBill, id: b.ID, date: b.Date, party: b.Party,
 			parkedAccount: b.Account, parkedAmount: b.Amount.Negate(), category: b.Category,
-			settledBy: settled[b.ID],
+			invoice: b.Number, settledBy: settled[b.ID],
 		})
 	}
 	return out, nil

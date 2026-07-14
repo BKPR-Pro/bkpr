@@ -37,6 +37,7 @@ type Invoice struct {
 	Amount   model.Amount // the magnitude owed; a positive quantity
 	Category string       // the Income account the revenue is recognized in
 	Account  string       // the Assets:Receivable account it parks in until paid
+	Number   string       // the invoice number, rendered as the ledger (code); metadata, not part of the fingerprint
 }
 
 // Raise records an invoice: revenue earned and billed before the cash moves. It returns the stored
@@ -62,7 +63,7 @@ func Raise(log *eventlog.Log, actor, why string, inv Invoice) (Invoice, bool, er
 
 	data, err := json.Marshal(accrualData{
 		Date: inv.Date, Party: inv.Party, Amount: inv.Amount,
-		Category: inv.Category, Account: inv.Account, Why: why,
+		Category: inv.Category, Account: inv.Account, Number: inv.Number, Why: why,
 	})
 	if err != nil {
 		return Invoice{}, false, err
@@ -140,7 +141,7 @@ func Invoices(log *eventlog.Log) ([]Invoice, error) {
 		}
 		out = append(out, Invoice{
 			ID: e.RecordID, Date: data.Date, Party: data.Party,
-			Amount: data.Amount, Category: data.Category, Account: data.Account,
+			Amount: data.Amount, Category: data.Category, Account: data.Account, Number: data.Number,
 		})
 	}
 	return out, nil
@@ -185,7 +186,7 @@ func invoiceLines(log *eventlog.Log) ([]accrualLine, error) {
 		out = append(out, accrualLine{
 			kind: CollectionInvoice, id: inv.ID, date: inv.Date, party: inv.Party,
 			parkedAccount: inv.Account, parkedAmount: inv.Amount, category: inv.Category,
-			settledBy: settled[inv.ID],
+			invoice: inv.Number, settledBy: settled[inv.ID],
 		})
 	}
 	return out, nil

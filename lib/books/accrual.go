@@ -34,6 +34,7 @@ type accrualData struct {
 	Amount   model.Amount `json:"amount"`
 	Category string       `json:"category"`
 	Account  string       `json:"account"`
+	Number   string       `json:"number,omitempty"` // the invoice or bill number, rendered as the ledger (code)
 	Why      string       `json:"why,omitempty"`
 }
 
@@ -53,6 +54,7 @@ type accrualLine struct {
 	parkedAccount string       // the receivable (invoice) or payable (bill)
 	parkedAmount  model.Amount // signed from the parked account's view: +magnitude for AR, -magnitude for AP
 	category      string       // the income (invoice) or expense (bill) account
+	invoice       string       // the invoice or bill number, rendered as the ledger (code)
 	settledBy     string       // the bank line that paid it, or "" while open
 }
 
@@ -75,6 +77,7 @@ func (a accrualLine) entry() model.Entry {
 	// stored -- the flag is derived here from the settle events the fold already read.
 	return model.Entry{
 		Payee:    a.party,
+		Invoice:  a.invoice,
 		Pending:  a.settledBy == "",
 		Postings: []model.Posting{{Account: a.category, Amount: a.parkedAmount.Negate()}},
 	}
@@ -132,7 +135,7 @@ func overlayAccruals(log *eventlog.Log, txs []model.Transaction, entries []model
 		}
 		entries[i] = model.Entry{
 			Payee:    entries[i].Payee,
-			Postings: []model.Posting{{Account: ln.parkedAccount, Amount: txs[i].Amount.Negate()}},
+			Postings: []model.Posting{clearing(ln, txs[i])},
 		}
 	}
 
@@ -143,6 +146,24 @@ func overlayAccruals(log *eventlog.Log, txs []model.Transaction, entries []model
 
 	sortByDate(txs, entries)
 	return txs, entries, nil
+}
+
+// clearing builds the posting that redirects a settling bank line onto the parked account instead of
+// booking income or expense a second time. When the cash is in the accrual's own currency it clears
+// the parked account by what landed, so a partial payment leaves the remainder owing. When the cash
+// is a foreign settlement -- a CAD deposit paying a USD invoice -- it clears the whole parked amount
+// in its own commodity, priced at the cash that actually arrived, so the receivable or payable nets
+// to zero rather than being left holding two currencies. The @@ price is the exact figure the books
+// keep for the settlement, the same shape a foreign holding records its cost in.
+func clearing(ln accrualLine, tx model.Transaction) model.Posting {
+	if tx.Amount.Commodity == ln.parkedAmount.Commodity {
+		return model.Posting{Account: ln.parkedAccount, Amount: tx.Amount.Negate()}
+	}
+	cost := tx.Amount
+	if cost.Units < 0 {
+		cost = cost.Negate()
+	}
+	return model.Posting{Account: ln.parkedAccount, Amount: ln.parkedAmount.Negate(), Cost: &cost}
 }
 
 // settlementWindow is how far from an accrual's date a bank line may fall and still be offered as
