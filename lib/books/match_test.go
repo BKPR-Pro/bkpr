@@ -186,6 +186,52 @@ func TestBreakingAMatchKeepsBothSightings(t *testing.T) {
 	}
 }
 
+// Two lines that are explicitly categorized -- carried in from a hand-kept ledger, or corrected by
+// hand -- are statements of fact, not unclaimed sightings to be guessed at. When two such asserted
+// entries happen to be the same size moving opposite ways between owned accounts inside the window
+// but do not name each other, the loose fold must not fuse them: doing so deletes a real line and
+// wipes the surviving one's payee. This is the paycheck-vs-credit-card-payment coincidence from the
+// real books: a $1000 paycheck and an unrelated $1000 card payment five days apart.
+func TestTwoAssertedOppositeLinesAreNotFusedAsATransfer(t *testing.T) {
+	log := newLog()
+	// The card account must be owned for the loose fold to consider the pair at all, so a card
+	// statement line anchors it as a source account. Its size and date keep it clear of the pair.
+	importOne(t, log, lineIn("card", "Liabilities:Card", 25, -7300, "CARD STATEMENT"))
+	importOne(t, log, lineIn("pay", "Liabilities:Shareholder Loan", 7, 100000, "Dallas Read"))
+	importOne(t, log, lineIn("bill", "Assets:Bank:Chequing", 12, -100000, "RBC Mastercard"))
+
+	// The paycheck: money left chequing into the shareholder loan, with a note on the leg.
+	if err := books.Categorize(log, "human", "carried", "pay", "Dallas Read",
+		[]model.Posting{{Account: "Assets:Bank:Chequing", Amount: cad(-100000), Comment: "Paycheque"}}); err != nil {
+		t.Fatalf("Categorize pay: %v", err)
+	}
+	// The card payment: money left chequing to the card. It names the card, not the shareholder loan,
+	// so the two do not mutually name each other and only the loose fold could pair them.
+	if err := books.Categorize(log, "human", "carried", "bill", "RBC Mastercard",
+		[]model.Posting{{Account: "Liabilities:Card", Amount: cad(100000)}}); err != nil {
+		t.Fatalf("Categorize bill: %v", err)
+	}
+
+	txs, entries := ledger(t, log)
+	ids := map[string]bool{}
+	for _, tx := range txs {
+		ids[tx.ID] = true
+	}
+	if !ids["pay"] || !ids["bill"] {
+		t.Fatalf("both asserted lines must survive; got %v", ids)
+	}
+	for i, tx := range txs {
+		if tx.ID == "pay" {
+			if entries[i].Payee != "Dallas Read" {
+				t.Errorf("paycheck payee wiped to %q, want it kept", entries[i].Payee)
+			}
+			if len(entries[i].Postings) != 1 || entries[i].Postings[0].Comment != "Paycheque" {
+				t.Errorf("paycheck leg/comment lost: %+v", entries[i].Postings)
+			}
+		}
+	}
+}
+
 func usd(cents int64) model.Amount { return model.Amount{Units: cents, Scale: 2, Commodity: "USD"} }
 
 // crossLeg is one side of a cross-currency transfer: an account, a day, and an amount in its own

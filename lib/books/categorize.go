@@ -160,7 +160,14 @@ func cashLedger(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) {
 	for _, tx := range txs {
 		owned[tx.Account] = true
 	}
-	dup := suppressed(txs, entries, overrides, owned)
+	// A line categorized by hand or carried from a ledger file is an assertion, not a guess. The loose
+	// transfer fold, which pairs unnamed sightings on size alone, must not dissolve two such assertions;
+	// the assertions say what each line is.
+	asserted, err := assertions(log)
+	if err != nil {
+		return nil, nil, err
+	}
+	dup := suppressed(txs, entries, overrides, owned, asserted)
 	keptTxs := make([]model.Transaction, 0, len(txs))
 	keptEntries := make([]model.Entry, 0, len(entries))
 	for i, tx := range txs {

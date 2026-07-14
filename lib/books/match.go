@@ -39,7 +39,14 @@ const transferDays = 5
 // of the same size would be mistaken for a transfer and one would vanish. When such a pair is found
 // the kept (earlier) leg is booked as the transfer to the other account, so both accounts' balances
 // stay right even though neither statement named the other. A wrong pairing is undone with `match`.
-func suppressed(txs []model.Transaction, entries []model.Entry, overrides map[string]matchedData, owned map[string]bool) map[string]bool {
+//
+// The loose fold is a guess made where the rules stayed silent, so it yields to an assertion: two
+// lines both explicitly categorized -- corrected by hand, or carried from a ledger file that names
+// its own accounts -- are not fused, because each assertion says what its line is. Hand-kept books
+// write every movement once, so there a loose pairing can only be a coincidence of size; the named
+// fold, which has real evidence, still applies. A genuine transfer the rules missed on one asserted
+// side is recovered with `match`.
+func suppressed(txs []model.Transaction, entries []model.Entry, overrides map[string]matchedData, owned map[string]bool, asserted map[string]model.Entry) map[string]bool {
 	dup := map[string]bool{}
 	consumed := make([]bool, len(txs))
 	pos := make(map[string]int, len(txs))
@@ -86,6 +93,11 @@ func suppressed(txs []model.Transaction, entries []model.Entry, overrides map[st
 			named := isTransferPair(txs[i], entries[i], txs[j], entries[j]) ||
 				isCrossTransferPair(txs[i], entries[i], txs[j], entries[j])
 			loose := !named && isOwnedTransferPair(txs[i], entries[i], txs[j], entries[j], owned)
+			if loose && bothAsserted(txs[i], txs[j], asserted) {
+				// Two assertions, not two unnamed sightings: trust what each line says rather than
+				// guessing them into one movement on size alone.
+				loose = false
+			}
 			if !named && !loose {
 				continue
 			}
@@ -102,6 +114,15 @@ func suppressed(txs []model.Transaction, entries []model.Entry, overrides map[st
 		}
 	}
 	return dup
+}
+
+// bothAsserted reports whether both sightings carry an explicit categorization -- a hand correction
+// or a fact carried from a ledger file -- rather than a rules guess. Two assertions are statements of
+// what each line is, so the loose fold leaves them alone.
+func bothAsserted(a, b model.Transaction, asserted map[string]model.Entry) bool {
+	_, ai := asserted[a.ID]
+	_, bi := asserted[b.ID]
+	return ai && bi
 }
 
 // isOwnedTransferPair reports whether two sightings are the same movement between two accounts you own,
