@@ -14,9 +14,12 @@ import (
 //
 // The account names which leg the note belongs to. It may be omitted only when the entry has a
 // single posting, the one place a note could go; a split must name the leg, and an account that
-// matches no posting, or more than one, is refused rather than guessed. Commenting a line the rules
-// categorized freezes their current answer for that one line, the same way a hand correction does,
-// because a note is an assertion about a specific line and cannot be carried by a rule.
+// matches no posting, or more than one, is refused rather than guessed. Naming the line's own
+// account reaches the source (elided) leg -- the balancing posting the ledger infers, which is not
+// among the categorized postings -- and records the note against the transaction instead, its own
+// latest-wins fact. Commenting a line the rules categorized freezes their current answer for that
+// one line, the same way a hand correction does, because a note is an assertion about a specific
+// line and cannot be carried by a rule.
 func Comment(log *eventlog.Log, actor, why, txID, account, text string, remove bool) error {
 	tx, err := Transaction(log, txID)
 	if err != nil {
@@ -28,12 +31,24 @@ func Comment(log *eventlog.Log, actor, why, txID, account, text string, remove b
 		return err
 	}
 
-	idx, err := postingToComment(entry.Postings, account)
+	if remove {
+		text = ""
+	}
+
+	// The source (elided) leg is the line's own account, not one of the categorized postings, so a note
+	// on it is recorded against the transaction rather than the entry. It cannot unbalance the line, so
+	// like a categorized note it needs no balance re-check.
+	onSource, err := namesSourceLeg(tx, entry.Postings, account)
 	if err != nil {
 		return err
 	}
-	if remove {
-		text = ""
+	if onSource {
+		return commentSource(log, actor, why, tx.ID, text)
+	}
+
+	idx, err := postingToComment(entry.Postings, account)
+	if err != nil {
+		return err
 	}
 	entry.Postings[idx].Comment = text
 
@@ -65,6 +80,24 @@ func entryFor(log *eventlog.Log, txID string) (model.Entry, error) {
 		}
 	}
 	return model.Entry{}, fmt.Errorf("books: no transaction %q to comment on", txID)
+}
+
+// namesSourceLeg reports whether the account names the transaction's own (elided, source) leg, the
+// balancing posting the ledger infers and that is never among the categorized postings. It is named
+// only when the account matches the line's account exactly; an empty account names the sole
+// categorized posting instead, never the source leg. When that same account is also a categorized
+// posting -- a line posted back to its own account -- the note could belong to either leg, so it is
+// refused as ambiguous rather than guessed.
+func namesSourceLeg(tx model.Transaction, postings []model.Posting, account string) (bool, error) {
+	if account == "" || account != tx.Account {
+		return false, nil
+	}
+	for _, p := range postings {
+		if p.Account == account {
+			return false, fmt.Errorf("books: account %q is both the source leg and a categorized posting; the note is ambiguous", account)
+		}
+	}
+	return true, nil
 }
 
 // postingToComment finds the one leg a note belongs to. With no account named it is the sole

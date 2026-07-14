@@ -66,6 +66,31 @@ func TestCommentRecordsTheNoteAndActor(t *testing.T) {
 	}
 }
 
+// Naming the line's own account notes the source (elided) leg, the balancing posting the ledger
+// infers. The note lands on the transaction, not a categorized posting, and reads back on the fold.
+func TestCommentTheSourceLeg(t *testing.T) {
+	bookHere(t)
+	seedTx(t, "tx1")
+	if err := categorize([]string{"tx1", "-category", "Expenses:Food"}); err != nil {
+		t.Fatalf("categorize: %v", err)
+	}
+
+	if err := commentCmd([]string{"tx1", "-account", "Assets:Bank:Chequing", "-text", "paid from petty cash"}); err != nil {
+		t.Fatalf("comment: %v", err)
+	}
+
+	txs, _, _ := foldStore(t)
+	var got string
+	for _, tx := range txs {
+		if tx.ID == "tx1" {
+			got = tx.Comment
+		}
+	}
+	if got != "paid from petty cash" {
+		t.Errorf("source note = %q, want it recorded on the transaction's own leg", got)
+	}
+}
+
 // -remove clears the note from the posting.
 func TestCommentRemoveClearsTheNote(t *testing.T) {
 	bookHere(t)

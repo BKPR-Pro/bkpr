@@ -35,7 +35,6 @@ type importedData struct {
 	Amount      model.Amount      `json:"amount"`
 	Description string            `json:"description"`
 	Raw         map[string]string `json:"raw,omitempty"`
-	Comment     string            `json:"comment,omitempty"` // a note on the source leg, carried from the file
 }
 
 // ImportResult reports what one statement did to the log.
@@ -66,7 +65,6 @@ func Import(log *eventlog.Log, actor string, txs []model.Transaction) (ImportRes
 			Amount:      tx.Amount,
 			Description: tx.Description,
 			Raw:         tx.Raw,
-			Comment:     tx.Comment,
 		})
 		if err != nil {
 			return result, fmt.Errorf("books: %s: %w", tx.ID, err)
@@ -87,6 +85,14 @@ func Import(log *eventlog.Log, actor string, txs []model.Transaction) (ImportRes
 			return result, fmt.Errorf("books: %s: %w", tx.ID, err)
 		default:
 			result.Imported++
+			// A note on the source leg is a separate fact from the import, latest-wins, so it is carried
+			// as its own event rather than baked in. Only on a fresh import: a re-import is a no-op, and
+			// re-carrying the file's note would clobber a note the comment command left in the meantime.
+			if tx.Comment != "" {
+				if err := commentSource(log, actor, "", tx.ID, tx.Comment); err != nil {
+					return result, fmt.Errorf("books: %s: %w", tx.ID, err)
+				}
+			}
 		}
 	}
 	return result, nil
@@ -101,6 +107,10 @@ func Transactions(log *eventlog.Log) ([]model.Transaction, error) {
 	}
 
 	gone := voidedTransactions(events)
+	comments, err := sourceComments(events)
+	if err != nil {
+		return nil, err
+	}
 
 	var txs []model.Transaction
 	for _, e := range events {
@@ -121,7 +131,7 @@ func Transactions(log *eventlog.Log) ([]model.Transaction, error) {
 			Amount:      data.Amount,
 			Description: data.Description,
 			Raw:         data.Raw,
-			Comment:     data.Comment,
+			Comment:     comments[e.RecordID],
 		})
 	}
 

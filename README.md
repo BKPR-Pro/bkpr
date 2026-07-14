@@ -705,7 +705,9 @@ Expenses:Repairs:Materials  84.20 CAD  ; lumber for the deck
 ```
 
 When the line splits across several postings, `-account` names which leg the note belongs to; a
-line with one posting needs no `-account`. `-remove` clears it. The note is commentary, not data: it
+line with one posting needs no `-account`. Naming the line's own account notes the source (elided)
+leg — the balancing posting the ledger infers rather than spells out — so a reason for where the
+money came from is reachable the same way, common in hand-kept books. `-remove` clears it. The note is commentary, not data: it
 never takes part in balancing, and it is not a fact the way a rule or a correction is — so it is not
 authored into the artifact by hand but carried in the log like the account and amount, and the
 inline comment you see is regenerated from it on every fold. That is why editing the artifact's

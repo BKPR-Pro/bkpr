@@ -443,8 +443,10 @@ var reference = []docGroup{
       commentary the books carry beside the account and amount: it renders inline in the ledger
       artifact (Expenses:Repairs  84.20 CAD  ; the note) and reads back, so a reason left on a
       split is durable. -account names which leg the note belongs to and is needed only when the
-      line splits across several; a line with one posting needs no -account. Commenting a line the
-      rules categorized freezes their answer for that one line, the way a correction does.
+      line splits across several; a line with one posting needs no -account. Naming the line's own
+      account notes the source (elided) leg -- the balancing posting the ledger infers -- so a
+      reason for where the money came from is reachable too. Commenting a line the rules categorized
+      freezes their answer for that one line, the way a correction does.
 `},
 		{[]string{"void"}, `  void <fingerprint> [-why <reason>] [-actor <name>]
       Annul a bad imported line. The imported fact stays in the log; a later fact supersedes
