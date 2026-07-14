@@ -15,9 +15,44 @@ package ledger
 import (
 	"fmt"
 	"io"
+	"sort"
+	"strings"
 
 	"github.com/dallasread/bookkeeper/lib/model"
 )
+
+// WriteAccounts renders the account directives an account's metadata describes, so a hand-kept
+// file's letterhead survives a rewrite. Each account is written as `account NAME` followed by one
+// `address` line per line of its stored address, which splits the newline-joined value back into
+// the form source.ReadLedgerAccounts reads: writer and reader are symmetric, so the artifact round
+// trips. Accounts are emitted in name order for a stable diff, blocks separated by a blank line. An
+// account carrying no address contributes nothing, and empty metadata writes nothing at all -- the
+// caller adds the separator to the entries only when something was written.
+func WriteAccounts(w io.Writer, meta map[string]map[string]string) error {
+	names := make([]string, 0, len(meta))
+	for account := range meta {
+		if meta[account]["address"] != "" {
+			names = append(names, account)
+		}
+	}
+	sort.Strings(names)
+	for i, account := range names {
+		if i > 0 {
+			if _, err := fmt.Fprintln(w); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintf(w, "account %s\n", account); err != nil {
+			return err
+		}
+		for _, line := range strings.Split(meta[account]["address"], "\n") {
+			if _, err := fmt.Fprintf(w, "  address %s\n", line); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
 
 // WriteAll renders one entry per transaction, in order. Each entry is written in the currency of
 // the account its statement came from, which is a fact about the account rather than a choice made

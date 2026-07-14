@@ -2,11 +2,13 @@ package ledger_test
 
 import (
 	"bytes"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/dallasread/bookkeeper/lib/adapters/ledger"
+	"github.com/dallasread/bookkeeper/lib/adapters/source"
 	"github.com/dallasread/bookkeeper/lib/model"
 )
 
@@ -338,5 +340,41 @@ func TestATransactionWithoutACommodityIsRefused(t *testing.T) {
 func TestMismatchedLengthsIsAnError(t *testing.T) {
 	if err := ledger.WriteAll(&bytes.Buffer{}, []model.Transaction{{}}, nil); err == nil {
 		t.Fatal("expected an error when entries do not line up with transactions")
+	}
+}
+
+// Account directives render before the entries so a hand-kept file's letterhead survives a rewrite.
+// The multi-line address stored under one key splits back into one `address` line each, in order,
+// and the whole thing parses back to the metadata it came from: reader and writer are symmetric, so
+// the artifact round-trips.
+func TestWriteAccountsRoundTripsThroughTheReader(t *testing.T) {
+	meta := map[string]map[string]string{
+		"Assets:Consulting:Chequing": {"address": "742104 NB Inc.\n90 King Street\nBN: 770593416"},
+		"Liabilities:Consulting:HST": {"address": "HST"},
+	}
+	var buf bytes.Buffer
+	if err := ledger.WriteAccounts(&buf, meta); err != nil {
+		t.Fatalf("WriteAccounts: %v", err)
+	}
+	if !strings.Contains(buf.String(), "account Assets:Consulting:Chequing\n  address 742104 NB Inc.\n  address 90 King Street\n  address BN: 770593416\n") {
+		t.Fatalf("directive not rendered as address lines:\n%s", buf.String())
+	}
+	got, err := source.ReadLedgerAccounts(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatalf("ReadLedgerAccounts: %v", err)
+	}
+	if !reflect.DeepEqual(got, meta) {
+		t.Fatalf("round trip = %+v, want %+v", got, meta)
+	}
+}
+
+// Nothing to describe writes nothing, so books with no account metadata gain no stray lines.
+func TestWriteAccountsWritesNothingWhenEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ledger.WriteAccounts(&buf, nil); err != nil {
+		t.Fatalf("WriteAccounts: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("wrote %q for empty metadata", buf.String())
 	}
 }

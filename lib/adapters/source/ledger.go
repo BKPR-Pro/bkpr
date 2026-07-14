@@ -132,6 +132,49 @@ func ReadLedger(r io.Reader) ([]model.Transaction, []model.Entry, error) {
 	return txs, entries, nil
 }
 
+// ReadLedgerAccounts collects the account directives a ledger file declares, as authored knowledge
+// about the accounts themselves rather than about any transaction. Each `account NAME` block's run
+// of `address` sub-lines folds, in file order, into one "address" value -- a multi-line letterhead
+// kept whole -- so the result is account -> metadata, the shape books.SetAccountMeta records. A
+// directive with no sub-lines carries no facts and so contributes no entry. Everything else in the
+// file (entries, periodic templates, comments) is not a directive and is ignored here; ReadLedger
+// reads those. It is a second, independent pass, so callers that only want statement lines are
+// untouched.
+func ReadLedgerAccounts(r io.Reader) (map[string]map[string]string, error) {
+	out := map[string]map[string]string{}
+	var account string
+	var address []string
+
+	flush := func() {
+		if account != "" && len(address) > 0 {
+			out[account] = map[string]string{"address": strings.Join(address, "\n")}
+		}
+		account, address = "", nil
+	}
+
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case strings.HasPrefix(line, "account "):
+			flush()
+			account = strings.TrimSpace(line[len("account "):])
+		case account != "" && (line == "" || line[0] != ' ' && line[0] != '\t'):
+			// the directive's block ends at the first line that is not one of its indented sub-lines
+			flush()
+		case account != "":
+			if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "address "); ok {
+				address = append(address, strings.TrimSpace(rest))
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	flush()
+	return out, nil
+}
+
 // stripComment drops an inline "; ..." note from a header line: a comment on the entry header has
 // no posting to belong to, so everything after the payee is commentary the reader discards.
 func stripComment(s string) string {

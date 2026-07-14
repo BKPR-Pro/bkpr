@@ -16,6 +16,44 @@ func accountMeta(t *testing.T, log *eventlog.Log, account string) map[string]str
 	return all[account]
 }
 
+// A source that declares accounts records their metadata in one call, so an import can carry the
+// letterhead a hand-kept file names alongside the transactions it carries.
+func TestImportAccountMetaRecordsEachAccount(t *testing.T) {
+	log := newLog()
+	n, err := books.ImportAccountMeta(log, "human", map[string]map[string]string{
+		"Assets:Bank:Chequing": {"address": "742104 NB Inc.\n90 King Street"},
+		"Liabilities:Bank:HST": {"address": "HST"},
+	})
+	if err != nil {
+		t.Fatalf("ImportAccountMeta: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("recorded %d, want 2", n)
+	}
+	if got := accountMeta(t, log, "Assets:Bank:Chequing")["address"]; got != "742104 NB Inc.\n90 King Street" {
+		t.Errorf("address = %q", got)
+	}
+}
+
+// Re-importing the same file records nothing new: an account whose stored metadata already matches
+// is skipped, so the log does not grow an event on every re-run of a migration.
+func TestImportAccountMetaSkipsUnchanged(t *testing.T) {
+	log := newLog()
+	meta := map[string]map[string]string{"Assets:Bank:Chequing": {"address": "90 King Street"}}
+	if _, err := books.ImportAccountMeta(log, "human", meta); err != nil {
+		t.Fatalf("ImportAccountMeta: %v", err)
+	}
+	before, _ := log.All()
+	n, err := books.ImportAccountMeta(log, "human", meta)
+	if err != nil {
+		t.Fatalf("ImportAccountMeta: %v", err)
+	}
+	after, _ := log.All()
+	if n != 0 || len(after) != len(before) {
+		t.Fatalf("re-import recorded %d and grew the log from %d to %d", n, len(before), len(after))
+	}
+}
+
 // Metadata set on an account folds back out under that account, keyed by the path.
 func TestAccountMetaFoldsBackByAccount(t *testing.T) {
 	log := newLog()

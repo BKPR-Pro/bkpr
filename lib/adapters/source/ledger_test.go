@@ -281,6 +281,50 @@ func TestReadLedgerCarriesAPostingComment(t *testing.T) {
 
 // A real ledger file opens with account directives and periodic (~) templates. They are not
 // statement lines, so they are skipped, sub-lines and all.
+// An account directive in a hand-kept file carries reference data about the account itself -- the
+// business name, its mailing address, a tax number -- as a run of `address` lines. That is
+// authored knowledge with a home in the books (account metadata), so the reader surfaces it rather
+// than dropping it with the rest of the directive. Every `address` line folds into the one address
+// value, in file order, so a multi-line letterhead survives whole.
+func TestReadLedgerAccountsFoldsTheAddressBlock(t *testing.T) {
+	meta, err := source.ReadLedgerAccounts(strings.NewReader(`account Assets:Consulting:Chequing
+  address 742104 NB Inc.
+  address 90 King Street
+  address BN: 770593416
+
+account Liabilities:Consulting:HST
+  address HST
+
+2026/03/01  * One
+  Expenses:A  1.00 CAD
+  Assets:Consulting:Chequing
+`))
+	if err != nil {
+		t.Fatalf("ReadLedgerAccounts: %v", err)
+	}
+	if got := meta["Assets:Consulting:Chequing"]["address"]; got != "742104 NB Inc.\n90 King Street\nBN: 770593416" {
+		t.Fatalf("Chequing address = %q", got)
+	}
+	if got := meta["Liabilities:Consulting:HST"]["address"]; got != "HST" {
+		t.Fatalf("HST address = %q", got)
+	}
+	if _, ok := meta["Expenses:A"]; ok {
+		t.Fatalf("an account only named by a posting is not a directive: %+v", meta)
+	}
+}
+
+// An account directive with no sub-lines carries nothing to record, so it produces no metadata
+// entry rather than an empty bag that would assert the account exists with no facts about it.
+func TestReadLedgerAccountsOmitsAnEmptyDirective(t *testing.T) {
+	meta, err := source.ReadLedgerAccounts(strings.NewReader("account Assets:Bank:Chequing\n"))
+	if err != nil {
+		t.Fatalf("ReadLedgerAccounts: %v", err)
+	}
+	if len(meta) != 0 {
+		t.Fatalf("want no metadata, got %+v", meta)
+	}
+}
+
 func TestReadLedgerSkipsDirectivesAndPeriodicEntries(t *testing.T) {
 	txs := readLedger(t, `account Assets:Bank:Chequing
   address 90 King Street

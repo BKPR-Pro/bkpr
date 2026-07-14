@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -491,9 +492,26 @@ func writeSummaryComments(w io.Writer, sum bookSummary) error {
 // output: bookkeeper owns the file and rewrites it whole, and its git diff is the readable account
 // of what changed.
 func writeLedger(s *store.Store, txs []model.Transaction, entries []model.Entry, sum bookSummary) error {
+	meta, err := books.AccountMeta(s.Log)
+	if err != nil {
+		return err
+	}
 	f, err := os.Create(s.Ledger())
 	if err != nil {
 		return err
+	}
+	// The account directives lead the file, so a hand-kept letterhead round-trips through a rewrite;
+	// a blank line sets them off from the entries when any were written.
+	var accounts bytes.Buffer
+	if err := ledger.WriteAccounts(&accounts, meta); err != nil {
+		f.Close()
+		return err
+	}
+	if accounts.Len() > 0 {
+		if _, err := fmt.Fprintf(f, "%s\n", accounts.Bytes()); err != nil {
+			f.Close()
+			return err
+		}
 	}
 	if err := ledger.WriteAll(f, txs, entries); err != nil {
 		f.Close()

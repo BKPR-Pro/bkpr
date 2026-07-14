@@ -38,6 +38,43 @@ func SetAccountMeta(log *eventlog.Log, actor, account string, meta map[string]st
 	return err
 }
 
+// ImportAccountMeta records metadata for each account a source declared, and returns how many it
+// recorded. An account whose stored metadata already carries every key/value being set is skipped,
+// so re-importing the same file -- the shape a migration takes -- adds no event and the log does
+// not grow on a re-run. Setting merges per key (see SetAccountMeta), so a source that names only an
+// address never clears a name recorded elsewhere.
+func ImportAccountMeta(log *eventlog.Log, actor string, accounts map[string]map[string]string) (int, error) {
+	current, err := AccountMeta(log)
+	if err != nil {
+		return 0, err
+	}
+	recorded := 0
+	for account, meta := range accounts {
+		if len(meta) == 0 {
+			continue
+		}
+		if metaSubset(meta, current[account]) {
+			continue
+		}
+		if err := SetAccountMeta(log, actor, account, meta); err != nil {
+			return recorded, err
+		}
+		recorded++
+	}
+	return recorded, nil
+}
+
+// metaSubset reports whether every key in want is already present in have with the same value, so a
+// set that would change nothing can be skipped.
+func metaSubset(want, have map[string]string) bool {
+	for k, v := range want {
+		if have[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
 // OwnedAccounts is the set of accounts you hold -- the real bank, card, and loan accounts money is
 // read from -- as opposed to the income, expense, and equity categories money is assigned to. An
 // account is yours if a statement was ever imported against it (it is some transaction's source
