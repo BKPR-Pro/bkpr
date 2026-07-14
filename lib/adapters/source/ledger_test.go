@@ -17,6 +17,35 @@ func readLedger(t *testing.T, text string) []model.Transaction {
 	return txs
 }
 
+// A hand-kept file marks an entry the bank has not cleared with "!", not "*" -- an accrued invoice,
+// an uncleared payment. That flag is real accounting state, so the reader carries it back on the
+// entry rather than stripping it, and a cleared entry comes back not pending.
+func TestReadLedgerCarriesThePendingFlag(t *testing.T) {
+	_, entries, err := source.ReadLedger(strings.NewReader(`2026/04/01  ! (2073) DNSimple
+  Income:Consulting:Contract:DNSimple  -9000.00 USD
+  Assets:Consulting:Chequing
+
+2026/04/02  * Swiss Chalet
+  Expenses:Consulting:Meals  53.08 CAD
+  Assets:Consulting:Chequing
+`))
+	if err != nil {
+		t.Fatalf("ReadLedger: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries, want 2", len(entries))
+	}
+	if !entries[0].Pending {
+		t.Errorf("the ! entry came back not pending, want its pending state carried")
+	}
+	if entries[0].Payee != "(2073) DNSimple" {
+		t.Errorf("payee = %q, want the flag stripped but the code kept", entries[0].Payee)
+	}
+	if entries[1].Pending {
+		t.Errorf("the * entry came back pending, want a cleared entry not pending")
+	}
+}
+
 // The categorization the file already carries is read back alongside the line, so an import can
 // assert it rather than making the rules re-derive what the file plainly says.
 func TestReadLedgerCarriesTheCategorization(t *testing.T) {

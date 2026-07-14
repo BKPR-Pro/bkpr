@@ -104,6 +104,37 @@ func TestSettlementClearsTheReceivableWithoutDoubleBookingIncome(t *testing.T) {
 	}
 }
 
+// The clearing flag is a folded read of settlement, not stored state: an open invoice's line renders
+// pending (!), because the cash it recognizes has not arrived, and settling it against the deposit
+// that paid it renders it cleared (*). Nothing is asserted; the flag falls out of the settle events
+// the fold already reads.
+func TestAnOpenInvoiceRendersPendingUntilSettled(t *testing.T) {
+	log := newLog()
+	inv := raise(t, log, "J. Smith", 1, 160000, "Income:Consulting")
+
+	_, entries := booksOn(t, log, books.AccrualBasis)
+	if len(entries) != 1 {
+		t.Fatalf("got %d accrual lines, want 1", len(entries))
+	}
+	if !entries[0].Pending {
+		t.Errorf("an open invoice should render pending until its cash arrives")
+	}
+
+	// The deposit lands and settles the invoice, so no line is owed any longer.
+	loaded(t, log, rule("j smith", "Income:Consulting"))
+	importOne(t, log, line("pay", 20, 160000, "E-TRANSFER FROM J SMITH"))
+	if err := books.SettleInvoice(log, "human", inv.ID, "pay"); err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+
+	txs, entries := booksOn(t, log, books.AccrualBasis)
+	for i := range entries {
+		if entries[i].Pending {
+			t.Errorf("after settlement no line should be pending; line %d (%s) is", i, txs[i].ID)
+		}
+	}
+}
+
 // A custom parked account rides through: an invoice may name where it holds until paid, so several
 // customers can carry their own receivable sub-accounts.
 func TestAnInvoiceMayNameItsReceivableAccount(t *testing.T) {

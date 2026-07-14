@@ -70,7 +70,14 @@ func (a accrualLine) transaction() model.Transaction {
 }
 
 func (a accrualLine) entry() model.Entry {
-	return model.Entry{Payee: a.party, Postings: []model.Posting{{Account: a.category, Amount: a.parkedAmount.Negate()}}}
+	// The clearing flag is a folded read of settlement: while the accrual is open its cash has not
+	// arrived, so the line is pending (!); once a bank line settles it, it is cleared (*). Nothing is
+	// stored -- the flag is derived here from the settle events the fold already read.
+	return model.Entry{
+		Payee:    a.party,
+		Pending:  a.settledBy == "",
+		Postings: []model.Posting{{Account: a.category, Amount: a.parkedAmount.Negate()}},
+	}
 }
 
 // accrualLines folds every open invoice and bill into the shared shape, in raise/receive order.

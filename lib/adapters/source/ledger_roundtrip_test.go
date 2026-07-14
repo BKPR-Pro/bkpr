@@ -149,6 +149,52 @@ func TestLedgerBlockCommentsRoundTrip(t *testing.T) {
 	}
 }
 
+// The pending flag on an entry -- a hand-kept file's "!" for an accrued invoice or an uncleared
+// payment -- must survive the writer and the reader. It renders in the header, reads back onto the
+// entry, and re-renders byte-identically. Forcing every entry to "*" on import silently asserted
+// pending money had cleared the bank.
+func TestLedgerPendingFlagRoundTrips(t *testing.T) {
+	usd := func(cents int64) model.Amount { return model.Amount{Units: cents, Scale: 2, Commodity: "USD"} }
+	date, err := time.Parse("2006/01/02", "2026/04/01")
+	if err != nil {
+		t.Fatalf("date: %v", err)
+	}
+
+	txs := []model.Transaction{{
+		ID: "p-1", Account: "Assets:Consulting:Chequing", Date: date,
+		Amount: usd(900000), Description: "(2073) DNSimple",
+	}}
+	entries := []model.Entry{{
+		Payee:    "(2073) DNSimple",
+		Pending:  true,
+		Postings: []model.Posting{{Account: "Income:Consulting:Contract:DNSimple", Amount: usd(-900000)}},
+	}}
+
+	var first bytes.Buffer
+	if err := ledger.WriteAll(&first, txs, entries); err != nil {
+		t.Fatalf("WriteAll: %v", err)
+	}
+
+	_, gotEntries, err := source.ReadLedger(bytes.NewReader(first.Bytes()))
+	if err != nil {
+		t.Fatalf("re-import failed: %v", err)
+	}
+	if len(gotEntries) != 1 {
+		t.Fatalf("read back %d entries, want 1", len(gotEntries))
+	}
+	if !gotEntries[0].Pending {
+		t.Errorf("the pending flag was lost on the round trip")
+	}
+
+	var second bytes.Buffer
+	if err := ledger.WriteAll(&second, txs, gotEntries); err != nil {
+		t.Fatalf("re-render failed: %v", err)
+	}
+	if first.String() != second.String() {
+		t.Fatalf("pending-flag round trip is not byte-identical:\n--- wrote ---\n%s\n--- re-rendered ---\n%s", first.String(), second.String())
+	}
+}
+
 // A cost-basis line the ledger writer emits must read back through the source reader and re-render
 // byte-identically. The reader's own @@ tests hand-author their ledger text, so nothing ties the
 // writer's actual output to the reader; this drives real ledger.WriteAll bytes through ReadLedger.

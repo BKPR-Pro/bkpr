@@ -1,8 +1,10 @@
 // Package ledger renders entries as plain-text double-entry postings.
 //
-// The output is the artifact: greppable, diffable, and readable by ledger-cli. Every entry is
-// cleared (*), because every line came off a bank statement and so has cleared the bank. Pending
-// (!) means the bank has not reported a transaction yet, and nothing written here is that.
+// The output is the artifact: greppable, diffable, and readable by ledger-cli. A line off a bank
+// statement is cleared (*), because it has cleared the bank, and that is the default. Pending (!)
+// means the bank has not reported a transaction yet -- an accrued invoice, an uncleared payment --
+// and an entry that carries that state, as a hand-kept file does, renders it rather than being
+// asserted cleared.
 //
 // The one annotation is a `; memo:` note carrying the line's original description when a rule
 // renamed the payee, so importing the artifact elsewhere regenerates the same fingerprints and
@@ -50,7 +52,14 @@ func writeEntry(w io.Writer, tx model.Transaction, e model.Entry) error {
 			tx.Date.Format("2006/01/02"), e.Payee, tx.Amount.Negate())
 	}
 
-	if _, err := fmt.Fprintf(w, "%s  * %s\n", tx.Date.Format("2006/01/02"), e.Payee); err != nil {
+	// Cleared (*) is the default, because every line off a statement has cleared the bank. A hand-kept
+	// file marks what the bank has not reported yet as pending (!), and that flag is the entry's own
+	// fact, so it renders as written rather than being asserted cleared.
+	flag := "*"
+	if e.Pending {
+		flag = "!"
+	}
+	if _, err := fmt.Fprintf(w, "%s  %s %s\n", tx.Date.Format("2006/01/02"), flag, e.Payee); err != nil {
 		return err
 	}
 	// The entry is titled with the payee, so when a rule renamed one the raw description would be

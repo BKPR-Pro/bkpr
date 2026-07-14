@@ -85,6 +85,14 @@ type Entry struct {
 	Payee    string
 	Postings []Posting
 
+	// Pending marks an entry the bank has not cleared yet: an accrued invoice or bill whose cash has
+	// not arrived. It renders the ledger flag -- pending "!", cleared "*" -- and it is a render
+	// projection, not stored state: the fold sets it from settlement (an open accrual is pending, a
+	// settled one cleared), so it is never asserted and never carried through the categorization event.
+	// A line off a bank statement has cleared the bank, so the zero value is cleared and every Source
+	// leaves it so. It takes no part in balancing or the fingerprint. False on a cleared entry.
+	Pending bool
+
 	// Metadata is an opaque bag carried from the rule that categorized the line. The core neither
 	// reads nor validates it; a connector reads its own namespaced keys (e.g. rentapp.lease) to
 	// learn where to export. Empty when no rule supplied any.

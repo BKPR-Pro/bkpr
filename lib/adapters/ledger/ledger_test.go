@@ -138,6 +138,27 @@ func TestEveryEntryIsCleared(t *testing.T) {
 	}
 }
 
+// A hand-kept file carries genuine pending state: an accrued invoice or an uncleared payment the
+// bank has not reported yet is marked "!", not "*". That state is the writer's to keep, so a pending
+// entry renders with the pending flag rather than being asserted cleared.
+func TestAPendingEntryRendersPending(t *testing.T) {
+	tx := chequing(1, -900000, "(2073) DNSimple")
+	e := model.Entry{
+		Payee:    "(2073) DNSimple",
+		Pending:  true,
+		Postings: []model.Posting{{Account: "Income:Consulting:Contract:DNSimple", Amount: cad(900000)}},
+	}
+
+	got := write(t, tx, e)
+
+	if !strings.HasPrefix(got, "2026/03/01  ! (2073) DNSimple\n") {
+		t.Errorf("a pending entry should render with the pending flag:\n%s", got)
+	}
+	if strings.Contains(got, "  * ") {
+		t.Errorf("a pending entry must not be asserted cleared:\n%s", got)
+	}
+}
+
 // The account path is the only marker of what is unknown. Nothing annotates it.
 func TestAnUncategorizedLineCarriesNoAnnotation(t *testing.T) {
 	tx := chequing(2, -8420, "ACME HARDWARE #4471")

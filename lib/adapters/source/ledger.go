@@ -33,6 +33,7 @@ func ReadLedger(r io.Reader) ([]model.Transaction, []model.Entry, error) {
 		skipBlock     bool
 		date          time.Time
 		payee         string
+		pending       bool
 		memo          string
 		postings      []posting
 		blockComments []string
@@ -57,9 +58,10 @@ func ReadLedger(r io.Reader) ([]model.Transaction, []model.Entry, error) {
 		txs = append(txs, tx)
 		// The entry title is the payee the file names, kept distinct from the memo the line
 		// fingerprints on, so a carried assertion reads as the file wrote it. Standalone notes inside
-		// the entry ride along as block comments, in the order the file wrote them.
-		entries = append(entries, model.Entry{Payee: payee, Postings: side, BlockComments: blockComments})
-		haveEntry, memo, postings, blockComments = false, "", nil, nil
+		// the entry ride along as block comments, in the order the file wrote them. The pending flag is
+		// the entry's own accounting state, carried back so a "!" line is not re-asserted cleared.
+		entries = append(entries, model.Entry{Payee: payee, Pending: pending, Postings: side, BlockComments: blockComments})
+		haveEntry, pending, memo, postings, blockComments = false, false, "", nil, nil
 		return nil
 	}
 
@@ -113,11 +115,11 @@ func ReadLedger(r io.Reader) ([]model.Transaction, []model.Entry, error) {
 			if err := flush(); err != nil {
 				return nil, nil, err
 			}
-			d, pay, err := parseHeader(stripComment(trimmed))
+			d, pay, pend, err := parseHeader(stripComment(trimmed))
 			if err != nil {
 				return nil, nil, fmt.Errorf("ledger line %d: %w", n, err)
 			}
-			haveEntry, date, payee, entryLine = true, d, pay, n
+			haveEntry, date, payee, pending, entryLine = true, d, pay, pend, n
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -177,19 +179,27 @@ func (p posting) value() model.Amount {
 	return c
 }
 
-func parseHeader(s string) (time.Time, string, error) {
+// parseHeader reads an entry header into its date, payee, and clearing state. A leading "!" marks
+// the entry pending (an accrued invoice, an uncleared payment) and a leading "*" or no flag marks it
+// cleared; the flag is stripped from the payee either way, so what follows -- a transaction code like
+// "(2073)" and the name -- is the payee.
+func parseHeader(s string) (time.Time, string, bool, error) {
 	sp := strings.IndexAny(s, " \t")
 	if sp < 0 {
-		return time.Time{}, "", fmt.Errorf("entry %q has no payee", s)
+		return time.Time{}, "", false, fmt.Errorf("entry %q has no payee", s)
 	}
 	date, err := time.Parse("2006/01/02", s[:sp])
 	if err != nil {
-		return time.Time{}, "", fmt.Errorf("entry date %q is not YYYY/MM/DD", s[:sp])
+		return time.Time{}, "", false, fmt.Errorf("entry date %q is not YYYY/MM/DD", s[:sp])
 	}
 	payee := strings.TrimSpace(s[sp:])
-	payee = strings.TrimSpace(strings.TrimPrefix(payee, "*"))
-	payee = strings.TrimSpace(strings.TrimPrefix(payee, "!"))
-	return date, payee, nil
+	pending := false
+	if rest, ok := strings.CutPrefix(payee, "!"); ok {
+		pending, payee = true, strings.TrimSpace(rest)
+	} else if rest, ok := strings.CutPrefix(payee, "*"); ok {
+		payee = strings.TrimSpace(rest)
+	}
+	return date, payee, pending, nil
 }
 
 func parsePosting(s string) (posting, error) {
