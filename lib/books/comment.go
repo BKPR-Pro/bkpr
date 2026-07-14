@@ -38,7 +38,8 @@ func Comment(log *eventlog.Log, actor, why, txID, account, text string, remove b
 	entry.Postings[idx].Comment = text
 
 	data, err := json.Marshal(categorizedData{
-		Payee: entry.Payee, Postings: entry.Postings, Gain: entry.Gain, Why: why,
+		Payee: entry.Payee, Postings: entry.Postings, Gain: entry.Gain,
+		BlockComments: entry.BlockComments, Why: why,
 	})
 	if err != nil {
 		return err

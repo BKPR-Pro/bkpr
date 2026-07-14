@@ -61,6 +61,15 @@ func writeEntry(w io.Writer, tx model.Transaction, e model.Entry) error {
 			return err
 		}
 	}
+	// Standalone notes on the whole line, not on any one posting, are written under the header before
+	// the postings, each its own "; text" line ledger-cli reads as an entry note. On re-import they
+	// read back as block comments, so the notes survive even though their place among the postings is
+	// not tracked.
+	for _, c := range e.BlockComments {
+		if _, err := fmt.Fprintf(w, "  ; %s\n", c); err != nil {
+			return err
+		}
+	}
 	for _, p := range e.Postings {
 		// A posting in another commodity (shares bought with cash) carries its total price in the
 		// "@@" form, which is what lets ledger value the position and match cost basis on a sale.

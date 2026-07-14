@@ -29,13 +29,14 @@ func ReadLedger(r io.Reader) ([]model.Transaction, []model.Entry, error) {
 	seen := map[string]int{}  // fingerprint -> times seen, so identical lines stay distinct
 
 	var (
-		haveEntry bool
-		skipBlock bool
-		date      time.Time
-		payee     string
-		memo      string
-		postings  []posting
-		entryLine int
+		haveEntry     bool
+		skipBlock     bool
+		date          time.Time
+		payee         string
+		memo          string
+		postings      []posting
+		blockComments []string
+		entryLine     int
 	)
 
 	flush := func() error {
@@ -55,9 +56,10 @@ func ReadLedger(r io.Reader) ([]model.Transaction, []model.Entry, error) {
 		}
 		txs = append(txs, tx)
 		// The entry title is the payee the file names, kept distinct from the memo the line
-		// fingerprints on, so a carried assertion reads as the file wrote it.
-		entries = append(entries, model.Entry{Payee: payee, Postings: side})
-		haveEntry, memo, postings = false, "", nil
+		// fingerprints on, so a carried assertion reads as the file wrote it. Standalone notes inside
+		// the entry ride along as block comments, in the order the file wrote them.
+		entries = append(entries, model.Entry{Payee: payee, Postings: side, BlockComments: blockComments})
+		haveEntry, memo, postings, blockComments = false, "", nil, nil
 		return nil
 	}
 
@@ -73,10 +75,15 @@ func ReadLedger(r io.Reader) ([]model.Transaction, []model.Entry, error) {
 				return nil, nil, err
 			}
 		case strings.HasPrefix(trimmed, ";") || strings.HasPrefix(trimmed, "#"):
-			// A comment, except the one note the writer uses to carry a line's raw description.
+			// A comment. The one the writer uses to carry a line's raw description is the memo; any
+			// other note inside an entry is a standalone block comment the person kept beside the line.
+			// A comment outside any entry (under an account directive, say) belongs to nothing and is
+			// dropped.
 			if haveEntry {
 				if m, ok := strings.CutPrefix(trimmed, "; memo:"); ok {
 					memo = strings.TrimSpace(m)
+				} else {
+					blockComments = append(blockComments, strings.TrimSpace(trimmed[1:]))
 				}
 			}
 		case line[0] == ' ' || line[0] == '\t':

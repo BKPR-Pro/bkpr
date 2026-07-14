@@ -96,6 +96,13 @@ type Entry struct {
 	// gain, is computed by folding the account's history, never stored, so a corrected purchase
 	// price reclassifies the gain on the next regeneration. Empty on an ordinary entry.
 	Gain string
+
+	// BlockComments are standalone note lines that sit inside the entry without belonging to any one
+	// posting -- the worksheet a person keeps beside a line. They are commentary, not data: nothing in
+	// the core reads them and they take no part in balancing. The ledger adapters render each as its
+	// own note line under the header and read them back in order, so a block of notes survives a round
+	// trip. Empty on an ordinary entry.
+	BlockComments []string
 }
 
 // Balances reports whether the postings account for the whole statement line. The statement's sign

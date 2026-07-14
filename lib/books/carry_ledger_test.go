@@ -8,6 +8,39 @@ import (
 	"github.com/dallasread/bookkeeper/lib/books"
 )
 
+// A standalone note a person kept inside an entry must survive the whole import path: the reader
+// takes it off the file, CarryCategorizations records it, and the fold hands it back on the entry.
+// Without threading it through the categorization event, the note is read but never stored, so it
+// vanishes the moment the line is folded from the log.
+func TestCarryingKeepsAnEntrysBlockComments(t *testing.T) {
+	log := newLog()
+
+	txs, entries, err := source.ReadLedger(strings.NewReader(`2025/09/13  * Dallas Read
+  ; Sephora          238.05 CAD
+  ; Store             55.78 CAD
+  Expenses:Discretionary  1000.00 CAD
+  Assets:Bank:Chequing
+`))
+	if err != nil {
+		t.Fatalf("ReadLedger: %v", err)
+	}
+	if _, err := books.Import(log, "import:acct.txt", txs); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if _, _, err := books.CarryCategorizations(log, "import:acct.txt", "from acct.txt", txs, entries); err != nil {
+		t.Fatalf("CarryCategorizations: %v", err)
+	}
+
+	_, folded := ledger(t, log)
+	if len(folded) != 1 {
+		t.Fatalf("folded %d entries, want 1", len(folded))
+	}
+	got := folded[0].BlockComments
+	if len(got) != 2 || got[0] != "Sephora          238.05 CAD" || got[1] != "Store             55.78 CAD" {
+		t.Fatalf("block comments lost across the log: %q", got)
+	}
+}
+
 // The whole point of carrying: a hand-kept ledger file already names its accounts, so importing it
 // and folding shows those accounts with no rule loaded and no manual categorize per line. This is
 // the end-to-end path the reader and the CarryCategorizations command exist to make honest.
