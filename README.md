@@ -711,6 +711,16 @@ bkpr categorize 0d76f1f1 \
   -post "Expenses:Materials:Unit 2=44.20"
 ```
 
+A taxed line categorized by hand takes the same `-tax-rate`/`-tax-account` pair a rule does, and the
+same arithmetic: the pre-tax amount (`net = total / (1 + rate)`) posts to the category and the exact
+remainder to the tax account, so the two legs always sum back to the bank amount and the hand form
+of the decision cannot drift from the rule form:
+
+```sh
+bkpr categorize 0d76f1f1 -category "Expenses:...:Unit 1" \
+  -tax-rate "15%" -tax-account "Assets:HST ITC"
+```
+
 An assertion is a fact about one transaction. It never generalizes into a rule, so correcting one
 hardware charge does not re-pin every future one, and it survives a later rule change: fixing the
 rule moves every line except the ones you have already spoken for. Assert twice and the later fact

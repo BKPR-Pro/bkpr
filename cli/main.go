@@ -169,7 +169,7 @@ var usageSections = []usageSection{
 		{"import", "<file> -format csv|ledger|jsonl"},
 		{"import", "<connector> [-relogin] [-history <days> | -from <date> [-to <date>]]"},
 		{"import", "-all [-relogin] [-history <days> | -from <date> [-to <date>]]"},
-		{"categorize", "<fingerprint> (-category <account> | -post <account>=<amount> ...) [-payee <name>] [-invoice <n>] [-source <account>] [-why <reason>] [-actor <name>]"},
+		{"categorize", "<fingerprint> (-category <account> [-tax-rate <pct> -tax-account <account>] | -post <account>=<amount> ...) [-payee <name>] [-invoice <n>] [-source <account>] [-why <reason>] [-actor <name>]"},
 		{"comment", "<fingerprint> (-text <note> | -remove) [-account <a>] [-why <reason>] [-actor <name>]"},
 		{"void", "<fingerprint> [-why <reason>] [-actor <name>]"},
 		{"match", "<fingerprint> (-with <fingerprint> | -break) [-actor <name>]"},
@@ -435,12 +435,17 @@ var reference = []docGroup{
       transfer each book saw from its own side pairs up once merged. Re-importing the same
       file is a no-op, keyed by a fingerprint of its content.
 `},
-		{[]string{"categorize"}, `  categorize <fingerprint> (-category <account> | -post <account>=<amount> ... |
+		{[]string{"categorize"}, `  categorize <fingerprint> (-category <account> [-tax-rate <pct> -tax-account <account>] |
+             -post <account>=<amount> ... |
              -sell <account>=<qty> ... -gain <account>) [-payee <name>] [-invoice <n>] [-source <account>] [-why <reason>] [-actor <name>]
       Assert the postings for one line, overriding the rule for that line only. Use -post
       more than once to split one charge across accounts. A -post amount may name its own
       commodity and an @@ total price, so a share bought with cash is
-      -post "Assets:Brokerage:AAPL=10 AAPL @@ 1000.00 USD". A sale instead names the shares
+      -post "Assets:Brokerage:AAPL=10 AAPL @@ 1000.00 USD". With -category, -tax-rate and
+      -tax-account (required together) split the tax the total already includes, exactly as a
+      taxed rule does: the pre-tax amount (net = total / (1 + rate)) to the category, the exact
+      remainder to the tax account, so the hand form of the decision cannot drift a cent from
+      the rule form. A sale instead names the shares
       it disposed of with -sell and where the gain lands with -gain; the cost base, and so the
       gain, is folded from your purchases: -sell "Assets:Brokerage:AAPL=10 AAPL" -gain "Income:Capital Gains".
       -invoice records the invoice or bill number for the line, the ledger (code); it renders as
@@ -1614,6 +1619,20 @@ func postingsFor(category string, split splitFlag, line model.Amount) ([]model.P
 	return post, nil
 }
 
+// taxedPostings turns the -category and -tax-rate/-tax-account flags into the two postings a taxed
+// line asserts: the pre-tax amount on the category and the tax extracted from the same total on the
+// tax account, exactly as a taxed rule splits (net = total / (1 + rate), the tax takes the exact
+// remainder). One arithmetic serves both forms, so a hand categorization can never drift a cent
+// from what the rule form would have booked.
+func taxedPostings(category, rate, taxAccount string, line model.Amount) ([]model.Posting, error) {
+	numer, denom, err := model.ParsePercent(rate)
+	if err != nil {
+		return nil, err
+	}
+	net, tax := line.Negate().SplitInclusive(numer, denom)
+	return []model.Posting{{Account: category, Amount: net}, {Account: taxAccount, Amount: tax}}, nil
+}
+
 // disposalsFor turns the -sell flags into the holdings a sale disposes of. Each names an account
 // and a positive share quantity with its commodity, e.g. "Assets:Brokerage:AAPL=10 AAPL". A sale
 // carries no price: the cost base is folded from the account's purchases, not restated here.
@@ -1647,6 +1666,8 @@ func categorize(args []string) error {
 	source := fs.String("source", "", "route this line's card/liability leg to a sub-account, e.g. \"Liabilities:PC Mastercard:9 Schoodic\"; the parent it rolls up to still reconciles to the one bank balance")
 	why := fs.String("why", "", "why this line is categorized so; recorded with the assertion")
 	gain := fs.String("gain", "", "on a sale, the account its capital gain or loss lands in, e.g. Income:Capital Gains")
+	taxRate := fs.String("tax-rate", "", "sales tax the -category total already includes, e.g. 15%; splits the tax onto -tax-account, the same arithmetic a taxed rule uses")
+	taxAccount := fs.String("tax-account", "", "account the extracted tax posts to, e.g. \"Assets:HST ITC\"")
 	actor := fs.String("actor", "human", "who is categorizing; the log records who decided")
 	fs.Var(&split, "post", "account=amount, repeatable; amount may carry a commodity and an @@ total price, e.g. \"Assets:Brokerage:AAPL=10 AAPL @@ 1000.00 USD\"")
 	fs.Var(&sell, "sell", "account=quantity, repeatable; the shares this line sold, e.g. \"Assets:Brokerage:AAPL=10 AAPL\", paired with -gain")
@@ -1663,6 +1684,10 @@ func categorize(args []string) error {
 		return fmt.Errorf("one of -category, -post, or -sell is required")
 	case *category != "" && len(split) > 0:
 		return fmt.Errorf("give -category or -post, not both")
+	case (*taxRate == "") != (*taxAccount == ""):
+		return fmt.Errorf("-tax-rate and -tax-account are required together, as on a rule")
+	case *taxRate != "" && *category == "":
+		return fmt.Errorf("-tax-rate splits a -category total; with -post you spell the legs yourself")
 	}
 
 	s, err := store.Open(".")
@@ -1690,7 +1715,12 @@ func categorize(args []string) error {
 		return err
 	}
 
-	post, err := postingsFor(*category, split, tx.Amount)
+	var post []model.Posting
+	if *taxRate != "" {
+		post, err = taxedPostings(*category, *taxRate, *taxAccount, tx.Amount)
+	} else {
+		post, err = postingsFor(*category, split, tx.Amount)
+	}
 	if err != nil {
 		return err
 	}
