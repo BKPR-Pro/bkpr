@@ -157,7 +157,7 @@ var usageSections = []usageSection{
 		{"connectors list", ""},
 	}},
 	{"RULES", []usageLine{
-		{"rules set", "<re> [-amount <amt>] [-category <account>] [-payee <name>] [-source <account>] [-tax-rate <pct> -tax-account <account>] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]"},
+		{"rules set", "<re> [-amount <amt>] [-category <account>] [-payee <name>] [-source <account>] [-tax-rate <pct> -tax-account <account> [-tax-category <re>] [-tax-from <date>]] [-meta <k=v> ...] [-before <re>] [-why <reason>] [-actor <name>]"},
 		{"rules rm", "<re> [-amount <amt>]"},
 		{"rules mv", "<re> [-amount <amt>] [-before <re>]"},
 		{"rules list", ""},
@@ -361,7 +361,9 @@ var reference = []docGroup{
 `},
 	}},
 	{"RULES  (deterministic categorization; first matching rule wins per field)", []docTopic{
-		{[]string{"rules"}, `  rules set <re> [-amount <amt>] [-category <account>] [-payee <name>] [-source <account>] [-tax-rate <pct> -tax-account <account>] [-meta <k=v> ...] [-before <re>] [-why <reason>]
+		{[]string{"rules"}, `  rules set <re> [-amount <amt>] [-category <account>] [-payee <name>] [-source <account>]
+            [-tax-rate <pct> -tax-account <account> [-tax-category <re>] [-tax-from <date>]]
+            [-meta <k=v> ...] [-before <re>] [-why <reason>]
       Add a rule, or change one already matching this pattern. On an existing rule only the
       fields you name change, and since that reclassifies every past line it matched, it
       takes a -why. A new rule lands last unless -before places it ahead of another. Account
@@ -374,7 +376,13 @@ var reference = []docGroup{
       amounts. -tax-rate and -tax-account (required together) mark a vendor whose charge
       already includes sales tax: the rate is extracted from the total (net = total / (1 +
       rate)) onto the category, the tax onto its account, e.g. -tax-rate 15% -tax-account
-      "Assets:HST ITC". -source routes the matched line's card/liability leg to a sub-account
+      "Assets:HST ITC". -tax-category scopes that tax to the categories matching its pattern,
+      because the right treatment can depend on the category rather than the vendor (the same
+      hardware store sells to a property whose tax is claimable and to one whose is not); a
+      category outside the scope stays gross, and the pattern's capture groups may appear in
+      -tax-account ($1), so one rule derives each property's tax account from the category the
+      line took. -tax-from bounds the tax by date: a line dated before it stays gross, so a
+      filed year whose lines already carry their splits cannot re-split. -source routes the matched line's card/liability leg to a sub-account
       instead of the account it was imported on, so a physical card registered on one parent
       splits by purpose: each charge self-routes to its purpose child, and the parent reconciles
       to the one bank balance by rolling those children up. -meta attaches opaque key=value pairs
@@ -1314,7 +1322,9 @@ func ruleSetOne(args []string) error {
 	fs.StringVar(&r.Source, "source", "", "route the matched line's card/liability leg to a sub-account, e.g. \"Liabilities:PC Mastercard:9 Schoodic\"; the parent it rolls up to still reconciles to the one bank balance")
 	amount := fs.String("amount", "", "narrow the rule to lines of this magnitude, e.g. 175 (a bare amount is read as CAD; \"175 USD\" names another); its pattern and amount together are the rule's identity")
 	fs.StringVar(&r.TaxRate, "tax-rate", "", "sales tax the total already includes, e.g. 15%; splits the tax onto -tax-account")
-	fs.StringVar(&r.TaxAccount, "tax-account", "", "account the extracted tax posts to, e.g. \"Assets:HST ITC\"")
+	fs.StringVar(&r.TaxAccount, "tax-account", "", "account the extracted tax posts to, e.g. \"Assets:HST ITC\"; may reference -tax-category capture groups ($1)")
+	fs.StringVar(&r.TaxCategory, "tax-category", "", "scope the tax to lines whose category matches this pattern; a category outside it stays gross")
+	taxFrom := fs.String("tax-from", "", "apply the tax only to lines dated on or after this date, e.g. 2026-01-01; earlier lines stay gross")
 	fs.Var(&meta, "meta", "key=value carried onto the entry, repeatable, e.g. rentapp.lease=31")
 	before := fs.String("before", "", "on a new rule, place it ahead of the one matching this pattern")
 	why := fs.String("why", "", "why the rule changed; changing one reclassifies every line it matched")
@@ -1324,6 +1334,11 @@ func ruleSetOne(args []string) error {
 	}
 	if r.Amount, err = parseRuleAmount(*amount); err != nil {
 		return err
+	}
+	if *taxFrom != "" {
+		if r.TaxFrom, err = taxFromDate(*taxFrom); err != nil {
+			return err
+		}
 	}
 
 	// Only the fields you name change, so setting a category does not silently blank the payee.
@@ -1413,6 +1428,16 @@ func parseRuleAmount(s string) (*model.Amount, error) {
 	return &a, nil
 }
 
+// taxFromDate reads a -tax-from value in the written forms every date flag takes and restates it in
+// the one form a rule stores, 2006-01-02, so the engine reads one layout however the date was typed.
+func taxFromDate(s string) (string, error) {
+	t, err := parseAsOf(s)
+	if err != nil {
+		return "", err
+	}
+	return t.Format("2006-01-02"), nil
+}
+
 func upsertRule(log *eventlog.Log, r rules.Rule, provided map[string]bool, before, why, actor string) error {
 	current, err := books.Rules(log)
 	if err != nil {
@@ -1437,6 +1462,12 @@ func upsertRule(log *eventlog.Log, r rules.Rule, provided map[string]bool, befor
 		}
 		if provided["tax-account"] {
 			merged.TaxAccount = r.TaxAccount
+		}
+		if provided["tax-category"] {
+			merged.TaxCategory = r.TaxCategory
+		}
+		if provided["tax-from"] {
+			merged.TaxFrom = r.TaxFrom
 		}
 		if provided["meta"] {
 			merged.Metadata = mergeMeta(merged.Metadata, r.Metadata)

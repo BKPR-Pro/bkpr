@@ -29,16 +29,18 @@ const (
 // carry the rule's identity in the payload too, because the record id is now a composite key; a
 // legacy event has no Match here and the record id is its pattern, so the fold falls back to it.
 type ruleData struct {
-	Match      string            `json:"match,omitempty"`
-	Amount     *model.Amount     `json:"amount,omitempty"`
-	Payee      string            `json:"payee,omitempty"`
-	Category   string            `json:"category,omitempty"`
-	Source     string            `json:"source,omitempty"`
-	TaxRate    string            `json:"tax_rate,omitempty"`
-	TaxAccount string            `json:"tax_account,omitempty"`
-	Metadata   map[string]string `json:"metadata,omitempty"`
-	Before     string            `json:"before,omitempty"`
-	Why        string            `json:"why,omitempty"`
+	Match       string            `json:"match,omitempty"`
+	Amount      *model.Amount     `json:"amount,omitempty"`
+	Payee       string            `json:"payee,omitempty"`
+	Category    string            `json:"category,omitempty"`
+	Source      string            `json:"source,omitempty"`
+	TaxRate     string            `json:"tax_rate,omitempty"`
+	TaxAccount  string            `json:"tax_account,omitempty"`
+	TaxCategory string            `json:"tax_category,omitempty"`
+	TaxFrom     string            `json:"tax_from,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	Before      string            `json:"before,omitempty"`
+	Why         string            `json:"why,omitempty"`
 }
 
 // ruleKey is a rule's identity as a string: its pattern, plus its amount predicate when it has one.
@@ -121,7 +123,8 @@ func ruleFrom(recordID string, data ruleData) rules.Rule {
 	}
 	return rules.Rule{
 		Match: match, Amount: data.Amount, Payee: data.Payee, Category: data.Category, Source: data.Source,
-		TaxRate: data.TaxRate, TaxAccount: data.TaxAccount, Metadata: data.Metadata,
+		TaxRate: data.TaxRate, TaxAccount: data.TaxAccount, TaxCategory: data.TaxCategory, TaxFrom: data.TaxFrom,
+		Metadata: data.Metadata,
 	}
 }
 
@@ -130,7 +133,8 @@ func ruleFrom(recordID string, data ruleData) rules.Rule {
 func dataFrom(r rules.Rule, before, why string) ruleData {
 	return ruleData{
 		Match: r.Match, Amount: r.Amount, Payee: r.Payee, Category: r.Category, Source: r.Source,
-		TaxRate: r.TaxRate, TaxAccount: r.TaxAccount, Metadata: r.Metadata, Before: before, Why: why,
+		TaxRate: r.TaxRate, TaxAccount: r.TaxAccount, TaxCategory: r.TaxCategory, TaxFrom: r.TaxFrom,
+		Metadata: r.Metadata, Before: before, Why: why,
 	}
 }
 

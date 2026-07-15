@@ -84,6 +84,24 @@ func TestARulesTaxSurvivesTheLog(t *testing.T) {
 	}
 }
 
+// A tax's scope and bound are part of the rule too, so they survive the round trip: a scoped tax
+// authored in a past session still gates on the category and the date on every later read.
+func TestARulesTaxScopeSurvivesTheLog(t *testing.T) {
+	log := newLog()
+	r := rule("kent", "Expenses:Real Estate:Materials:9 Schoodic")
+	r.TaxRate, r.TaxAccount = "15%", "Expenses:Real Estate:HST:ITC:$1"
+	r.TaxCategory, r.TaxFrom = `Materials:([^:]+)`, "2026-01-01"
+	loaded(t, log, r)
+
+	set, err := books.Rules(log)
+	if err != nil {
+		t.Fatalf("Rules: %v", err)
+	}
+	if len(set) != 1 || set[0].TaxCategory != `Materials:([^:]+)` || set[0].TaxFrom != "2026-01-01" {
+		t.Errorf("folded rule = %+v, want the tax scope and from-date intact", set[0])
+	}
+}
+
 // End to end: a taxed vendor's imported line splits in the rendered books — the pre-tax amount on
 // the category, the tax extracted from the same total on its own account — and the two still
 // balance the statement line. Nothing about the split is stored; it re-derives from the rule.

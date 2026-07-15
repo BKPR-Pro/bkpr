@@ -2,6 +2,7 @@ package rules_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/dallasread/bookkeeper/lib/model"
 	"github.com/dallasread/bookkeeper/lib/rules"
@@ -231,6 +232,125 @@ func taxable(description string, units int64) model.Transaction {
 	return model.Transaction{
 		Description: description, Account: "Liabilities:Card:Visa",
 		Amount: model.Amount{Units: units, Scale: 2, Commodity: "CAD"},
+	}
+}
+
+func datedTaxable(description string, units int64, date string) model.Transaction {
+	tx := taxable(description, units)
+	parsed, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		panic(err)
+	}
+	tx.Date = parsed
+	return tx
+}
+
+// The right tax treatment can depend on the category, not just the vendor: the same hardware store
+// sells to a property whose tax is claimable and to one whose is not. TaxCategory scopes the split
+// to the categories it names; a category outside it stays gross.
+func TestTaxCategoryScopesTheSplitToMatchingCategories(t *testing.T) {
+	claimable := engine(t, rules.Rule{
+		Match: `kent`, Category: "Expenses:Real Estate:Materials:9 Schoodic",
+		TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxCategory: `9 schoodic`,
+	})
+	if got := claimable.Apply(taxable("KENT BUILDING SUPPLIES", -11500)); len(got.Postings) != 2 {
+		t.Errorf("a matching category should split, got %+v", got.Postings)
+	}
+
+	gross := engine(t, rules.Rule{
+		Match: `kent`, Category: "Expenses:Real Estate:Materials:22 Lisgar",
+		TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxCategory: `9 schoodic`,
+	})
+	got := gross.Apply(taxable("KENT BUILDING SUPPLIES", -11500))
+	if len(got.Postings) != 1 {
+		t.Fatalf("a category outside the scope must stay gross, got %+v", got.Postings)
+	}
+	if got.Postings[0].Amount.String() != "115.00 CAD" {
+		t.Errorf("gross amount = %s, want the whole 115.00 CAD", got.Postings[0].Amount)
+	}
+}
+
+// TaxCategory gates on the category the line finally takes, wherever it came from: a later rule can
+// name the category and the earlier rule's tax still scopes against it.
+func TestTaxCategoryGatesOnTheResolvedCategory(t *testing.T) {
+	e := engine(t,
+		rules.Rule{Match: `kent`, TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxCategory: `9 schoodic`},
+		rules.Rule{Match: `building`, Category: "Expenses:Real Estate:Materials:9 Schoodic"},
+	)
+
+	got := e.Apply(taxable("KENT BUILDING SUPPLIES", -11500))
+
+	if len(got.Postings) != 2 {
+		t.Fatalf("the later rule's category is in scope, so the tax should split: %+v", got.Postings)
+	}
+	if got.Postings[1].Account != "Assets:HST ITC" {
+		t.Errorf("tax account = %q", got.Postings[1].Account)
+	}
+}
+
+// One rule can serve every property when the tax account is derived from the category: TaxCategory's
+// capture groups expand into TaxAccount, so the KENT charge categorized to a property extracts to
+// that property's own tax account.
+func TestTaxAccountExpandsTaxCategoryCaptures(t *testing.T) {
+	e := engine(t, rules.Rule{
+		Match: `kent`, Category: "Expenses:Real Estate:Materials:9 Schoodic",
+		TaxRate: "15%", TaxCategory: `Materials:([^:]+)`, TaxAccount: "Expenses:Real Estate:HST:ITC:$1",
+	})
+
+	got := e.Apply(taxable("KENT BUILDING SUPPLIES", -11500))
+
+	if len(got.Postings) != 2 {
+		t.Fatalf("want a split, got %+v", got.Postings)
+	}
+	if got.Postings[1].Account != "Expenses:Real Estate:HST:ITC:9 Schoodic" {
+		t.Errorf("tax account = %q, want the property derived from the category", got.Postings[1].Account)
+	}
+}
+
+// A filed year's lines already carry their splits, so re-splitting them would double-count.
+// TaxFrom bounds the rule's tax: a line dated before it stays gross, one on or after it splits.
+func TestTaxFromBoundsTheSplitByDate(t *testing.T) {
+	e := engine(t, rules.Rule{
+		Match: `kent`, Category: "Expenses:Materials",
+		TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxFrom: "2026-01-01",
+	})
+
+	if got := e.Apply(datedTaxable("KENT", -11500, "2025-12-31")); len(got.Postings) != 1 {
+		t.Errorf("a line before TaxFrom must stay gross, got %+v", got.Postings)
+	}
+	if got := e.Apply(datedTaxable("KENT", -11500, "2026-01-01")); len(got.Postings) != 2 {
+		t.Errorf("a line on TaxFrom should split, got %+v", got.Postings)
+	}
+}
+
+// The scope and the bound qualify a tax; without one they have nothing to qualify, so they are
+// refused at authoring like a rate without an account.
+func TestTaxCategoryWithoutATaxIsRejected(t *testing.T) {
+	if _, err := rules.New([]rules.Rule{{Match: `kent`, Category: "Expenses:Materials", TaxCategory: `9 schoodic`}}); err == nil {
+		t.Fatal("expected an error for a tax category with no tax")
+	}
+	if _, err := rules.New([]rules.Rule{{Match: `kent`, Category: "Expenses:Materials", TaxFrom: "2026-01-01"}}); err == nil {
+		t.Fatal("expected an error for a tax from-date with no tax")
+	}
+}
+
+func TestAnInvalidTaxCategoryPatternIsRejected(t *testing.T) {
+	_, err := rules.New([]rules.Rule{{
+		Match: `kent`, Category: "Expenses:Materials",
+		TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxCategory: `([`,
+	}})
+	if err == nil {
+		t.Fatal("expected an error for an invalid tax category pattern")
+	}
+}
+
+func TestAnUnreadableTaxFromDateIsRejected(t *testing.T) {
+	_, err := rules.New([]rules.Rule{{
+		Match: `kent`, Category: "Expenses:Materials",
+		TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxFrom: "January 2026",
+	}})
+	if err == nil {
+		t.Fatal("expected an error for a date the rule cannot read")
 	}
 }
 

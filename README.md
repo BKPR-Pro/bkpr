@@ -453,6 +453,20 @@ bkpr rules set "acme hardware" -category "Expenses:Repairs:Materials" \
 # a $115.00 charge now posts 100.00 to Materials and 15.00 to the ITC account
 ```
 
+The right tax treatment can depend on the category rather than the vendor: the same hardware store
+sells to a property whose tax is claimable and to one whose is not. `-tax-category` scopes the tax
+to the categories matching its pattern — a category outside it stays gross — and its capture groups
+may appear in `-tax-account`, so one rule derives each property's tax account from the category the
+line took. `-tax-from` bounds the tax by date: a line dated before it stays gross, so a filed year
+whose lines already carry their splits cannot re-split.
+
+```sh
+bkpr rules set "kent" -tax-rate "15%" -tax-category "Materials:(9 Schoodic)" \
+  -tax-account "Expenses:Real Estate:HST:ITC:$1" -tax-from "2026-01-01"
+# a KENT charge on Materials:9 Schoodic extracts its tax to HST:ITC:9 Schoodic;
+# one on Materials:22 Lisgar falls outside the scope and stays gross
+```
+
 `books` folds the log and renders it: a table or JSON to read, or the ledger artifact. `-account`
 narrows any of the three to the lines posting to a matching account — repeat it to name several —
 so there is no separate review command: the decision queue is just the books, filtered:

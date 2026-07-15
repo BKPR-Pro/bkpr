@@ -7,6 +7,7 @@ package rules
 import (
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/dallasread/bookkeeper/lib/model"
 )
@@ -47,13 +48,28 @@ type Rule struct {
 	TaxRate    string `json:"tax_rate,omitempty"`
 	TaxAccount string `json:"tax_account,omitempty"`
 
+	// TaxCategory scopes the tax to the categories it matches (case-insensitively, like Match),
+	// because the right treatment can depend on the category rather than the vendor: the same
+	// hardware store sells to a property whose tax is claimable and to one whose is not. The gate
+	// reads the category the line finally takes, wherever that came from, and a category outside
+	// the scope stays gross. Its capture groups may appear in TaxAccount ($1, ${name}), so one rule
+	// derives each property's tax account from the category it matched. Empty scopes nothing out.
+	TaxCategory string `json:"tax_category,omitempty"`
+
+	// TaxFrom bounds the tax by date, "2006-01-02": a line dated before it stays gross. A rule's
+	// split is a read-time fold over all history, and a filed year's lines already carry their
+	// splits, so an unbounded retroactive split would double-count them. Empty splits over all time.
+	TaxFrom string `json:"tax_from,omitempty"`
+
 	// Metadata is an opaque bag the engine neither reads nor validates. Apply carries it onto the
 	// entry, first-wins per key, so a connector can read its own namespaced keys (e.g.
 	// rentapp.lease) off a categorized line without the core knowing what they mean.
 	Metadata map[string]string `json:"metadata,omitempty"`
 
 	re             *regexp.Regexp
+	taxCategoryRe  *regexp.Regexp
 	taxNum, taxDen int64
+	taxFrom        time.Time
 }
 
 // Engine applies an ordered rule set.
@@ -99,6 +115,19 @@ func New(rs []Rule) (*Engine, error) {
 			}
 			r.taxNum, r.taxDen = num, den
 		}
+		if (r.TaxCategory != "" || r.TaxFrom != "") && r.taxDen == 0 {
+			return nil, fmt.Errorf("rule %d (%q): a tax scope needs a tax; give -tax-rate and -tax-account", i, r.Match)
+		}
+		if r.TaxCategory != "" {
+			if r.taxCategoryRe, err = regexp.Compile("(?i)" + r.TaxCategory); err != nil {
+				return nil, fmt.Errorf("rule %d (%q): %w", i, r.Match, err)
+			}
+		}
+		if r.TaxFrom != "" {
+			if r.taxFrom, err = time.Parse("2006-01-02", r.TaxFrom); err != nil {
+				return nil, fmt.Errorf("rule %d (%q): a tax from-date reads as 2006-01-02: %w", i, r.Match, err)
+			}
+		}
 		compiled[i] = r
 	}
 	return &Engine{rules: compiled}, nil
@@ -108,17 +137,13 @@ func New(rs []Rule) (*Engine, error) {
 // it, and turns the result into an entry. Every line posts: one no rule matches goes to
 // Uncategorized rather than being withheld, or guessed into Expenses or Income.
 func (e *Engine) Apply(tx model.Transaction) model.Entry {
-	var payee, category, source, taxAccount string
-	var taxNum, taxDen int64
+	var payee, category, source string
 	var metadata map[string]string
 
 	// Every field is first-wins, so the walk cannot stop early: a later matching rule may still be
-	// the first to supply a payee, a category, a tax, or a metadata key an earlier match left empty.
+	// the first to supply a payee, a category, or a metadata key an earlier match left empty.
 	for _, r := range e.rules {
-		if !r.re.MatchString(tx.Description) {
-			continue
-		}
-		if r.Amount != nil && !amountMatches(*r.Amount, tx.Amount) {
+		if !r.matches(tx) {
 			continue
 		}
 		if payee == "" {
@@ -129,9 +154,6 @@ func (e *Engine) Apply(tx model.Transaction) model.Entry {
 		}
 		if source == "" {
 			source = r.Source
-		}
-		if taxDen == 0 && r.taxDen != 0 {
-			taxAccount, taxNum, taxDen = r.TaxAccount, r.taxNum, r.taxDen
 		}
 		for k, v := range r.Metadata {
 			if _, taken := metadata[k]; taken {
@@ -153,12 +175,15 @@ func (e *Engine) Apply(tx model.Transaction) model.Entry {
 
 	// The statement's sign is from the source account's point of view, so the categorized side takes
 	// the opposite one. A taxed vendor splits that total into the pre-tax amount on the category and
-	// the tax on its own account; both sum back to the line, so the entry stays balanced.
+	// the tax on its own account; both sum back to the line, so the entry stays balanced. The tax
+	// gates on the category the walk resolved, so a scoped tax reads the line's final category even
+	// when a different rule supplied it.
 	full := tx.Amount.Negate()
 	postings := []model.Posting{{Account: category, Amount: full}}
-	if taxDen != 0 {
-		net, tax := full.SplitInclusive(taxNum, taxDen)
-		postings = []model.Posting{{Account: category, Amount: net}, {Account: taxAccount, Amount: tax}}
+	if r := e.taxRule(tx); r != nil {
+		if split, ok := r.taxSplit(tx.Date, category, full); ok {
+			postings = split
+		}
 	}
 
 	return model.Entry{
@@ -167,4 +192,48 @@ func (e *Engine) Apply(tx model.Transaction) model.Entry {
 		Source:   source,
 		Metadata: metadata,
 	}
+}
+
+// matches reports whether a rule fires on a line: its pattern on the description, and its amount
+// predicate, when it has one, on the magnitude.
+func (r Rule) matches(tx model.Transaction) bool {
+	if !r.re.MatchString(tx.Description) {
+		return false
+	}
+	return r.Amount == nil || amountMatches(*r.Amount, tx.Amount)
+}
+
+// taxRule finds the rule whose tax a line takes: the tax is first-wins like every field, so it is
+// the first matching rule that supplies one, whether or not that rule also names the category.
+func (e *Engine) taxRule(tx model.Transaction) *Rule {
+	for i := range e.rules {
+		r := &e.rules[i]
+		if r.taxDen != 0 && r.matches(tx) {
+			return r
+		}
+	}
+	return nil
+}
+
+// taxSplit divides an amount on an account into the pre-tax posting on that account and the tax
+// posting on the rule's tax account, or reports that this rule's tax does not touch it: the line is
+// dated before TaxFrom, or the account falls outside TaxCategory. A scoped tax account may reference
+// the scope's capture groups, so the account the tax lands on can be derived from the category.
+func (r Rule) taxSplit(date time.Time, account string, amount model.Amount) ([]model.Posting, bool) {
+	if r.taxDen == 0 {
+		return nil, false
+	}
+	if !r.taxFrom.IsZero() && date.Before(r.taxFrom) {
+		return nil, false
+	}
+	taxAccount := r.TaxAccount
+	if r.taxCategoryRe != nil {
+		m := r.taxCategoryRe.FindStringSubmatchIndex(account)
+		if m == nil {
+			return nil, false
+		}
+		taxAccount = string(r.taxCategoryRe.ExpandString(nil, r.TaxAccount, account, m))
+	}
+	net, tax := amount.SplitInclusive(r.taxNum, r.taxDen)
+	return []model.Posting{{Account: account, Amount: net}, {Account: taxAccount, Amount: tax}}, true
 }
