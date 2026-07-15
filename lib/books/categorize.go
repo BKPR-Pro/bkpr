@@ -24,6 +24,13 @@ type categorizedData struct {
 	Gain          string          `json:"gain,omitempty"`          // set on a sale: the account its capital gain lands in
 	BlockComments []string        `json:"blockComments,omitempty"` // standalone notes carried from a ledger file
 	Why           string          `json:"why,omitempty"`
+
+	// ExplicitPosts marks an assertion whose legs the caller spelled out (categorize's -post form, a
+	// ledger file's own entry) rather than derived from a category. Spelled legs are the caller's
+	// arithmetic, so a rule's tax overlay never restates them; a category-form assertion, where the
+	// tool computed the one leg, stays open to it. Absent on events written before the overlay
+	// existed, which reads as false: their shape (a single derived leg) is the category form.
+	ExplicitPosts bool `json:"explicitPosts,omitempty"`
 }
 
 // Categorize asserts the postings for one imported transaction.
@@ -32,6 +39,18 @@ type categorizedData struct {
 // whole line, so the books stay balanced. Both are checked here rather than left for the render:
 // the books are the artifact, and a bad assertion should be refused at the moment it is made.
 func Categorize(log *eventlog.Log, actor, why, txID, invoice, payee, source string, postings []model.Posting) error {
+	return categorizeChecked(log, actor, why, txID, invoice, payee, source, postings, false)
+}
+
+// CategorizePosts is Categorize for postings the caller spelled out leg by leg — categorize's
+// -post form. The spelled legs are the caller's own arithmetic (a hand-made split, or a deliberate
+// no-split), so the assertion outranks a rule's tax overlay where a category-form assertion, whose
+// one leg the tool derived, would still take it.
+func CategorizePosts(log *eventlog.Log, actor, why, txID, invoice, payee, source string, postings []model.Posting) error {
+	return categorizeChecked(log, actor, why, txID, invoice, payee, source, postings, true)
+}
+
+func categorizeChecked(log *eventlog.Log, actor, why, txID, invoice, payee, source string, postings []model.Posting, explicitPosts bool) error {
 	tx, err := Transaction(log, txID)
 	if err != nil {
 		return err
@@ -43,14 +62,14 @@ func Categorize(log *eventlog.Log, actor, why, txID, invoice, payee, source stri
 	}
 
 	// tx.ID, not txID: the caller may have quoted a prefix, and the assertion must key to the line.
-	return assertCategorized(log, actor, why, tx.ID, invoice, payee, source, postings, nil)
+	return assertCategorized(log, actor, why, tx.ID, invoice, payee, source, postings, nil, explicitPosts)
 }
 
 // assertCategorized records one categorization event, keyed by the transaction's fingerprint. It
 // is the shared tail of a hand correction and a carried-in categorization: both are the same fact
 // about one line, an assertion that overrides whatever the rules would have said.
-func assertCategorized(log *eventlog.Log, actor, why, txID, invoice, payee, source string, postings []model.Posting, blockComments []string) error {
-	data, err := json.Marshal(categorizedData{Payee: payee, Invoice: invoice, Postings: postings, Source: source, BlockComments: blockComments, Why: why})
+func assertCategorized(log *eventlog.Log, actor, why, txID, invoice, payee, source string, postings []model.Posting, blockComments []string, explicitPosts bool) error {
+	data, err := json.Marshal(categorizedData{Payee: payee, Invoice: invoice, Postings: postings, Source: source, BlockComments: blockComments, Why: why, ExplicitPosts: explicitPosts})
 	if err != nil {
 		return err
 	}
@@ -68,7 +87,9 @@ func assertCategorized(log *eventlog.Log, actor, why, txID, invoice, payee, sour
 // An entry with no postings, or one that does not account for its line (a mixed-commodity
 // placeholder the books cannot post), is left to the rules and counted as skipped rather than
 // asserted: the import carries what it faithfully can and never writes a broken entry. The carried
-// facts are ordinary assertions, so a later human correction still wins over them.
+// facts are ordinary assertions, so a later human correction still wins over them. A file spells
+// its own legs, so the carry records them as spelled: a rule's tax overlay never restates a carried
+// entry, and a re-imported historical book keeps its splits exactly as written.
 func CarryCategorizations(log *eventlog.Log, actor, why string, txs []model.Transaction, entries []model.Entry) (carried, skipped int, err error) {
 	if len(txs) != len(entries) {
 		return 0, 0, fmt.Errorf("books: %d transactions but %d categorizations", len(txs), len(entries))
@@ -79,7 +100,7 @@ func CarryCategorizations(log *eventlog.Log, actor, why string, txs []model.Tran
 			skipped++
 			continue
 		}
-		if err := assertCategorized(log, actor, why, tx.ID, entry.Invoice, entry.Payee, entry.Source, entry.Postings, entry.BlockComments); err != nil {
+		if err := assertCategorized(log, actor, why, tx.ID, entry.Invoice, entry.Payee, entry.Source, entry.Postings, entry.BlockComments, true); err != nil {
 			return carried, skipped, err
 		}
 		carried++
@@ -167,9 +188,13 @@ func cashLedger(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) {
 	// transfer fold, which pairs unnamed sightings on size alone, must not dissolve two such assertions;
 	// the assertions say what each line is. Their recency also picks the surviving side of a same-day
 	// pair: the asserted side speaks for the movement.
-	_, assertedAt, err := assertions(log)
+	asserted, err := assertions(log)
 	if err != nil {
 		return nil, nil, err
+	}
+	assertedAt := make(map[string]int, len(asserted))
+	for id, a := range asserted {
+		assertedAt[id] = a.at
 	}
 	dup := suppressed(txs, entries, overrides, owned, assertedAt)
 	keptTxs := make([]model.Transaction, 0, len(txs))
@@ -186,8 +211,11 @@ func cashLedger(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) {
 
 // categorized folds the log into every transaction and the entry it currently carries, in date
 // order, before disposals are priced and transfers suppressed. Each line is categorized by the
-// rules, then overridden by the latest human or model assertion for that specific line. It is the
-// shared front half of Ledger, reused to validate a sale before it is recorded.
+// rules, then overridden by the latest human or model assertion for that specific line. A rule's
+// tax is orthogonal to that override — "this vendor's prices include tax" is a fact about the
+// vendor, the category a fact about the line — so an opted-in rule still lays its tax onto the
+// asserted entry, unless the caller spelled the legs out. It is the shared front half of Ledger,
+// reused to validate a sale before it is recorded.
 func categorized(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) {
 	set, err := Rules(log)
 	if err != nil {
@@ -203,15 +231,18 @@ func categorized(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) 
 		return nil, nil, err
 	}
 
-	asserted, _, err := assertions(log)
+	asserted, err := assertions(log)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	entries := make([]model.Entry, len(txs))
 	for i, tx := range txs {
-		if entry, ok := asserted[tx.ID]; ok {
-			entries[i] = entry
+		if a, ok := asserted[tx.ID]; ok {
+			entries[i] = a.entry
+			if !a.explicitPosts {
+				entries[i] = engine.OverlayTax(tx, a.entry)
+			}
 			continue
 		}
 		entries[i] = engine.Apply(tx)
@@ -219,28 +250,38 @@ func categorized(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) 
 	return txs, entries, nil
 }
 
-// assertions folds the categorized events into the current entry per transaction, and where in
-// the log each line's latest assertion sits -- its recency, which the transfer fold uses to pick
-// the surviving side of a same-day pair. A later event about the same line replaces an earlier
-// one, so both maps simply take each in log order.
-func assertions(log *eventlog.Log) (map[string]model.Entry, map[string]int, error) {
+// assertion is one line's latest categorization fact as the fold reads it: the entry it asserted,
+// whether its legs were spelled out by the caller (which keeps the tax overlay off them), and where
+// in the log it sits -- its recency, which the transfer fold uses to pick the surviving side of a
+// same-day pair.
+type assertion struct {
+	entry         model.Entry
+	explicitPosts bool
+	at            int
+}
+
+// assertions folds the categorized events into the current assertion per transaction. A later
+// event about the same line replaces an earlier one, so the map simply takes each in log order.
+func assertions(log *eventlog.Log) (map[string]assertion, error) {
 	events, err := log.All()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	out := map[string]model.Entry{}
-	at := map[string]int{}
+	out := map[string]assertion{}
 	for i, e := range events {
 		if e.Collection != CollectionTransaction || e.Action != ActionCategorized {
 			continue
 		}
 		var data categorizedData
 		if err := e.Decode(&data); err != nil {
-			return nil, nil, fmt.Errorf("books: event %s: %w", e.ID, err)
+			return nil, fmt.Errorf("books: event %s: %w", e.ID, err)
 		}
-		out[e.RecordID] = model.Entry{Payee: data.Payee, Invoice: data.Invoice, Postings: data.Postings, Source: data.Source, Gain: data.Gain, BlockComments: data.BlockComments}
-		at[e.RecordID] = i
+		out[e.RecordID] = assertion{
+			entry:         model.Entry{Payee: data.Payee, Invoice: data.Invoice, Postings: data.Postings, Source: data.Source, Gain: data.Gain, BlockComments: data.BlockComments},
+			explicitPosts: data.ExplicitPosts,
+			at:            i,
+		}
 	}
-	return out, at, nil
+	return out, nil
 }

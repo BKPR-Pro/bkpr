@@ -43,7 +43,8 @@ func Sell(log *eventlog.Log, actor, why, txID, payee, gainAccount string, dispos
 		return err
 	}
 
-	data, err := json.Marshal(categorizedData{Payee: payee, Postings: postings, Gain: gainAccount, Why: why})
+	// A sale's legs are spelled, never derived from a category, so no tax overlay may restate them.
+	data, err := json.Marshal(categorizedData{Payee: payee, Postings: postings, Gain: gainAccount, Why: why, ExplicitPosts: true})
 	if err != nil {
 		return err
 	}

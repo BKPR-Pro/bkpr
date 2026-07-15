@@ -58,7 +58,9 @@ type Rule struct {
 
 	// TaxFrom bounds the tax by date, "2006-01-02": a line dated before it stays gross. A rule's
 	// split is a read-time fold over all history, and a filed year's lines already carry their
-	// splits, so an unbounded retroactive split would double-count them. Empty splits over all time.
+	// splits, so an unbounded retroactive split would double-count them. Setting it is also what
+	// opts the rule into overlaying lines something else categorized (see OverlayTax); empty keeps
+	// the split on the lines this rule categorizes itself, over all time.
 	TaxFrom string `json:"tax_from,omitempty"`
 
 	// Metadata is an opaque bag the engine neither reads nor validates. Apply carries it onto the
@@ -192,6 +194,40 @@ func (e *Engine) Apply(tx model.Transaction) model.Entry {
 		Source:   source,
 		Metadata: metadata,
 	}
+}
+
+// OverlayTax lays the first matching taxed rule's split onto an entry something else categorized —
+// a human's categorize, a carried file, another rule — so the vendor's tax fact survives the moment
+// a person picks the category. "This vendor's prices include 15% HST" is a fact about the vendor;
+// "where the money went" is a fact about the line; the overlay keeps them orthogonal.
+//
+// It is deliberately narrow. Only a rule that opts in with TaxFrom overlays at all, and only onto
+// lines dated on or after it, because reclassifying asserted history is the point and the footgun:
+// a filed year's lines already carry their splits, and re-splitting would double them. Only an
+// entry with exactly one leg in the line's own commodity is touched — spelled-out legs are the
+// caller's arithmetic — and a leg already on the rule's tax account is the tax itself, never split
+// again. TaxCategory reads the asserted category through the same scope Apply uses, so the human's
+// choice of property still decides whether and where the tax lands. When any guard says no, the
+// entry comes back exactly as given.
+func (e *Engine) OverlayTax(tx model.Transaction, entry model.Entry) model.Entry {
+	r := e.taxRule(tx)
+	if r == nil || r.taxFrom.IsZero() {
+		return entry
+	}
+	if len(entry.Postings) != 1 {
+		return entry
+	}
+	leg := entry.Postings[0]
+	if leg.Cost != nil || leg.Amount.Commodity != tx.Amount.Commodity {
+		return entry
+	}
+	split, ok := r.taxSplit(tx.Date, leg.Account, leg.Amount)
+	if !ok || split[1].Account == leg.Account {
+		return entry
+	}
+	split[0].Comment = leg.Comment
+	entry.Postings = split
+	return entry
 }
 
 // matches reports whether a rule fires on a line: its pattern on the description, and its amount

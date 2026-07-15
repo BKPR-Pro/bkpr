@@ -323,6 +323,132 @@ func TestTaxFromBoundsTheSplitByDate(t *testing.T) {
 	}
 }
 
+// A vendor's tax is a fact about the vendor; the category is a fact about the line. OverlayTax lays
+// the tax onto an entry something else categorized, so the vendor's fact survives a human picking
+// the category: the asserted leg splits into its pre-tax amount and the tax, and everything else on
+// the entry stays the human's.
+func TestOverlayLaysTheTaxOntoACategorizedEntry(t *testing.T) {
+	e := engine(t, rules.Rule{
+		Match: `kent`, TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxFrom: "2026-01-01",
+	})
+	line := datedTaxable("KENT BUILDING SUPPLIES", -11500, "2026-03-05")
+	entry := model.Entry{Payee: "Kent", Source: "Liabilities:Card:Reno", Postings: []model.Posting{
+		{Account: "Expenses:Materials:Unit 1", Amount: line.Amount.Negate(), Comment: "the receipt said Unit 1"},
+	}}
+
+	got := e.OverlayTax(line, entry)
+
+	if len(got.Postings) != 2 {
+		t.Fatalf("want the asserted leg split in two, got %+v", got.Postings)
+	}
+	net, tax := got.Postings[0], got.Postings[1]
+	if net.Account != "Expenses:Materials:Unit 1" || net.Amount.String() != "100.00 CAD" {
+		t.Errorf("net = %s %s, want the asserted category at 100.00 CAD", net.Account, net.Amount)
+	}
+	if net.Comment != "the receipt said Unit 1" {
+		t.Errorf("net comment = %q, want the human's note kept on the leg it was left on", net.Comment)
+	}
+	if tax.Account != "Assets:HST ITC" || tax.Amount.String() != "15.00 CAD" {
+		t.Errorf("tax = %s %s, want Assets:HST ITC at 15.00 CAD", tax.Account, tax.Amount)
+	}
+	if got.Payee != "Kent" || got.Source != "Liabilities:Card:Reno" {
+		t.Errorf("payee/source = %q/%q, want the assertion's kept", got.Payee, got.Source)
+	}
+	if !got.Balances(line) {
+		t.Error("the overlaid entry must still account for the whole line")
+	}
+}
+
+// Rewriting asserted history must be opted into and bounded, so a taxed rule without TaxFrom never
+// overlays: it behaves exactly as it always has, splitting only the lines it categorizes itself.
+func TestOverlayNeedsTaxFrom(t *testing.T) {
+	e := engine(t, rules.Rule{Match: `kent`, TaxRate: "15%", TaxAccount: "Assets:HST ITC"})
+	line := datedTaxable("KENT", -11500, "2026-03-05")
+	entry := model.Entry{Postings: []model.Posting{{Account: "Expenses:Materials", Amount: line.Amount.Negate()}}}
+
+	if got := e.OverlayTax(line, entry); len(got.Postings) != 1 {
+		t.Errorf("a rule without TaxFrom must not overlay, got %+v", got.Postings)
+	}
+}
+
+// The bound is the guard against double-counting: a filed year's line, already split in the old
+// ledger it was carried from, is dated before TaxFrom and stays exactly as asserted.
+func TestOverlaySkipsLinesBeforeTaxFrom(t *testing.T) {
+	e := engine(t, rules.Rule{Match: `kent`, TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxFrom: "2026-01-01"})
+	line := datedTaxable("KENT", -11500, "2025-06-30")
+	entry := model.Entry{Postings: []model.Posting{{Account: "Expenses:Materials", Amount: line.Amount.Negate()}}}
+
+	if got := e.OverlayTax(line, entry); len(got.Postings) != 1 {
+		t.Errorf("a line before TaxFrom must stay as asserted, got %+v", got.Postings)
+	}
+}
+
+// Spelled-out legs are the caller's own arithmetic — a hand-made split, or a split that already
+// carries its tax — so an entry with more than one posting is never touched.
+func TestOverlayLeavesASpelledSplitAlone(t *testing.T) {
+	e := engine(t, rules.Rule{Match: `kent`, TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxFrom: "2026-01-01"})
+	line := datedTaxable("KENT", -11500, "2026-03-05")
+	entry := model.Entry{Postings: []model.Posting{
+		{Account: "Expenses:Materials:Unit 1", Amount: model.Amount{Units: 5000, Scale: 2, Commodity: "CAD"}},
+		{Account: "Expenses:Materials:Unit 2", Amount: model.Amount{Units: 6500, Scale: 2, Commodity: "CAD"}},
+	}}
+
+	if got := e.OverlayTax(line, entry); len(got.Postings) != 2 || got.Postings[0].Amount.String() != "50.00 CAD" {
+		t.Errorf("a hand-made split must stay the caller's, got %+v", got.Postings)
+	}
+}
+
+// A leg already on the rule's tax account is the tax, so splitting it again would double-count.
+func TestOverlaySkipsALegAlreadyOnTheTaxAccount(t *testing.T) {
+	e := engine(t, rules.Rule{Match: `kent`, TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxFrom: "2026-01-01"})
+	line := datedTaxable("KENT REFUND", 1500, "2026-03-05")
+	entry := model.Entry{Postings: []model.Posting{{Account: "Assets:HST ITC", Amount: line.Amount.Negate()}}}
+
+	if got := e.OverlayTax(line, entry); len(got.Postings) != 1 {
+		t.Errorf("a leg already on the tax account must not split, got %+v", got.Postings)
+	}
+}
+
+// The overlay reads the asserted category through the same scope Apply does: the property the human
+// picked decides whether the tax splits at all and which account it lands in, so one vendor serves a
+// claimable property and a gross one from one rule.
+func TestOverlayScopesByTheAssertedCategory(t *testing.T) {
+	e := engine(t, rules.Rule{
+		Match: `kent`, TaxRate: "15%", TaxFrom: "2026-01-01",
+		TaxCategory: `Materials:(9 Schoodic)`, TaxAccount: "Expenses:Real Estate:HST:ITC:$1",
+	})
+	line := datedTaxable("KENT BUILDING SUPPLIES", -11500, "2026-03-05")
+
+	claimed := e.OverlayTax(line, model.Entry{Postings: []model.Posting{
+		{Account: "Expenses:Real Estate:Materials:9 Schoodic", Amount: line.Amount.Negate()},
+	}})
+	if len(claimed.Postings) != 2 || claimed.Postings[1].Account != "Expenses:Real Estate:HST:ITC:9 Schoodic" {
+		t.Errorf("a category in scope should split to its derived account, got %+v", claimed.Postings)
+	}
+
+	gross := e.OverlayTax(line, model.Entry{Postings: []model.Posting{
+		{Account: "Expenses:Real Estate:Materials:22 Lisgar", Amount: line.Amount.Negate()},
+	}})
+	if len(gross.Postings) != 1 {
+		t.Errorf("a category outside the scope must stay gross, got %+v", gross.Postings)
+	}
+}
+
+// A priced or foreign leg cannot be split against the line's commodity, so it is left alone rather
+// than guessed at.
+func TestOverlaySkipsAForeignOrPricedLeg(t *testing.T) {
+	e := engine(t, rules.Rule{Match: `kent`, TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxFrom: "2026-01-01"})
+	line := datedTaxable("KENT", -11500, "2026-03-05")
+	cost := model.Amount{Units: 11500, Scale: 2, Commodity: "CAD"}
+	entry := model.Entry{Postings: []model.Posting{
+		{Account: "Assets:Brokerage:AAPL", Amount: model.Amount{Units: 10, Commodity: "AAPL"}, Cost: &cost},
+	}}
+
+	if got := e.OverlayTax(line, entry); len(got.Postings) != 1 || got.Postings[0].Cost == nil {
+		t.Errorf("a priced leg must stay whole, got %+v", got.Postings)
+	}
+}
+
 // The scope and the bound qualify a tax; without one they have nothing to qualify, so they are
 // refused at authoring like a rate without an account.
 func TestTaxCategoryWithoutATaxIsRejected(t *testing.T) {

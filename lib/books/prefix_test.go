@@ -85,7 +85,7 @@ func TestCategorizeByPrefixKeysToTheFullFingerprint(t *testing.T) {
 		t.Fatalf("Categorize: %v", err)
 	}
 
-	asserted, _, err := assertions(log)
+	asserted, err := assertions(log)
 	if err != nil {
 		t.Fatalf("assertions: %v", err)
 	}

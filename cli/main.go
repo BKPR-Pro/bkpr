@@ -382,7 +382,15 @@ var reference = []docGroup{
       category outside the scope stays gross, and the pattern's capture groups may appear in
       -tax-account ($1), so one rule derives each property's tax account from the category the
       line took. -tax-from bounds the tax by date: a line dated before it stays gross, so a
-      filed year whose lines already carry their splits cannot re-split. -source routes the matched line's card/liability leg to a sub-account
+      filed year whose lines already carry their splits cannot re-split. Setting -tax-from also
+      opts the rule's tax into overlaying lines something else categorized: the vendor's tax is
+      a fact about the vendor and the category a fact about the line, so a matching line
+      categorized by hand (or by another rule) still splits, from that date on -- the human
+      keeps the category decision, the rule keeps the arithmetic. The overlay touches only a
+      single-leg entry whose leg the tool derived: postings spelled with -post, a hand-made
+      split, a carried ledger entry, and a leg already on the tax account all stand as written.
+      Without -tax-from a taxed rule behaves as it always has, splitting only the lines it
+      categorizes itself. -source routes the matched line's card/liability leg to a sub-account
       instead of the account it was imported on, so a physical card registered on one parent
       splits by purpose: each charge self-routes to its purpose child, and the parent reconciles
       to the one bank balance by rolling those children up. -meta attaches opaque key=value pairs
@@ -453,7 +461,10 @@ var reference = []docGroup{
       -tax-account (required together) split the tax the total already includes, exactly as a
       taxed rule does: the pre-tax amount (net = total / (1 + rate)) to the category, the exact
       remainder to the tax account, so the hand form of the decision cannot drift a cent from
-      the rule form. A sale instead names the shares
+      the rule form. The two forms rank differently against a taxed rule's overlay (rules set
+      -tax-from): a -category assertion stays open to it, because the vendor's tax is a fact the
+      category decision does not answer, while -post legs are your own arithmetic and stand as
+      written. A sale instead names the shares
       it disposed of with -sell and where the gain lands with -gain; the cost base, and so the
       gain, is folded from your purchases: -sell "Assets:Brokerage:AAPL=10 AAPL" -gain "Income:Capital Gains".
       -invoice records the invoice or bill number for the line, the ledger (code); it renders as
@@ -1757,7 +1768,13 @@ func categorize(args []string) error {
 	}
 
 	warnUnrootedSource(s.Log, *source)
-	if err := books.Categorize(s.Log, *actor, *why, txID, *invoice, *payee, *source, post); err != nil {
+	// -post legs are the caller's own arithmetic, so they are recorded as spelled and no rule's tax
+	// overlay may restate them; a -category assertion, whose leg the tool derived, stays open to one.
+	assert := books.Categorize
+	if len(split) > 0 {
+		assert = books.CategorizePosts
+	}
+	if err := assert(s.Log, *actor, *why, txID, *invoice, *payee, *source, post); err != nil {
 		return err
 	}
 	// tx.ID rather than the argument: a quoted prefix echoes back as the whole fingerprint.

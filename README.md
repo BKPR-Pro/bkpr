@@ -467,6 +467,19 @@ bkpr rules set "kent" -tax-rate "15%" -tax-category "Materials:(9 Schoodic)" \
 # one on Materials:22 Lisgar falls outside the scope and stays gross
 ```
 
+Setting `-tax-from` also opts the rule's tax into **overlaying lines something else categorized**.
+The vendor's tax is a fact about the vendor; the category is a fact about the line; and on books
+where the category is a manual decision (which unit a hardware receipt serves), every line is
+categorized by hand, so a tax that died on assertion would reach nothing. With the overlay the human
+keeps the category decision and the rule keeps the arithmetic: a matching line categorized by hand,
+by another rule, or before the rule existed still splits, from the bound date on. The overlay
+touches only a single-leg entry whose leg the tool derived from a category. Legs you spelled
+yourself stand as written: a `-post` assertion (split or deliberate no-split), a sale, a carried
+ledger entry, and a leg already posting to the tax account are never restated, and the scope still
+gates on the asserted category, so the property the human picked decides whether and where the tax
+lands. Without `-tax-from` a taxed rule behaves as it always has, splitting only the lines it
+categorizes itself.
+
 `books` folds the log and renders it: a table or JSON to read, or the ledger artifact. `-account`
 narrows any of the three to the lines posting to a matching account — repeat it to name several —
 so there is no separate review command: the decision queue is just the books, filtered:

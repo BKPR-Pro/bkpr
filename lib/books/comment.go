@@ -26,7 +26,7 @@ func Comment(log *eventlog.Log, actor, why, txID, account, text string, remove b
 		return err
 	}
 
-	entry, err := entryFor(log, tx.ID)
+	entry, explicitPosts, err := entryFor(log, tx.ID)
 	if err != nil {
 		return err
 	}
@@ -52,9 +52,11 @@ func Comment(log *eventlog.Log, actor, why, txID, account, text string, remove b
 	}
 	entry.Postings[idx].Comment = text
 
+	// The freeze re-asserts the entry as it stands, and it must not soften it: legs the caller spelled
+	// stay spelled, so a note never opens a deliberate no-split to a later tax overlay.
 	data, err := json.Marshal(categorizedData{
 		Payee: entry.Payee, Postings: entry.Postings, Gain: entry.Gain,
-		BlockComments: entry.BlockComments, Why: why,
+		BlockComments: entry.BlockComments, Why: why, ExplicitPosts: explicitPosts,
 	})
 	if err != nil {
 		return err
@@ -67,19 +69,24 @@ func Comment(log *eventlog.Log, actor, why, txID, account, text string, remove b
 }
 
 // entryFor folds the log into the categorization one line currently carries, whether the rules gave
-// it or a later assertion did. It is the stored form, before disposals are priced, so re-asserting
-// it records the same fact the books already hold.
-func entryFor(log *eventlog.Log, txID string) (model.Entry, error) {
+// it or a later assertion did, and whether that assertion's legs were spelled by the caller. It is
+// the stored form, before disposals are priced, so re-asserting it records the same fact the books
+// already hold.
+func entryFor(log *eventlog.Log, txID string) (model.Entry, bool, error) {
 	txs, entries, err := categorized(log)
 	if err != nil {
-		return model.Entry{}, err
+		return model.Entry{}, false, err
+	}
+	asserted, err := assertions(log)
+	if err != nil {
+		return model.Entry{}, false, err
 	}
 	for i, tx := range txs {
 		if tx.ID == txID {
-			return entries[i], nil
+			return entries[i], asserted[txID].explicitPosts, nil
 		}
 	}
-	return model.Entry{}, fmt.Errorf("books: no transaction %q to comment on", txID)
+	return model.Entry{}, false, fmt.Errorf("books: no transaction %q to comment on", txID)
 }
 
 // namesSourceLeg reports whether the account names the transaction's own (elided, source) leg, the
