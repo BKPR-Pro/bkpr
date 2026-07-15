@@ -774,6 +774,8 @@ Three different itches, three different tools, only one of them new:
 - **Starting over** is `bkpr reset`: the log emptied, the artifact removed, the directory still a
   book. It is the one verb in the tool that destroys history, so without `-confirm` it is a dry
   run that says what would be lost — and after a reset the old log is recoverable only from git.
+  (`bkpr migrate`, which restates a pre-door-scoped book's line ids in place, shares the same
+  discipline: dry run without `-confirm`, git as the undo.)
 
 ### Transfers between your own accounts
 
@@ -785,6 +787,9 @@ movement.
 So the second sighting is suppressed. Two sightings pair when they are the same amount moving the
 other way between two accounts you own, within a few days; the earlier one is kept and books the
 transfer (a single posting to the other account, so both balances stay right), the later is dropped.
+Two sightings on one day have no earlier: there the side with the most recent assertion is kept —
+the categorization someone made speaks for the movement — so which side books never hangs on the
+accident of fingerprint order.
 It happens by itself on import — no rule, no command — which is the point: a transfer is the last
 thing you should have to hand-categorize. Import a statement that has not been paired yet and it
 books normally on its own; import its other half later and the duplicate is recognised and dropped.
