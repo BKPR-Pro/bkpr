@@ -165,12 +165,13 @@ func cashLedger(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) {
 	}
 	// A line categorized by hand or carried from a ledger file is an assertion, not a guess. The loose
 	// transfer fold, which pairs unnamed sightings on size alone, must not dissolve two such assertions;
-	// the assertions say what each line is.
-	asserted, err := assertions(log)
+	// the assertions say what each line is. Their recency also picks the surviving side of a same-day
+	// pair: the asserted side speaks for the movement.
+	_, assertedAt, err := assertions(log)
 	if err != nil {
 		return nil, nil, err
 	}
-	dup := suppressed(txs, entries, overrides, owned, asserted)
+	dup := suppressed(txs, entries, overrides, owned, assertedAt)
 	keptTxs := make([]model.Transaction, 0, len(txs))
 	keptEntries := make([]model.Entry, 0, len(entries))
 	for i, tx := range txs {
@@ -202,7 +203,7 @@ func categorized(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) 
 		return nil, nil, err
 	}
 
-	asserted, err := assertions(log)
+	asserted, _, err := assertions(log)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -218,24 +219,28 @@ func categorized(log *eventlog.Log) ([]model.Transaction, []model.Entry, error) 
 	return txs, entries, nil
 }
 
-// assertions folds the categorized events into the current entry per transaction. A later event
-// about the same line replaces an earlier one, so the map simply takes each in log order.
-func assertions(log *eventlog.Log) (map[string]model.Entry, error) {
+// assertions folds the categorized events into the current entry per transaction, and where in
+// the log each line's latest assertion sits -- its recency, which the transfer fold uses to pick
+// the surviving side of a same-day pair. A later event about the same line replaces an earlier
+// one, so both maps simply take each in log order.
+func assertions(log *eventlog.Log) (map[string]model.Entry, map[string]int, error) {
 	events, err := log.All()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	out := map[string]model.Entry{}
-	for _, e := range events {
+	at := map[string]int{}
+	for i, e := range events {
 		if e.Collection != CollectionTransaction || e.Action != ActionCategorized {
 			continue
 		}
 		var data categorizedData
 		if err := e.Decode(&data); err != nil {
-			return nil, fmt.Errorf("books: event %s: %w", e.ID, err)
+			return nil, nil, fmt.Errorf("books: event %s: %w", e.ID, err)
 		}
 		out[e.RecordID] = model.Entry{Payee: data.Payee, Invoice: data.Invoice, Postings: data.Postings, Source: data.Source, Gain: data.Gain, BlockComments: data.BlockComments}
+		at[e.RecordID] = i
 	}
-	return out, nil
+	return out, at, nil
 }

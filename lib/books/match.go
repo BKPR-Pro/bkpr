@@ -25,7 +25,10 @@ const transferDays = 5
 // This is a pure fold: no event records a pairing, because the pairing is recomputable from the
 // lines and their categorization. Two sightings pair when each names the other's account, their
 // amounts are equal and opposite, and their dates are within the window. The earlier sighting is
-// kept, which dates the entry at the movement's origin and makes the choice deterministic.
+// kept, which dates the entry at the movement's origin and makes the choice deterministic. Two
+// sightings on one day have no origin, so there the side with the most recent assertion is kept
+// -- the categorization someone made speaks for the movement, and between two assertions the
+// later wins, as a later fact does everywhere in the log (see keptOf).
 //
 // Pairing is greedy in date order. When several sightings of the same size sit in one window they
 // are interchangeable, so any valid pairing suppresses the same number, and the count of real
@@ -46,7 +49,7 @@ const transferDays = 5
 // write every movement once, so there a loose pairing can only be a coincidence of size; the named
 // fold, which has real evidence, still applies. A genuine transfer the rules missed on one asserted
 // side is recovered with `match`.
-func suppressed(txs []model.Transaction, entries []model.Entry, overrides map[string]matchedData, owned map[string]bool, asserted map[string]model.Entry) map[string]bool {
+func suppressed(txs []model.Transaction, entries []model.Entry, overrides map[string]matchedData, owned map[string]bool, assertedAt map[string]int) map[string]bool {
 	dup := map[string]bool{}
 	consumed := make([]bool, len(txs))
 	pos := make(map[string]int, len(txs))
@@ -63,7 +66,7 @@ func suppressed(txs []model.Transaction, entries []model.Entry, overrides map[st
 	}
 
 	// A forced match asserts two sightings are one movement the automatic fold could not see (it pairs
-	// only on mutual naming). Suppress the later of the pair.
+	// only on mutual naming). The losing sighting is suppressed.
 	for i, tx := range txs {
 		o, ok := overrides[tx.ID]
 		if !ok || !o.Paired || consumed[i] {
@@ -73,15 +76,13 @@ func suppressed(txs []model.Transaction, entries []model.Entry, overrides map[st
 		if !ok || consumed[j] {
 			continue
 		}
-		later := i
-		if j > i { // txs are date-ordered, so the higher index is the later sighting
-			later = j
-		}
-		dup[txs[later].ID] = true
+		_, lost := keptOf(txs, assertedAt, i, j)
+		dup[txs[lost].ID] = true
 		consumed[i], consumed[j] = true, true
 	}
 
-	// Internal transfers: one movement seen in two accounts you own. Suppress the later sighting.
+	// Internal transfers: one movement seen in two accounts you own. The losing sighting is
+	// suppressed.
 	for i := range txs {
 		if consumed[i] {
 			continue
@@ -93,13 +94,17 @@ func suppressed(txs []model.Transaction, entries []model.Entry, overrides map[st
 			named := isTransferPair(txs[i], entries[i], txs[j], entries[j]) ||
 				isCrossTransferPair(txs[i], entries[i], txs[j], entries[j])
 			loose := !named && isOwnedTransferPair(txs[i], entries[i], txs[j], entries[j], owned)
-			if loose && bothAsserted(txs[i], txs[j], asserted) {
+			if loose && bothAsserted(txs[i], txs[j], assertedAt) {
 				// Two assertions, not two unnamed sightings: trust what each line says rather than
 				// guessing them into one movement on size alone.
 				loose = false
 			}
 			if !named && !loose {
 				continue
+			}
+			lost := j
+			if named {
+				_, lost = keptOf(txs, assertedAt, i, j)
 			}
 			if loose {
 				// Neither statement named the other, so book the kept leg as the transfer: a single
@@ -108,7 +113,7 @@ func suppressed(txs []model.Transaction, entries []model.Entry, overrides map[st
 					{Account: txs[j].Account, Amount: txs[i].Amount.Negate()},
 				}}
 			}
-			dup[txs[j].ID] = true // txs are date-ordered, so j is the later sighting
+			dup[txs[lost].ID] = true
 			consumed[i], consumed[j] = true, true
 			break
 		}
@@ -116,12 +121,43 @@ func suppressed(txs []model.Transaction, entries []model.Entry, overrides map[st
 	return dup
 }
 
+// keptOf chooses which sighting of a pair survives the fold. Dated apart, the earlier is kept:
+// the entry belongs at the movement's origin. On one day there is no origin, and the choice must
+// not hang on the accident of fingerprint order, so the side with the most recent assertion is
+// kept -- the categorization someone made speaks for the movement, and between two assertions
+// the later wins, as a later fact does everywhere in the log. With nothing asserted the earlier
+// index is kept, so the choice stays deterministic.
+func keptOf(txs []model.Transaction, assertedAt map[string]int, i, j int) (kept, lost int) {
+	kept, lost = i, j
+	if j < i { // txs are date-ordered, so the lower index is the earlier sighting
+		kept, lost = j, i
+	}
+	if !txs[i].Date.Equal(txs[j].Date) {
+		return kept, lost
+	}
+	ri, ok := assertedAt[txs[i].ID]
+	if !ok {
+		ri = -1
+	}
+	rj, ok := assertedAt[txs[j].ID]
+	if !ok {
+		rj = -1
+	}
+	switch {
+	case ri > rj:
+		return i, j
+	case rj > ri:
+		return j, i
+	}
+	return kept, lost
+}
+
 // bothAsserted reports whether both sightings carry an explicit categorization -- a hand correction
 // or a fact carried from a ledger file -- rather than a rules guess. Two assertions are statements of
 // what each line is, so the loose fold leaves them alone.
-func bothAsserted(a, b model.Transaction, asserted map[string]model.Entry) bool {
-	_, ai := asserted[a.ID]
-	_, bi := asserted[b.ID]
+func bothAsserted(a, b model.Transaction, assertedAt map[string]int) bool {
+	_, ai := assertedAt[a.ID]
+	_, bi := assertedAt[b.ID]
 	return ai && bi
 }
 

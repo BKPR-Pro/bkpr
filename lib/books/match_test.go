@@ -303,3 +303,72 @@ func TestALaterMatchSupersedesAnEarlierOne(t *testing.T) {
 		t.Fatalf("the later break should undo the force, got %d", len(txs))
 	}
 }
+
+// Two sightings on one day have no origin to date the entry at, so which one is kept must not
+// hang on the accident of fingerprint order. The side someone actually categorized speaks for
+// the movement: a forced pair keeps the asserted side even when it sorts later.
+func TestASameDayForcedPairKeepsTheAssertedSide(t *testing.T) {
+	log := newLog()
+	importOne(t, log, line("a-cheq", 5, -20000, "ONLINE PAYMENT"))
+	importOne(t, log, lineIn("z-card", "Liabilities:Card", 5, 20000, "PAYMENT RECEIVED"))
+	if err := books.Categorize(log, "human", "the card side is the movement", "z-card", "", "Card Payment", "",
+		[]model.Posting{{Account: "Assets:Bank:Chequing", Amount: cad(-20000)}}); err != nil {
+		t.Fatalf("Categorize: %v", err)
+	}
+	if err := books.Match(log, "human", "z-card", "a-cheq", true); err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+
+	txs, entries := ledger(t, log)
+	if len(txs) != 1 || txs[0].ID != "z-card" {
+		t.Fatalf("kept %v, want the asserted card side", txs)
+	}
+	if entries[0].Payee != "Card Payment" {
+		t.Errorf("the kept side should render its assertion, got payee %q", entries[0].Payee)
+	}
+}
+
+// Both sides asserted: the later assertion is the later fact, and a later fact wins everywhere
+// in the log.
+func TestASameDayPairKeepsTheLaterAssertion(t *testing.T) {
+	log := newLog()
+	importOne(t, log, line("a-cheq", 5, -20000, "ONLINE PAYMENT"))
+	importOne(t, log, lineIn("z-card", "Liabilities:Card", 5, 20000, "PAYMENT RECEIVED"))
+	// Mutual naming makes them a pair without a forced match; the card side is asserted second.
+	if err := books.Categorize(log, "human", "first", "a-cheq", "", "Chequing Side", "",
+		[]model.Posting{{Account: "Liabilities:Card", Amount: cad(20000)}}); err != nil {
+		t.Fatalf("Categorize: %v", err)
+	}
+	if err := books.Categorize(log, "human", "second", "z-card", "", "Card Side", "",
+		[]model.Posting{{Account: "Assets:Bank:Chequing", Amount: cad(-20000)}}); err != nil {
+		t.Fatalf("Categorize: %v", err)
+	}
+
+	txs, entries := ledger(t, log)
+	if len(txs) != 1 || txs[0].ID != "z-card" {
+		t.Fatalf("kept %v, want the side asserted last", txs)
+	}
+	if entries[0].Payee != "Card Side" {
+		t.Errorf("the kept side should render its assertion, got payee %q", entries[0].Payee)
+	}
+}
+
+// Dated apart, the earlier sighting still wins whatever is asserted where: the entry belongs at
+// the movement's origin.
+func TestACrossDatePairStillKeepsTheEarlierSighting(t *testing.T) {
+	log := newLog()
+	importOne(t, log, line("a-cheq", 3, -20000, "ONLINE PAYMENT"))
+	importOne(t, log, lineIn("z-card", "Liabilities:Card", 5, 20000, "PAYMENT RECEIVED"))
+	if err := books.Categorize(log, "human", "asserted on the later side", "z-card", "", "Card Payment", "",
+		[]model.Posting{{Account: "Assets:Bank:Chequing", Amount: cad(-20000)}}); err != nil {
+		t.Fatalf("Categorize: %v", err)
+	}
+	if err := books.Match(log, "human", "z-card", "a-cheq", true); err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+
+	txs, _ := ledger(t, log)
+	if len(txs) != 1 || txs[0].ID != "a-cheq" {
+		t.Fatalf("kept %v, want the earlier sighting", txs)
+	}
+}
