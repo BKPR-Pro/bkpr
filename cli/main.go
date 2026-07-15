@@ -78,6 +78,8 @@ func main() {
 		err = exportCmd(os.Args[2:])
 	case "books":
 		err = renderBooks(os.Args[2:])
+	case "register":
+		err = registerCmd(os.Args[2:])
 	case "completion":
 		err = completionCmd(os.Args[2:])
 	case "__complete":
@@ -173,6 +175,7 @@ var usageSections = []usageSection{
 		{"match", "<fingerprint> (-with <fingerprint> | -break) [-actor <name>]"},
 		{"export", "<connector> [-confirm]"},
 		{"books", "[-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re> ...] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-sort amount [-desc]] [-value <c> [-rate <C=n> ...]] [-stdout]"},
+		{"register", "[-account <re>] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-dups]"},
 	}},
 	{"INVOICES AND BILLS", []usageLine{
 		{"invoice raise", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-invoice <n>] [-why <reason>] [-actor <name>]"},
@@ -512,6 +515,29 @@ var reference = []docGroup{
       supply (-rate USD=1.35, one unit's worth in the target, comma-separated for several), and one
       with neither is left in its own currency and named in a warning. Valuing restates a reading,
       not the artifact, so -value cannot render -format ledger, which stays each line's own commodity.
+`},
+		{[]string{"register"}, `  register [-account <re>] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-dups]
+      Read the books the way the bank prints a statement: every line in date order -- payee,
+      amount, the account it moved, and the door it entered through (the connector or file that
+      imported it, which no other view shows). It reads through the same lens books does: -basis
+      and -since fold the very lines that make books' totals, so on -basis accrual the invoices
+      and bills appear too, each with its kind as its door. A transfer the fold paired appears
+      once, and each account still sees its own side of it; voided lines have left the fold.
+      -account narrows to one account's statement and adds a balance running down the page,
+      counting the source leg the fold books there and any posting that lands there, so a card
+      whose charges route to purpose sub-accounts reads rolled up under the parent pattern.
+      -from and -to narrow by date, both ends inclusive. It is a pure reading and writes nothing.
+      -dups reads the same fold for candidate twins: lines sharing a date and an amount that
+      entered through different doors. That is the double the books cannot catch on their own --
+      fingerprints dedupe within a door, and reconcile compares each door's lines to its own
+      bank -- so one purchase entering through two doors (a hand ledger and a connector, say)
+      doubles silently, and on -basis accrual an open invoice collides with a deposit that
+      booked the same income directly. One door colliding with itself is not reported: a bank
+      legitimately charges the same amount twice in a day. A settled accrual never twins with
+      the line that paid it -- that pairing is recorded, not a coincidence. Each group prints the
+      shared date and amount, then every line with its fingerprint, door, account, and
+      categorization; the report only ever suggests, and a twin that is real is voided on one
+      side by hand.
 `},
 	}},
 	{"INVOICES AND BILLS  (value recognized before its cash; only shown on -basis accrual)", []docTopic{

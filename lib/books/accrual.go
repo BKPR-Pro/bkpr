@@ -63,7 +63,7 @@ type accrualLine struct {
 // one, exactly as a statement's own account is.
 func (a accrualLine) transaction() model.Transaction {
 	return model.Transaction{
-		ID:          a.kind + ":" + a.id,
+		ID:          foldID(a.kind, a.id),
 		Account:     a.parkedAccount,
 		Date:        a.date,
 		Amount:      a.parkedAmount,
@@ -323,6 +323,28 @@ func settlementsFor(log *eventlog.Log, collection string) (map[string]string, er
 			continue
 		}
 		out[e.RecordID] = d.Tx
+	}
+	return out, nil
+}
+
+// foldID is the id an accrual's synthetic line carries in the fold, namespaced by kind so it can
+// never collide with a statement fingerprint. It is the fold's own naming, so every projection that
+// speaks about a folded line (Doors, Settlements) mints the same id the overlay does.
+func foldID(kind, id string) string { return kind + ":" + id }
+
+// Settlements maps each settled accrual's fold line to the bank line that paid it, across invoices
+// and bills alike. A settlement is a recorded pairing, not a coincidence of date and amount, so a
+// reading that hunts coincidences (the register's twin report) reads this to leave them alone.
+func Settlements(log *eventlog.Log) (map[string]string, error) {
+	out := map[string]string{}
+	for _, kind := range []string{CollectionInvoice, CollectionBill} {
+		m, err := settlementsFor(log, kind)
+		if err != nil {
+			return nil, err
+		}
+		for id, tx := range m {
+			out[foldID(kind, id)] = tx
+		}
 	}
 	return out, nil
 }

@@ -59,8 +59,8 @@ func TestUsageStylesEveryCommandUnderASection(t *testing.T) {
 	}
 	for _, name := range []string{
 		"init", "reset", "connectors register", "rules set", "import", "categorize", "void",
-		"match", "export", "books", "invoice raise", "bill receive", "policy set", "accounts set",
-		"balance set", "reconcile", "receipt", "report", "help", "docs", "version",
+		"match", "export", "books", "register", "invoice raise", "bill receive", "policy set",
+		"accounts set", "balance set", "reconcile", "receipt", "report", "help", "docs", "version",
 	} {
 		if !strings.Contains(out, name) {
 			t.Errorf("usage should list the %q command", name)
@@ -136,7 +136,7 @@ func TestPaletteForHonorsNoColor(t *testing.T) {
 func TestHelpTopicKnowsEveryCommand(t *testing.T) {
 	for _, name := range []string{
 		"init", "connectors", "rules", "import", "categorize", "void",
-		"match", "export", "books", "invoice", "bill",
+		"match", "export", "books", "register", "invoice", "bill",
 	} {
 		var buf bytes.Buffer
 		if err := helpTopic(&buf, name); err != nil {
