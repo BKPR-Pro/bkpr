@@ -774,8 +774,6 @@ Three different itches, three different tools, only one of them new:
 - **Starting over** is `bkpr reset`: the log emptied, the artifact removed, the directory still a
   book. It is the one verb in the tool that destroys history, so without `-confirm` it is a dry
   run that says what would be lost — and after a reset the old log is recoverable only from git.
-  (`bkpr migrate`, which restates a pre-door-scoped book's line ids in place, shares the same
-  discipline: dry run without `-confirm`, git as the undo.)
 
 ### Transfers between your own accounts
 
