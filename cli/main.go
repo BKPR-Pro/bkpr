@@ -44,6 +44,8 @@ func main() {
 		err = initStore(os.Args[2:])
 	case "reset":
 		err = resetCmd(os.Args[2:])
+	case "migrate":
+		err = migrateCmd(os.Args[2:])
 	case "import":
 		err = importCmd(os.Args[2:])
 	case "connectors":
@@ -152,6 +154,7 @@ var usageSections = []usageSection{
 	{"SETUP", []usageLine{
 		{"init", "[dir]"},
 		{"reset", "[-confirm]"},
+		{"migrate", "[-confirm]"},
 		{"connectors register", "<name> -kind <rentapp|rbc|simplii|pcfinancial> -url <url> -token-env <ENV> -account <a> [-currency <c>] [-cred field=ref ...] [-secret-cmd <cmd>] [-account-path <label> ...] [-history <days>]"},
 		{"connectors rm", "<name>"},
 		{"connectors list", ""},
@@ -330,6 +333,18 @@ var reference = []docGroup{
       -reopen, each a later fact that supersedes - and not how a bad batch is unwound: every
       write is a pure append, so git restore .bkpr/log.jsonl rolls the book back to any
       committed point. After a reset the old log is recoverable only from git.
+`},
+		{[]string{"migrate"}, `  migrate [-confirm]
+      Restate every imported line's fingerprint under the door it entered through: the
+      connector's name, or the statement file's own name. A book recorded before the
+      door-scoped identity scheme keyed its lines to the account they landed in, so those ids
+      no longer match what an import computes and any overlapping window re-lands its history
+      as duplicates; migrating restates each id once, numbering identical lines in log order,
+      and re-points every fact keyed to an old id - a categorization, a void, a comment, a
+      match and its -with partner, a settlement's -tx - so the books fold identically, id
+      names aside. Without -confirm it is a dry run that says what would move. Migrating a
+      migrated book is a no-op. The log is rewritten in place - the one deliberate exception,
+      with reset, to append-only - so commit .bkpr/log.jsonl first; git is the undo.
 `},
 		{[]string{"connectors"}, `  connectors register <name> -kind <kind> -url <url> -token-env <ENV> -account <a> [-currency <c>] [-cred field=ref ...] [-secret-cmd <cmd>]
       Register a live connector. Kinds: rentapp (export), and the banks imported from --

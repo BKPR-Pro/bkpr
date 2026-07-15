@@ -58,7 +58,7 @@ func TestUsageStylesEveryCommandUnderASection(t *testing.T) {
 		t.Fatal("a color palette should paint the usage screen with ANSI styling")
 	}
 	for _, name := range []string{
-		"init", "reset", "connectors register", "rules set", "import", "categorize", "void",
+		"init", "reset", "migrate", "connectors register", "rules set", "import", "categorize", "void",
 		"match", "export", "books", "register", "invoice raise", "bill receive", "policy set",
 		"accounts set", "balance set", "reconcile", "receipt", "report", "help", "docs", "version",
 	} {
