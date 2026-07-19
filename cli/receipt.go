@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
 	"io"
+	"os"
 	"strings"
 	"text/tabwriter"
 
@@ -16,27 +18,27 @@ import (
 // party is one side of the document: a name and an address split into lines, so the template renders
 // line breaks without any raw HTML crossing the escaping boundary.
 type party struct {
-	Name    string
-	Address []string
+	Name    string   `json:"name"`
+	Address []string `json:"address,omitempty"`
 }
 
 type invoiceItem struct {
-	Label  string
-	Amount string
+	Label  string `json:"label"`
+	Amount string `json:"amount"`
 }
 
 // invoiceDoc is the whole printable document, assembled from one transaction and its entry. It holds
 // only strings, so the template does no arithmetic and the rendering is a pure function of the view.
 type invoiceDoc struct {
-	Title     string // the banner, e.g. INVOICE
-	Kind      string // the reference label, e.g. Invoice (as in "Invoice No")
-	Biller    party
-	BillTo    party
-	Reference string
-	Date      string
-	Paid      bool
-	Items     []invoiceItem
-	Total     string
+	Title     string        `json:"title"` // the banner, e.g. INVOICE
+	Kind      string        `json:"kind"`  // the reference label, e.g. Invoice (as in "Invoice No")
+	Biller    party         `json:"biller"`
+	BillTo    party         `json:"bill_to"`
+	Reference string        `json:"reference,omitempty"`
+	Date      string        `json:"date"`
+	Paid      bool          `json:"paid"`
+	Items     []invoiceItem `json:"items"`
+	Total     string        `json:"total"`
 }
 
 // buildInvoice turns one transaction and its folded entry into the document. The biller is the
@@ -209,12 +211,13 @@ func renderInvoiceText(w io.Writer, doc invoiceDoc) error {
 }
 
 // invoiceCmd renders one transaction as a printable invoice or receipt, found by its fingerprint.
-// -format picks text (the default) or html; -out writes to a file.
+// -format picks text or html for a person, or json (the default off a terminal) for a script or an
+// agent; -out writes to a file.
 func receiptCmd(args []string) error {
 	fs := flag.NewFlagSet("invoice", flag.ExitOnError)
 	txID := fs.String("tx", "", "the transaction fingerprint to render")
 	as := fs.String("as", "receipt", "the document title: invoice or receipt")
-	format := fs.String("format", "text", "text or html")
+	format := fs.String("format", defaultFormat(os.Stdout, "text", "json"), "text, html, or json (default: text at a terminal, json off one)")
 	out := fs.String("out", "", "write to this file instead of stdout")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -222,8 +225,8 @@ func receiptCmd(args []string) error {
 	if *txID == "" {
 		return fmt.Errorf("-tx is required: which transaction should the document render?")
 	}
-	if *format != "text" && *format != "html" {
-		return fmt.Errorf("-format must be text or html")
+	if *format != "text" && *format != "html" && *format != "json" {
+		return fmt.Errorf("-format must be text, html, or json")
 	}
 
 	s, err := store.OpenReader(".")
@@ -247,10 +250,21 @@ func receiptCmd(args []string) error {
 		}
 		doc := buildInvoice(tx, entries[i], meta, *as)
 		render := renderInvoiceText
-		if *format == "html" {
+		switch *format {
+		case "html":
 			render = renderInvoiceHTML
+		case "json":
+			render = renderInvoiceJSON
 		}
 		return writeOut(*out, func(w io.Writer) error { return render(w, doc) })
 	}
 	return fmt.Errorf("invoice: no transaction %q in the books", *txID)
+}
+
+// renderInvoiceJSON is the document's machine-readable form: the same fields the template renders,
+// so an agent filing a document elsewhere reads structured fields rather than parsing text or HTML.
+func renderInvoiceJSON(w io.Writer, doc invoiceDoc) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(doc)
 }

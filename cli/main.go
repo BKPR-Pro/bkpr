@@ -196,11 +196,11 @@ var usageSections = []usageSection{
 		{"accounts list", "[-sort amount [-desc]]"},
 		{"balance set", "<account> <amount> [-as-of <YYYY-MM-DD>] [-actor <name>]"},
 		{"reconcile", ""},
-		{"receipt", "-tx <fingerprint> [-as invoice|receipt] [-format text|html] [-out <file>]"},
-		{"report", "[-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
-		{"report income", "[-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
-		{"report balance", "[-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
-		{"report gains", "[-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
+		{"receipt", "-tx <fingerprint> [-as invoice|receipt] [-format text|html|json] [-out <file>]"},
+		{"report", "[-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
+		{"report income", "[-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
+		{"report balance", "[-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
+		{"report gains", "[-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
 	}},
 	{"MORE", []usageLine{
 		{"completion", "<bash|zsh|fish>"},
@@ -214,6 +214,8 @@ const usageIntro = `Every command finds the nearest .bkpr directory by walking u
 Run "bkpr help <command>" for one command, "bkpr docs" for the full reference.
 The thing a command acts on is its first argument; flags assert facts about it.
 Wherever a fingerprint is taken, a unique prefix of it is enough.
+-format defaults to the human form (table or text) at a terminal, json off one (a pipe,
+a redirect, a script, an agent) -- no flag needed either way; name -format to override.
 `
 
 // dimOptionals wraps each [ ... ] group in the dim style, so the optional flags recede and the
@@ -508,8 +510,10 @@ var reference = []docGroup{
 `},
 		{[]string{"books"}, `  books [-format table|json|ledger] [-basis cash|accrual] [-since YYYY-MM-DD] [-account <re> ...]
         [-from YYYY-MM-DD] [-to YYYY-MM-DD] [-sort amount [-desc]] [-value <c> [-rate <C=n> ...]] [-stdout]
-      Fold the log into a table (default), machine-readable JSON, or regenerate
-      .bkpr/books.ledger (-stdout writes the ledger to standard output instead).
+      Fold the log into a table, machine-readable JSON, or regenerate .bkpr/books.ledger
+      (-stdout writes the ledger to standard output instead). -format defaults to table at a
+      terminal and json off one, so a person and a script reading the same command get the
+      form each wants with no flag; -format ledger is never a default, only ever named.
       -account narrows any of the three to the lines posting to a matching account, at any
       depth, the way ledger matches account names; repeat it to name several accounts, and a
       line posting to any of them is kept. -from and -to narrow by date, both ends inclusive,
@@ -649,25 +653,27 @@ var reference = []docGroup{
       every one after is a real check that no movement since was missed, duplicated, or mispaired. A
       nonzero delta is exactly that gap.
 `},
-		{[]string{"receipt"}, `  receipt -tx <fingerprint> [-as invoice|receipt] [-format text|html] [-out <file>]
+		{[]string{"receipt"}, `  receipt -tx <fingerprint> [-as invoice|receipt] [-format text|html|json] [-out <file>]
       Render one settled transaction as a printable document: the account's letterhead, the payee
       as the bill-to, the postings as line items, stamped PAID because every line came off a
       statement. It bills in the currency that was billed, so a USD contract paid in CAD reads as
       the USD owed. (This prints money that already moved; invoice raise is for money still owed.)
+      -format defaults to text at a terminal and json off one, the same structured fields a
+      script or an agent filing the document elsewhere would otherwise have to parse from text.
 `},
-		{[]string{"report"}, `  report [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
+		{[]string{"report"}, `  report [-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
       Fold the books into the company's full picture: an income statement over the period and a
       balance sheet as of its end, together. -basis reads the one log as cash or accrual, chosen
       at read time and stored nowhere. Within each section, a subsection that gathers more than
       one account -- the level below the section, "Expenses:Real Estate" under Expenses -- is
       subtotalled per commodity, so a reader sees what each grouping came to without adding the
-      lines by hand.
-  report income [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
+      lines by hand. -format defaults to text at a terminal and json off one.
+  report income [-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
       Just the income statement: what was earned and spent over the period, by account, with the
       net per commodity.
-  report balance [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
+  report balance [-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
       Just the balance sheet: assets held and liabilities owed as of -to (or today), and net worth.
-  report gains [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
+  report gains [-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
       Just the capital-gains schedule: a disposal per row -- date, shares, proceeds, cost base, and
       realized gain -- with the total, for a filing (Canada's Schedule 3, the T5008 world).
 `},

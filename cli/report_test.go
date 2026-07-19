@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -548,11 +549,14 @@ func seedRent(t *testing.T) {
 }
 
 // reportOut runs a report command to a temp file and returns what it wrote, so a dispatch test reads
-// the rendered text without touching stdout.
+// the rendered text without touching stdout. It pins -format text: these tests check which statement
+// a subcommand shows, not what format defaults to off a terminal
+// (TestReportDefaultsToJSONWhenStdoutIsNotATerminal covers that separately), and stdout is never a
+// terminal under `go test`.
 func reportOut(t *testing.T, args ...string) string {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "out.txt")
-	if err := reportCmd(append(args, "-out", out)); err != nil {
+	if err := reportCmd(append(args, "-format", "text", "-out", out)); err != nil {
 		t.Fatalf("reportCmd %v: %v", args, err)
 	}
 	got, err := os.ReadFile(out)
@@ -625,5 +629,27 @@ func TestReportUnknownSubcommandIsRefused(t *testing.T) {
 
 	if err := reportCmd([]string{"cashflow"}); err == nil {
 		t.Error("an unknown report subcommand should be refused, not silently run the default")
+	}
+}
+
+// Off a terminal, report defaults to json rather than the text a person at a keyboard wants -- the
+// same rule books follows, so the two commands cannot drift on what "no flag given" means.
+func TestReportDefaultsToJSONWhenStdoutIsNotATerminal(t *testing.T) {
+	bookHere(t)
+	seedTx(t, "tx1")
+
+	out, err := withPipedStdout(t, func() error { return reportCmd(nil) })
+	if err != nil {
+		t.Fatalf("reportCmd: %v", err)
+	}
+	var parsed struct {
+		Income  json.RawMessage `json:"income"`
+		Balance json.RawMessage `json:"balance"`
+	}
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("output was not JSON: %v\n%s", err, out)
+	}
+	if parsed.Income == nil || parsed.Balance == nil {
+		t.Errorf("parsed = %+v, want both income and balance in the default view", parsed)
 	}
 }

@@ -836,9 +836,9 @@ each section, a subsection that gathers more than one account (the level below t
 grouping came to without adding the lines by hand; a subsection of a single account is left alone. It
 is a fold, so it adds a view, not state.
 
-Both `receipt` and `report` render **text by default and `-format html`** for a self-contained page
-to open and print to PDF, with `-out` to write a file. The HTML uses the standard library's
-templates, so bkpr needs no PDF library and stays stdlib-only. These, and the ledger, are the outputs
+Both `receipt` and `report` render **text at a terminal, json off one, and `-format html`** for a
+self-contained page to open and print to PDF, with `-out` to write a file. The HTML uses the standard
+library's templates, so bkpr needs no PDF library and stays stdlib-only. These, and the ledger, are the outputs
 besides the log: a deliberate widening of "the artifact is the product." A new document follows the
 same shape (see [Extending bkpr](#extending-bkpr)), so it is the same convention, not a special case.
 

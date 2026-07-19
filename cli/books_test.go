@@ -14,6 +14,27 @@ import (
 	"github.com/dallasread/bkpr/lib/rules"
 )
 
+// Off a terminal -- a pipe, a redirect, an agent capturing output -- books defaults to json rather
+// than the table a person at a keyboard wants, with no flag needed either way.
+func TestBooksDefaultsToJSONWhenStdoutIsNotATerminal(t *testing.T) {
+	bookHere(t)
+	seedTx(t, "tx1")
+
+	out, err := withPipedStdout(t, func() error { return renderBooks(nil) })
+	if err != nil {
+		t.Fatalf("renderBooks: %v", err)
+	}
+	var parsed struct {
+		Lines []bookLine `json:"lines"`
+	}
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("output was not JSON: %v\n%s", err, out)
+	}
+	if len(parsed.Lines) != 1 {
+		t.Errorf("lines = %+v, want the one seeded transaction", parsed.Lines)
+	}
+}
+
 // booksLog holds the two kinds of line every reading contains: one a rule places (to a truncated
 // leaf, so the kind is known but not the detail) and one no rule knows at all.
 func booksLog(t *testing.T) *eventlog.Log {
