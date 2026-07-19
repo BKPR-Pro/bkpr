@@ -3,9 +3,9 @@ package books_test
 import (
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/books"
-	"github.com/dallasread/bookkeeper/lib/model"
-	"github.com/dallasread/bookkeeper/lib/rules"
+	"github.com/dallasread/bkpr/lib/books"
+	"github.com/dallasread/bkpr/lib/model"
+	"github.com/dallasread/bkpr/lib/rules"
 )
 
 func ruleAmt(match, category string, cents int64) rules.Rule {

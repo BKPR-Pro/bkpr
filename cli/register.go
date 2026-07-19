@@ -9,9 +9,9 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/dallasread/bookkeeper/lib/books"
-	"github.com/dallasread/bookkeeper/lib/model"
-	"github.com/dallasread/bookkeeper/lib/store"
+	"github.com/dallasread/bkpr/lib/books"
+	"github.com/dallasread/bkpr/lib/model"
+	"github.com/dallasread/bkpr/lib/store"
 )
 
 // registerCmd reads the books the way the bank prints a statement: every line in date order with

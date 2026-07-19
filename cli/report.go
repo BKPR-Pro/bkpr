@@ -12,10 +12,10 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/dallasread/bookkeeper/lib/books"
-	"github.com/dallasread/bookkeeper/lib/eventlog"
-	"github.com/dallasread/bookkeeper/lib/model"
-	"github.com/dallasread/bookkeeper/lib/store"
+	"github.com/dallasread/bkpr/lib/books"
+	"github.com/dallasread/bkpr/lib/eventlog"
+	"github.com/dallasread/bkpr/lib/model"
+	"github.com/dallasread/bkpr/lib/store"
 )
 
 // valuer restates amounts into a target commodity for a "report in <target>" lens (the -value flag),
@@ -770,7 +770,7 @@ func asOfLabel(asOf string) string {
 }
 
 // reportTemplate renders the same statements as a self-contained HTML page, print-friendly like the
-// invoice, so bookkeeper needs no PDF library.
+// invoice, so bkpr needs no PDF library.
 var reportTemplate = template.Must(template.New("report").Parse(`<!doctype html>
 <meta charset="utf-8">
 <title>Report</title>

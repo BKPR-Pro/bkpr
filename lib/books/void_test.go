@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/books"
+	"github.com/dallasread/bkpr/lib/books"
 )
 
 // A voided line leaves the books. It is how a bad import is undone in an append-only log: the

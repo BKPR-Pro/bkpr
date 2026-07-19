@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/model"
-	"github.com/dallasread/bookkeeper/lib/store"
+	"github.com/dallasread/bkpr/lib/model"
+	"github.com/dallasread/bkpr/lib/store"
 )
 
 // lastActorOf returns the actor on the most recent event of the given collection and action, since a

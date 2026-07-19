@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dallasread/bookkeeper/lib/books"
-	"github.com/dallasread/bookkeeper/lib/store"
+	"github.com/dallasread/bkpr/lib/books"
+	"github.com/dallasread/bkpr/lib/store"
 )
 
 // Shell completion is computed in Go and forwarded through a hidden `__complete` command, so the

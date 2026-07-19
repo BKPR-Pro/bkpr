@@ -12,8 +12,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/dallasread/bookkeeper/lib/eventlog"
-	"github.com/dallasread/bookkeeper/lib/model"
+	"github.com/dallasread/bkpr/lib/eventlog"
+	"github.com/dallasread/bkpr/lib/model"
 )
 
 const (

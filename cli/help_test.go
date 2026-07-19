@@ -37,8 +37,8 @@ func TestMastheadShowsWordmarkAndTagline(t *testing.T) {
 	if !strings.Contains(plain, wordmark) {
 		t.Error("the masthead should carry the ASCII wordmark")
 	}
-	if !strings.Contains(plain, "bookkeeper") {
-		t.Error("the masthead should show the bookkeeper tagline")
+	if !strings.Contains(plain, "bkpr") {
+		t.Error("the masthead should show the bkpr tagline")
 	}
 	if strings.Contains(plain, "\x1b") {
 		t.Error("a plain masthead must carry no ANSI")

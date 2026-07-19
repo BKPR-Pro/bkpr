@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/eventlog"
+	"github.com/dallasread/bkpr/lib/eventlog"
 )
 
 // The file is the book of record, so a fact survives the process that wrote it.

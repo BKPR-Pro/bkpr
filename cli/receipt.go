@@ -8,9 +8,9 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/dallasread/bookkeeper/lib/books"
-	"github.com/dallasread/bookkeeper/lib/model"
-	"github.com/dallasread/bookkeeper/lib/store"
+	"github.com/dallasread/bkpr/lib/books"
+	"github.com/dallasread/bkpr/lib/model"
+	"github.com/dallasread/bkpr/lib/store"
 )
 
 // party is one side of the document: a name and an address split into lines, so the template renders
@@ -55,7 +55,7 @@ func buildInvoice(tx model.Transaction, entry model.Entry, meta map[string]map[s
 		Biller:    partyFor(tx.Account, tx.Account, meta),
 		Reference: tx.ID,
 		Date:      tx.Date.Format("January 2, 2006"),
-		Paid:      true, // every line bookkeeper holds came off a statement, so it has cleared
+		Paid:      true, // every line bkpr holds came off a statement, so it has cleared
 	}
 
 	// The bill-to is the categorized account's own metadata (a customer's name and address) when it
@@ -173,7 +173,7 @@ var invoiceTemplate = template.Must(template.New("invoice").Parse(`<!doctype htm
 `))
 
 // renderInvoiceHTML writes the document as a self-contained HTML page: open it and print to PDF, the
-// way fastfinance does, so bookkeeper needs no PDF library and stays stdlib-only.
+// way fastfinance does, so bkpr needs no PDF library and stays stdlib-only.
 func renderInvoiceHTML(w io.Writer, doc invoiceDoc) error {
 	return invoiceTemplate.Execute(w, doc)
 }

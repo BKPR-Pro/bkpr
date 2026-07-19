@@ -3,8 +3,8 @@ package books_test
 import (
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/books"
-	"github.com/dallasread/bookkeeper/lib/eventlog"
+	"github.com/dallasread/bkpr/lib/books"
+	"github.com/dallasread/bkpr/lib/eventlog"
 )
 
 func reconcileOne(t *testing.T, log *eventlog.Log, account string) books.Reconciliation {

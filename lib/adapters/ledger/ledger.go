@@ -18,7 +18,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dallasread/bookkeeper/lib/model"
+	"github.com/dallasread/bkpr/lib/model"
 )
 
 // WriteAccounts renders the account directives an account's metadata describes, so a hand-kept
@@ -143,7 +143,7 @@ func writeEntry(w io.Writer, tx model.Transaction, e model.Entry) error {
 	// elided and its amount inferred. Nothing else can name it, and nothing else can unbalance it. A
 	// note the writer left on that source leg rides along after the account, read back as its comment.
 	// A routed entry sends the leg to a purpose sub-account instead: the child carries it here so an
-	// external ledger tool reads the same balance bookkeeper does, and a "registered:" tag names the
+	// external ledger tool reads the same balance bkpr does, and a "registered:" tag names the
 	// account the line was imported on, so a re-import restores the routing and the fingerprint rather
 	// than collapsing the charge onto the child.
 	_, err := fmt.Fprintf(w, "  %s%s\n", e.SourceAccount(tx), sourceLegNote(tx, e))

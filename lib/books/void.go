@@ -3,7 +3,7 @@ package books
 import (
 	"encoding/json"
 
-	"github.com/dallasread/bookkeeper/lib/eventlog"
+	"github.com/dallasread/bkpr/lib/eventlog"
 )
 
 // ActionVoided records that a recorded thing was annulled: a bad import thrown out, or an invoice

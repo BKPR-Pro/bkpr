@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bookkeeper/lib/books"
+	"github.com/dallasread/bkpr/lib/books"
 )
 
 func asOf(y int, m time.Month, d int) time.Time {

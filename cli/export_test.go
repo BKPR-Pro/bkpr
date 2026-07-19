@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bookkeeper/lib/adapters/rentapp"
-	"github.com/dallasread/bookkeeper/lib/books"
-	"github.com/dallasread/bookkeeper/lib/eventlog"
-	"github.com/dallasread/bookkeeper/lib/model"
-	"github.com/dallasread/bookkeeper/lib/rules"
+	"github.com/dallasread/bkpr/lib/adapters/rentapp"
+	"github.com/dallasread/bkpr/lib/books"
+	"github.com/dallasread/bkpr/lib/eventlog"
+	"github.com/dallasread/bkpr/lib/model"
+	"github.com/dallasread/bkpr/lib/rules"
 )
 
 // capture records what the mock rent app was asked to do, so a test can assert the export sent the

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/model"
+	"github.com/dallasread/bkpr/lib/model"
 )
 
 func mkAmt(units int64, comm string) model.Amount {

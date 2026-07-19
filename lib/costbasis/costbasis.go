@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/dallasread/bookkeeper/lib/model"
+	"github.com/dallasread/bkpr/lib/model"
 )
 
 // Policy is a cost-basis method: how a disposal's cost is drawn from what was acquired. The set is

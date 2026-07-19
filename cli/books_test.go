@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bookkeeper/lib/adapters/ledger"
-	"github.com/dallasread/bookkeeper/lib/books"
-	"github.com/dallasread/bookkeeper/lib/eventlog"
-	"github.com/dallasread/bookkeeper/lib/model"
-	"github.com/dallasread/bookkeeper/lib/rules"
+	"github.com/dallasread/bkpr/lib/adapters/ledger"
+	"github.com/dallasread/bkpr/lib/books"
+	"github.com/dallasread/bkpr/lib/eventlog"
+	"github.com/dallasread/bkpr/lib/model"
+	"github.com/dallasread/bkpr/lib/rules"
 )
 
 // booksLog holds the two kinds of line every reading contains: one a rule places (to a truncated

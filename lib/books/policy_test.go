@@ -3,9 +3,9 @@ package books_test
 import (
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/books"
-	"github.com/dallasread/bookkeeper/lib/costbasis"
-	"github.com/dallasread/bookkeeper/lib/eventlog"
+	"github.com/dallasread/bkpr/lib/books"
+	"github.com/dallasread/bkpr/lib/costbasis"
+	"github.com/dallasread/bkpr/lib/eventlog"
 )
 
 func policies(t *testing.T, log *eventlog.Log) books.PolicySet {

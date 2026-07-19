@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/adapters/source"
+	"github.com/dallasread/bkpr/lib/adapters/source"
 )
 
 func signedMapping() source.CSV {

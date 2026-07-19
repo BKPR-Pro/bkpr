@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/dallasread/bookkeeper/lib/eventlog"
+	"github.com/dallasread/bkpr/lib/eventlog"
 )
 
 const (
-	// CollectionConnector is keyed by a connector's name. A connector is a live system bookkeeper
+	// CollectionConnector is keyed by a connector's name. A connector is a live system bkpr
 	// reaches over the network, registered once and then used by name, unlike a file which is a
 	// one-time input supplied inline. It is bidirectional in principle: export writes to it today.
 	CollectionConnector = "connector"

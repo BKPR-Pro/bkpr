@@ -1,4 +1,4 @@
-# bookkeeper
+# bkpr
 
 Turns bank and card statements into a set of books.
 
@@ -15,13 +15,13 @@ when an agent runs it), so the log records the hand without the tool caring whos
 ## Install
 
 Each tagged release ships a prebuilt `bkpr` for macOS and Linux, so another machine
-runs bookkeeper without a Go toolchain. Download the binary for your system, mark it
+runs bkpr without a Go toolchain. Download the binary for your system, mark it
 executable, and put it on your `PATH`:
 
 ```sh
 # pick your os/arch: darwin-arm64, darwin-amd64, linux-arm64, linux-amd64
 os_arch="darwin-arm64"
-curl -fsSL -o bkpr "https://github.com/dallasread/bookkeeper/releases/latest/download/bkpr-${os_arch}"
+curl -fsSL -o bkpr "https://github.com/dallasread/bkpr/releases/latest/download/bkpr-${os_arch}"
 chmod +x bkpr
 sudo mv bkpr /usr/local/bin/     # anywhere on your PATH
 
@@ -117,7 +117,7 @@ account for the whole line, and nothing else can name the source account.
 
 Double-entry bookkeeping is the oldest event-sourced system in continuous use. A ledger file is
 already an append-only log of immutable, time-ordered facts, and `ledger bal` is already a fold
-over it. So bookkeeper is built the same way, and the vocabulary is borrowed rather than invented.
+over it. So bkpr is built the same way, and the vocabulary is borrowed rather than invented.
 
 The whole design follows from one rule:
 
@@ -291,11 +291,11 @@ The core understands only normalized transactions. An **adapter** brings lines i
 knows about the outside world, and CSV is the default transport because every bank exports it and
 it needs no credentials.
 
-The only output is the ledger file. Bookkeeper turns statements into a committed double-entry
+The only output is the ledger file. Bkpr turns statements into a committed double-entry
 ledger and stops there; the artifact is the product. It does not drive other systems, which keeps
 it standalone and keeps nothing about any particular app wired into the core.
 
-(The event carries a stable `Event.Key()`, so if bookkeeper ever did drive an external system, a
+(The event carries a stable `Event.Key()`, so if bkpr ever did drive an external system, a
 destination that must not act twice could send that key as an `Idempotency-Key` and a retry would
 rebuild the identical key from the identical stored event. That is what makes a retry safe when the
 response is the part that gets lost. It is designed for and not built.)
@@ -518,7 +518,7 @@ filtered.
 ### Cash and accrual are one log read two ways
 
 Cash-basis books record money when it moves; accrual-basis books record value when it is earned or
-incurred, before the cash follows. bookkeeper does not choose between them and does not store a mode.
+incurred, before the cash follows. bkpr does not choose between them and does not store a mode.
 The basis is a **read-time lens** over the one log, chosen with `-basis`:
 
 ```sh
@@ -527,7 +527,7 @@ bkpr books -basis accrual   # also books the invoices and bills that have not be
 ```
 
 Cash basis is what every example above already is: it ignores invoices and bills entirely, so it is
-exactly the books bookkeeper was born on. Accrual basis adds the value you have recognized but not yet
+exactly the books bkpr was born on. Accrual basis adds the value you have recognized but not yet
 settled — an invoice raised, a bill received — each as its own line.
 
 **Choosing the basis triggers no event.** `-basis` (and its optional `-since`) are read-time flags,
@@ -901,7 +901,7 @@ broken out by what it is for. Routing to an account that sits under nothing you 
 than refuses, since only a child of the reconciling parent rolls up to it.
 
 The split survives the artifact. `bkpr books -format ledger` renders the routed leg on the child, so
-`ledger -f books.ledger bal` reads the same balance bookkeeper does, and a `; registered:` note names
+`ledger -f books.ledger bal` reads the same balance bkpr does, and a `; registered:` note names
 the account the line was imported on, so an export/import round trip restores the routing rather than
 collapsing the charge back onto the parent.
 
@@ -916,7 +916,7 @@ bkpr books -format ledger -stdout   # to stdout, to pipe
 
 Every entry is **cleared** (`*`), because every line came off a bank statement and so has cleared
 the bank. Pending (`!`) means the bank has not reported a transaction yet, which is a real state
-and not one bookkeeper can produce from a statement. Nothing here borrows those flags to mean
+and not one bkpr can produce from a statement. Nothing here borrows those flags to mean
 anything about categorization.
 
 The output is a real ledger file, so the usual tools work:
@@ -1021,7 +1021,7 @@ to read the account: Go runs the per-institution script with the connector's det
 environment, and the script prints the lines as JSON, which Go normalizes and fingerprints like a
 CSV. The automation lives in Node so the Go binary stays stdlib-only. The credential is a saved
 browser **session**, never a stored password: the person signs in themselves the first time (and
-whenever it expires) in a headed browser, and bookkeeper keeps only the session that results, reused
+whenever it expires) in a headed browser, and bkpr keeps only the session that results, reused
 headless after. Sign-in is folded into `import` and self-heals — a live session imports silently; an
 expired one re-opens the browser when a person is present, or fails fast with a "sign in again" hint
 when one is not, so an agent is never left staring at a browser it cannot answer. `TokenEnv` keys the
@@ -1071,7 +1071,7 @@ the resolved sale, never recomputed, so the schedule and the books can never dis
 
 Both `receipt` and `report` render **text by default and `-format html`** for a self-contained page
 to open and print to PDF, with `-out` to write a file. The HTML uses the standard library's
-templates, so bookkeeper needs no PDF library and stays stdlib-only. These, and the ledger, are the
+templates, so bkpr needs no PDF library and stays stdlib-only. These, and the ledger, are the
 outputs besides the log: a deliberate widening of "the artifact is the product". A new document
 follows the same shape (see below), so it is the same convention, not a special case.
 
@@ -1093,7 +1093,7 @@ In order:
 Around the engine, the product is a **web layer** that wraps it, and it owns two things this tool
 deliberately does not: the **human surface**, so a person never sees a fingerprint (chat over the
 books, and the `report` and `receipt` views to read and print), and the **secret store** a live
-connection needs. bookkeeper's job is to stay a clean thing to drive and to keep secrets out of the
+connection needs. bkpr's job is to stay a clean thing to drive and to keep secrets out of the
 committed log: the web layer holds them and injects them at run time through the `TokenEnv` /
 `BK_IMPORT_*` contract. A bank is the softer case already handled — its credential is not a stored
 secret at all but a saved browser session, kept machine-local outside the book and re-earned by
@@ -1157,7 +1157,7 @@ txs, entries, _ := books.Ledger(s.Log)
 
 ## Building on it
 
-For an agent or a person writing code against bookkeeper, four conventions cover almost everything.
+For an agent or a person writing code against bkpr, four conventions cover almost everything.
 Follow the nearest existing example; each capability has exactly one.
 
 - **A new view (report, document).** Fold `books.Ledger(log)` into a plain view struct (a pure

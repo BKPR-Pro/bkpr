@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/dallasread/bookkeeper/lib/costbasis"
-	"github.com/dallasread/bookkeeper/lib/eventlog"
+	"github.com/dallasread/bkpr/lib/costbasis"
+	"github.com/dallasread/bkpr/lib/eventlog"
 )
 
 // CollectionPolicy is keyed by the account a cost-basis method applies to. The empty key is the

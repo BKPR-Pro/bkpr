@@ -12,7 +12,7 @@ import (
 // the secret. At sign-in the reference is handed to a resolver command that prints the secret, and
 // the value exists only in memory for the length of the run.
 //
-// The resolver command is what keeps this generic: bookkeeper knows nothing about 1Password. The
+// The resolver command is what keeps this generic: bkpr knows nothing about 1Password. The
 // default command happens to be `op read`, so a 1Password reference works out of the box, but naming
 // a different command plugs in macOS Keychain (`security find-generic-password -s {} -w`), pass, or
 // any CLI that prints a secret to stdout. `{}` in the command is replaced by the reference; a command

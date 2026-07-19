@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dallasread/bookkeeper/lib/model"
+	"github.com/dallasread/bkpr/lib/model"
 )
 
-// ReadLedger parses plain-text ledger — the form bookkeeper writes back, or a hand-kept file —
+// ReadLedger parses plain-text ledger — the form bkpr writes back, or a hand-kept file —
 // into statement lines. Each entry names the account it came from: its single amountless posting
 // when one leg was elided, or its last posting when every leg is priced (ledger's convention puts
 // the source account last). The line's amount is the negation of what the other postings account

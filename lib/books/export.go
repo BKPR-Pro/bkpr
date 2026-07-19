@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dallasread/bookkeeper/lib/eventlog"
+	"github.com/dallasread/bkpr/lib/eventlog"
 )
 
 // ActionExported records that a transaction was written out to a connector (e.g. the rent app

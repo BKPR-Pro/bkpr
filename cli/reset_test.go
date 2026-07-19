@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/store"
+	"github.com/dallasread/bkpr/lib/store"
 )
 
 // reset is the one command that destroys history, so without -confirm it must touch nothing.

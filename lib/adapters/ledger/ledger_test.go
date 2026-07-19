@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bookkeeper/lib/adapters/ledger"
-	"github.com/dallasread/bookkeeper/lib/adapters/source"
-	"github.com/dallasread/bookkeeper/lib/model"
+	"github.com/dallasread/bkpr/lib/adapters/ledger"
+	"github.com/dallasread/bkpr/lib/adapters/source"
+	"github.com/dallasread/bkpr/lib/model"
 )
 
 func on(day int) time.Time {
@@ -157,7 +157,7 @@ func TestNoRedundantMemoForACodedTitle(t *testing.T) {
 	}
 }
 
-// Every line bookkeeper writes came off a bank statement, so every line has cleared the bank.
+// Every line bkpr writes came off a bank statement, so every line has cleared the bank.
 // The pending flag means the bank has not reported a transaction yet, and nothing here is that.
 func TestEveryEntryIsCleared(t *testing.T) {
 	tx := chequing(12, -3999, "UNKNOWN MERCHANT 88")

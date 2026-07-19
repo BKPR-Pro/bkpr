@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bookkeeper/lib/eventlog"
-	"github.com/dallasread/bookkeeper/lib/model"
+	"github.com/dallasread/bkpr/lib/eventlog"
+	"github.com/dallasread/bkpr/lib/model"
 )
 
 // prefixLog holds lines whose fingerprints share fronts, the shapes prefix matching must tell

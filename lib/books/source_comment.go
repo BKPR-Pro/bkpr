@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dallasread/bookkeeper/lib/eventlog"
+	"github.com/dallasread/bkpr/lib/eventlog"
 )
 
 // ActionCommented records a free-text note on a transaction's own (elided, source) leg: the

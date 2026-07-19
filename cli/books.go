@@ -13,10 +13,10 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/dallasread/bookkeeper/lib/adapters/ledger"
-	"github.com/dallasread/bookkeeper/lib/books"
-	"github.com/dallasread/bookkeeper/lib/model"
-	"github.com/dallasread/bookkeeper/lib/store"
+	"github.com/dallasread/bkpr/lib/adapters/ledger"
+	"github.com/dallasread/bkpr/lib/books"
+	"github.com/dallasread/bkpr/lib/model"
+	"github.com/dallasread/bkpr/lib/store"
 )
 
 // accountsFlag collects repeated -account patterns, so one reading can name several accounts and
@@ -489,7 +489,7 @@ func writeSummaryComments(w io.Writer, sum bookSummary) error {
 }
 
 // writeLedger regenerates the artifact in place. The books are a fold, so the ledger is derived
-// output: bookkeeper owns the file and rewrites it whole, and its git diff is the readable account
+// output: bkpr owns the file and rewrites it whole, and its git diff is the readable account
 // of what changed.
 func writeLedger(s *store.Store, txs []model.Transaction, entries []model.Entry, sum bookSummary) error {
 	meta, err := books.AccountMeta(s.Log)

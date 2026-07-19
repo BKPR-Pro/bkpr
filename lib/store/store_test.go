@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/eventlog"
-	"github.com/dallasread/bookkeeper/lib/store"
+	"github.com/dallasread/bkpr/lib/eventlog"
+	"github.com/dallasread/bkpr/lib/store"
 )
 
 // The marker directory is .bkpr, the short name the CLI goes by.
@@ -69,7 +69,7 @@ func TestInitRefusesToOverwriteAnExistingBookOfRecord(t *testing.T) {
 	}
 }
 
-// Run bookkeeper from anywhere under your books, as you would run git.
+// Run bkpr from anywhere under your books, as you would run git.
 func TestFindWalksUpFromASubdirectory(t *testing.T) {
 	root := t.TempDir()
 	want, err := store.Init(root)

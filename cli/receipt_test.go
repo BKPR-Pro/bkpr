@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bookkeeper/lib/model"
+	"github.com/dallasread/bkpr/lib/model"
 )
 
 func on(day int) time.Time { return time.Date(2026, 3, day, 0, 0, 0, 0, time.UTC) }

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dallasread/bookkeeper/lib/eventlog"
-	"github.com/dallasread/bookkeeper/lib/model"
+	"github.com/dallasread/bkpr/lib/eventlog"
+	"github.com/dallasread/bkpr/lib/model"
 )
 
 // An accrual is value recognized before its cash: an invoice (money owed to you) or a bill (money

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/books"
+	"github.com/dallasread/bkpr/lib/books"
 )
 
 func rentConnector() books.Connector {

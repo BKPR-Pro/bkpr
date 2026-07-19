@@ -1,10 +1,10 @@
-// Command bookkeeper turns bank and card statements into a set of books.
+// Command bkpr turns bank and card statements into a set of books.
 //
 // A directory holds a set of books the way it holds a git repository, marked by `.bkpr` and
 // found by walking up. `import` records what a statement said, once per line, into the append-only
 // log inside it. `books` folds that log back out through a rule set and renders it. Where the
 // rules run out of knowledge the account path stops at Uncategorized rather than guessing, and the
-// agent operating the tool answers those through the same commands a person would. bookkeeper is
+// agent operating the tool answers those through the same commands a person would. bkpr is
 // built to be driven by an agent; it holds no model of its own.
 package main
 
@@ -24,12 +24,12 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/dallasread/bookkeeper/lib/adapters/source"
-	"github.com/dallasread/bookkeeper/lib/books"
-	"github.com/dallasread/bookkeeper/lib/eventlog"
-	"github.com/dallasread/bookkeeper/lib/model"
-	"github.com/dallasread/bookkeeper/lib/rules"
-	"github.com/dallasread/bookkeeper/lib/store"
+	"github.com/dallasread/bkpr/lib/adapters/source"
+	"github.com/dallasread/bkpr/lib/books"
+	"github.com/dallasread/bkpr/lib/eventlog"
+	"github.com/dallasread/bkpr/lib/model"
+	"github.com/dallasread/bkpr/lib/rules"
+	"github.com/dallasread/bkpr/lib/store"
 )
 
 func main() {
@@ -100,7 +100,7 @@ func main() {
 	}
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "bookkeeper: %v\n", err)
+		fmt.Fprintf(os.Stderr, "bkpr: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -254,7 +254,7 @@ func masthead(p palette) string {
 	for _, line := range strings.Split(wordmark, "\n") {
 		fmt.Fprintf(&b, "%s%s%s\n", p.heading, line, p.reset)
 	}
-	fmt.Fprintf(&b, "\n  %sbookkeeper · books that balance themselves%s\n", p.dim, p.reset)
+	fmt.Fprintf(&b, "\n  %sbkpr · books that balance themselves%s\n", p.dim, p.reset)
 	return b.String()
 }
 
@@ -301,7 +301,7 @@ type docGroup struct {
 	topics []docTopic
 }
 
-const docsPreamble = `bookkeeper (bkpr) - turn bank and card statements into a plain-text double-entry ledger.
+const docsPreamble = `bkpr (bkpr) - turn bank and card statements into a plain-text double-entry ledger.
 
 A set of books lives in a .bkpr directory, found by walking up from the current
 directory the way git finds .git. The log inside it (log.jsonl) is the book of record;
@@ -940,7 +940,7 @@ func sessionsDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "bookkeeper", "sessions"), nil
+	return filepath.Join(base, "bkpr", "sessions"), nil
 }
 
 // interactiveTerminal reports whether a person is at the keyboard, so a bank import whose session has

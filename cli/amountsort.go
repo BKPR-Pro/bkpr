@@ -4,7 +4,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/dallasread/bookkeeper/lib/model"
+	"github.com/dallasread/bkpr/lib/model"
 )
 
 // amountMagnitude is an amount's signed decimal value as a float, the key for sorting by amount. It

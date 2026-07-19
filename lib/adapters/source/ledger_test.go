@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/adapters/source"
-	"github.com/dallasread/bookkeeper/lib/model"
+	"github.com/dallasread/bkpr/lib/adapters/source"
+	"github.com/dallasread/bkpr/lib/model"
 )
 
 func readLedger(t *testing.T, text string) []model.Transaction {
@@ -402,7 +402,7 @@ func TestReadLedgerPrefersTheMemoNoteOverThePayee(t *testing.T) {
 }
 
 // A posting priced with "@@" — the very form the ledger writer emits for a cross-commodity leg —
-// reads back carrying its cost, so a book bookkeeper wrote re-imports instead of being refused.
+// reads back carrying its cost, so a book bkpr wrote re-imports instead of being refused.
 func TestReadLedgerReadsAnAtAtPricedPosting(t *testing.T) {
 	txs, entries, err := source.ReadLedger(strings.NewReader(`2026/03/01  * Broker
   Assets:Brokerage:AAPL  10 AAPL @@ 1000.00 USD

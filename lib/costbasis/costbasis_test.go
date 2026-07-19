@@ -3,8 +3,8 @@ package costbasis_test
 import (
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/costbasis"
-	"github.com/dallasread/bookkeeper/lib/model"
+	"github.com/dallasread/bkpr/lib/costbasis"
+	"github.com/dallasread/bkpr/lib/model"
 )
 
 func usd(cents int64) model.Amount { return model.Amount{Units: cents, Scale: 2, Commodity: "USD"} }

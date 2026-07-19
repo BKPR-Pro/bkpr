@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bookkeeper/lib/model"
-	"github.com/dallasread/bookkeeper/lib/rules"
+	"github.com/dallasread/bkpr/lib/model"
+	"github.com/dallasread/bkpr/lib/rules"
 )
 
 func tx(description string) model.Transaction {

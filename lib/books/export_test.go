@@ -3,7 +3,7 @@ package books_test
 import (
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/books"
+	"github.com/dallasread/bkpr/lib/books"
 )
 
 // RecordExport marks that a transaction was written to a connector, and Exported folds those back,

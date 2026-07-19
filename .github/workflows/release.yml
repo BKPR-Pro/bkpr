@@ -2,7 +2,7 @@ name: release
 
 # Cutting a release is pushing a tag. The tag names the version; this workflow
 # cross-compiles bkpr for every supported OS/arch and attaches the binaries to the
-# GitHub Release so another machine can run bookkeeper without a Go toolchain.
+# GitHub Release so another machine can run bkpr without a Go toolchain.
 on:
   push:
     tags:
@@ -27,7 +27,7 @@ jobs:
         run: |
           mkdir -p dist
           # One static, dependency-free binary per target. The tag is stamped in
-          # so `bkpr version` reports the release rather than (devel). bookkeeper is
+          # so `bkpr version` reports the release rather than (devel). bkpr is
           # Unix-only (it relies on flock-based log locking and ioctl isatty), so
           # the matrix is macOS and Linux on both architectures.
           for target in \

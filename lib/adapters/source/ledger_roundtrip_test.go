@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bookkeeper/lib/adapters/ledger"
-	"github.com/dallasread/bookkeeper/lib/adapters/source"
-	"github.com/dallasread/bookkeeper/lib/model"
+	"github.com/dallasread/bkpr/lib/adapters/ledger"
+	"github.com/dallasread/bkpr/lib/adapters/source"
+	"github.com/dallasread/bkpr/lib/model"
 )
 
 // A comment left on one leg of a split must survive the writer and the reader: it renders inline,
@@ -56,7 +56,7 @@ func TestLedgerPostingCommentRoundTrips(t *testing.T) {
 	}
 }
 
-// A note on the source (elided) leg -- the one bookkeeper infers and does not price -- must survive
+// A note on the source (elided) leg -- the one bkpr infers and does not price -- must survive
 // the writer and reader like a note on any other leg. It renders after the account on the elided
 // line, reads back onto the transaction, and re-renders byte-identically. Hand-kept books leave such
 // notes on the account the movement came from ("1000 CAD", "Cash on hand"), and dropping them lost
@@ -104,7 +104,7 @@ func TestLedgerSourcePostingCommentRoundTrips(t *testing.T) {
 
 // A routed entry -- one whose card leg was sent to a purpose sub-account off the account it was
 // imported on -- must survive the round trip whole. The elided leg renders on the child, so an
-// external ledger tool reads the same balance bookkeeper does; a "registered:" tag names the account
+// external ledger tool reads the same balance bkpr does; a "registered:" tag names the account
 // the line was imported on, so the reader restores both the routing (Entry.Source = the child) and
 // the registered account the line's fingerprint keys on (tx.Account = the parent), rather than
 // collapsing the charge onto the child and drifting its fingerprint.

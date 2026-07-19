@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/dallasread/bookkeeper/lib/books"
+	"github.com/dallasread/bkpr/lib/books"
 )
 
 func conn(name, kind, tokenEnv string) books.Connector {

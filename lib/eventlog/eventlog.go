@@ -1,6 +1,6 @@
 // Package eventlog is the book of record: an append-only log of immutable, past-tense facts.
 //
-// Everything else in bookkeeper is a fold over it. The log holds only what cannot be recomputed:
+// Everything else in bkpr is a fold over it. The log holds only what cannot be recomputed:
 // the lines a bank reported, and the answers asserted where the rules ran out. Rules are
 // deterministic data kept in git, and a categorization is a pure function of a transaction and
 // the rules, so neither is written here. That is what makes the books regenerable, and a diff in

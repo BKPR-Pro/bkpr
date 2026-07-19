@@ -44,7 +44,7 @@ stubbed direction.
   description, raw) already lines up with FDX's transaction shape. Do not build against any Canadian
   "official" schema until the Minister's order designates one.
 - **The credential is a saved session, not a stored password.** No bank login is ever stored. The
-  person signs in themselves, once, in a headed browser (password and 2FA included); bookkeeper keeps
+  person signs in themselves, once, in a headed browser (password and 2FA included); bkpr keeps
   only the resulting browser session (Playwright `storageState`) and reuses it headless afterward. A
   session expires, which is the whole reason to prefer it to a password. `Connector.TokenEnv` is no
   longer an env var the person sets — it is the *key* under which that session is stored, so several
