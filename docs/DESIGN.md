@@ -344,9 +344,9 @@ deposits failed while the rest stand. Without `-confirm` it is a dry run:
 
 ```sh
 export BK_RENT_TOKEN=...   # the rent app's bearer token
-bkpr connectors register rent -kind rentapp -url https://rent.stcroixproperties.ca \
+bkpr connectors register rent -kind rentapp -url https://rent.example.com \
   -token-env BK_RENT_TOKEN -account "Assets:Bank:Chequing" -currency CAD
-bkpr rules set "hyungjin" -category "Income:Real Estate:Rent:22 Lisgar Street" \
+bkpr rules set "e-transfer from j smith" -category "Income:Real Estate:Rent:123 Example Street" \
   -meta rentapp.lease=31
 bkpr export rent            # dry run: what it would record
 bkpr export rent -confirm   # records each rent deposit against its lease
@@ -493,8 +493,8 @@ priced at the CAD that actually arrived, so it nets to zero rather than being le
 currencies:
 
 ```text
-2026/04/06  * DNSimple
-  Assets:Receivable:DNSimple  -9000.00 USD @@ 12495.25 CAD
+2026/04/06  * Globex
+  Assets:Receivable:Globex  -9000.00 USD @@ 12495.25 CAD
   Assets:Consulting:Chequing
 ```
 
@@ -661,7 +661,7 @@ from a payment out to the world.
 ### Splitting one card by purpose
 
 One physical card can be split by purpose in the books: a single PC Mastercard whose debt is filed by
-property and business line (`9 Schoodic`, `128 Milltown`, `Consulting`). But a connector reconciles one
+property and business line (`123 Example Street`, `45 Sample Avenue`, `Consulting`). But a connector reconciles one
 account to one bank balance, and a rule that only names the category assigns the offset (the expense)
 while the **card leg** stays on the single account the connector registered on. So every charge lumps
 onto one card account, and the purpose split is lost.
@@ -670,7 +670,7 @@ onto one card account, and the purpose split is lost.
 that names the category:
 
 ```sh
-bkpr rules set "kent" -category "Expenses:Real Estate:Materials:9 Schoodic" -source "Liabilities:PC Mastercard:9 Schoodic"
+bkpr rules set "acme hardware" -category "Expenses:Real Estate:Materials:123 Example Street" -source "Liabilities:PC Mastercard:123 Example Street"
 ```
 
 Register the connector on the **parent** `Liabilities:PC Mastercard`, add one rule per purpose, and each
