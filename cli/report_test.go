@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +11,7 @@ import (
 	"github.com/dallasread/bkpr/lib/books"
 	"github.com/dallasread/bkpr/lib/eventlog"
 	"github.com/dallasread/bkpr/lib/model"
+	"github.com/dallasread/bkpr/lib/store"
 )
 
 func cad2(cents int64) model.Amount { return model.Amount{Units: cents, Scale: 2, Commodity: "CAD"} }
@@ -517,5 +520,110 @@ func TestReportFiltersByDate(t *testing.T) {
 
 	if len(stmt.Net) != 1 || stmt.Net[0].String() != "1000.00 CAD" {
 		t.Errorf("net = %+v, want only the in-range line", stmt.Net)
+	}
+}
+
+// seedRent books one categorized rent deposit: money into Chequing, income on the other side. It
+// gives every report subcommand something to show — the income statement its earned line, the
+// balance sheet the cash it landed as.
+func seedRent(t *testing.T) {
+	t.Helper()
+	s, err := store.Open(".")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	_, err = books.Import(s.Log, "statement:test", []model.Transaction{{
+		ID: "rent1", Account: "Assets:Bank:Chequing", Date: on(1),
+		Amount: cad2(160000), Description: "RENT",
+	}})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if err := books.Categorize(s.Log, "human", "", "rent1", "", "", "", []model.Posting{
+		post("Income:Rent", cad2(-160000)),
+	}); err != nil {
+		t.Fatalf("Categorize: %v", err)
+	}
+}
+
+// reportOut runs a report command to a temp file and returns what it wrote, so a dispatch test reads
+// the rendered text without touching stdout.
+func reportOut(t *testing.T, args ...string) string {
+	t.Helper()
+	out := filepath.Join(t.TempDir(), "out.txt")
+	if err := reportCmd(append(args, "-out", out)); err != nil {
+		t.Fatalf("reportCmd %v: %v", args, err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	return string(got)
+}
+
+// report income shows only the income statement — the whole point of splitting report into one
+// verb per statement rather than switching on a flag.
+func TestReportIncomeShowsOnlyTheIncomeStatement(t *testing.T) {
+	bookHere(t)
+	seedRent(t)
+
+	got := reportOut(t, "income")
+	if !strings.Contains(got, "INCOME STATEMENT") {
+		t.Errorf("report income = %q, want the income statement", got)
+	}
+	if strings.Contains(got, "BALANCE SHEET") || strings.Contains(got, "CAPITAL GAINS") {
+		t.Errorf("report income = %q, want only the income statement", got)
+	}
+}
+
+func TestReportBalanceShowsOnlyTheBalanceSheet(t *testing.T) {
+	bookHere(t)
+	seedRent(t)
+
+	got := reportOut(t, "balance")
+	if !strings.Contains(got, "BALANCE SHEET") {
+		t.Errorf("report balance = %q, want the balance sheet", got)
+	}
+	if strings.Contains(got, "INCOME STATEMENT") || strings.Contains(got, "CAPITAL GAINS") {
+		t.Errorf("report balance = %q, want only the balance sheet", got)
+	}
+}
+
+func TestReportGainsShowsOnlyTheGainsSchedule(t *testing.T) {
+	bookHere(t)
+	seedRent(t)
+
+	got := reportOut(t, "gains")
+	if !strings.Contains(got, "CAPITAL GAINS") {
+		t.Errorf("report gains = %q, want the gains schedule", got)
+	}
+	if strings.Contains(got, "INCOME STATEMENT") || strings.Contains(got, "BALANCE SHEET") {
+		t.Errorf("report gains = %q, want only the gains schedule", got)
+	}
+}
+
+// With no subcommand, report keeps today's combined view: the income statement and the balance
+// sheet together, the "full picture" the README describes. Splitting the three statements into
+// verbs should not cost this convenience.
+func TestReportWithNoSubcommandShowsIncomeAndBalanceTogether(t *testing.T) {
+	bookHere(t)
+	seedRent(t)
+
+	got := reportOut(t)
+	if !strings.Contains(got, "INCOME STATEMENT") || !strings.Contains(got, "BALANCE SHEET") {
+		t.Errorf("bare report = %q, want both statements", got)
+	}
+	if strings.Contains(got, "CAPITAL GAINS") {
+		t.Errorf("bare report = %q, want no gains schedule unasked", got)
+	}
+}
+
+func TestReportUnknownSubcommandIsRefused(t *testing.T) {
+	bookHere(t)
+	seedRent(t)
+
+	if err := reportCmd([]string{"cashflow"}); err == nil {
+		t.Error("an unknown report subcommand should be refused, not silently run the default")
 	}
 }

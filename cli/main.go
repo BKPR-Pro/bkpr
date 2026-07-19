@@ -197,7 +197,10 @@ var usageSections = []usageSection{
 		{"balance set", "<account> <amount> [-as-of <YYYY-MM-DD>] [-actor <name>]"},
 		{"reconcile", ""},
 		{"receipt", "-tx <fingerprint> [-as invoice|receipt] [-format text|html] [-out <file>]"},
-		{"report", "[-income | -balance | -gains] [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
+		{"report", "[-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
+		{"report income", "[-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
+		{"report balance", "[-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
+		{"report gains", "[-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
 	}},
 	{"MORE", []usageLine{
 		{"completion", "<bash|zsh|fish>"},
@@ -652,13 +655,21 @@ var reference = []docGroup{
       statement. It bills in the currency that was billed, so a USD contract paid in CAD reads as
       the USD owed. (This prints money that already moved; invoice raise is for money still owed.)
 `},
-		{[]string{"report"}, `  report [-income | -balance | -gains] [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
-      Fold the books into the company's full picture: an income statement over a period, a
-      balance sheet as of its end, and the capital-gains schedule a filing wants. Each flag
-      narrows to one statement; -basis reads the one log as cash or accrual, chosen at read time
-      and stored nowhere. Within each section, a subsection that gathers more than one account --
-      the level below the section, "Expenses:Real Estate" under Expenses -- is subtotalled per
-      commodity, so a reader sees what each grouping came to without adding the lines by hand.
+		{[]string{"report"}, `  report [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
+      Fold the books into the company's full picture: an income statement over the period and a
+      balance sheet as of its end, together. -basis reads the one log as cash or accrual, chosen
+      at read time and stored nowhere. Within each section, a subsection that gathers more than
+      one account -- the level below the section, "Expenses:Real Estate" under Expenses -- is
+      subtotalled per commodity, so a reader sees what each grouping came to without adding the
+      lines by hand.
+  report income [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
+      Just the income statement: what was earned and spent over the period, by account, with the
+      net per commodity.
+  report balance [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
+      Just the balance sheet: assets held and liabilities owed as of -to (or today), and net worth.
+  report gains [-basis cash|accrual] [-format text|html] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
+      Just the capital-gains schedule: a disposal per row -- date, shares, proceeds, cost base, and
+      realized gain -- with the total, for a filing (Canada's Schedule 3, the T5008 world).
 `},
 	}},
 }

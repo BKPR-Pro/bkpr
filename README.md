@@ -548,7 +548,7 @@ read-time lens that restates the report in one commodity, using only the prices 
 carries:
 
 ```sh
-bkpr report -income -value CAD   # value USD income and holdings in CAD
+bkpr report income -value CAD   # value USD income and holdings in CAD
 ```
 
 It never invents a rate. A USD income line that recorded its own price, `-9000.00 USD @@ 12157.12
@@ -558,7 +558,7 @@ was billed and deposited in USD, is left in its own currency and named in a warn
 total is understood rather than mistaken for a gap. To value that residual, pass the rate yourself:
 
 ```sh
-bkpr report -income -value CAD -rate USD=1.35   # one USD is worth 1.35 CAD for anything unpriced
+bkpr report income -value CAD -rate USD=1.35   # one USD is worth 1.35 CAD for anything unpriced
 ```
 
 Like the basis, `-value` and `-rate` are read-time flags that trigger no event: the recorded `@@`
@@ -1056,15 +1056,16 @@ moved; the accrual `invoice raise` above is the invoice for money still owed.)
 held, liabilities owed, and net worth). A P&L is flows over a period, so income and expenses live
 there; a balance sheet is a position on a date, so that is where liabilities sit. The balance sheet
 counts the source-account posting the entries elide, since that is where cash and debt actually
-accumulate. `-income` or `-balance` shows one; `-account` narrows by a substring of the path, so "123
-Main" reaches a property's rent and its repairs at once; `-from`/`-to` bound the period. Totals are
-per commodity, because a USD fee and CAD rent, or cash and shares, do not sum without a price. Within
-each section, a subsection that gathers more than one account — the level below the section, so
+accumulate. `report income` or `report balance` shows just one — a subcommand rather than a mode
+flag, so each does one thing; `-account` narrows by a substring of the path, so "123 Main" reaches a
+property's rent and its repairs at once; `-from`/`-to` bound the period. Totals are per commodity,
+because a USD fee and CAD rent, or cash and shares, do not sum without a price. Within each section,
+a subsection that gathers more than one account — the level below the section, so
 `Expenses:Real Estate` under Expenses — carries a subtotal per commodity, so a reader sees what each
 grouping came to without adding the lines by hand; a subsection of a single account is left alone. It
 is a fold, so it adds a view, not state.
 
-`report -gains` is the tax-time view off the same cost-basis fold: a disposal per row — date, shares,
+`report gains` is the tax-time view off the same cost-basis fold: a disposal per row — date, shares,
 proceeds, cost base, and realized gain (a loss is negative) — with the total gain, for a year bounded
 by `-from`/`-to` (Canada's Schedule 3, the T5008 world). The proceeds and base are read straight off
 the resolved sale, never recomputed, so the schedule and the books can never disagree.
