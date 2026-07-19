@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -140,5 +141,28 @@ func TestRenderInvoiceTextCarriesTheFields(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("text missing %q", want)
 		}
+	}
+}
+
+// Off a terminal, receipt defaults to json rather than the text a person printing a document wants.
+func TestReceiptDefaultsToJSONWhenStdoutIsNotATerminal(t *testing.T) {
+	bookHere(t)
+	seedTx(t, "tx1")
+	if err := categorize([]string{"tx1", "-category", "Income:Rent"}); err != nil {
+		t.Fatalf("categorize: %v", err)
+	}
+
+	out, err := withPipedStdout(t, func() error { return receiptCmd([]string{"-tx", "tx1"}) })
+	if err != nil {
+		t.Fatalf("receiptCmd: %v", err)
+	}
+	var parsed struct {
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("output was not JSON: %v\n%s", err, out)
+	}
+	if parsed.Title == "" {
+		t.Errorf("parsed = %+v, want a title", parsed)
 	}
 }

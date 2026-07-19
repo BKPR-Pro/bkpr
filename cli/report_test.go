@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -517,5 +518,27 @@ func TestReportFiltersByDate(t *testing.T) {
 
 	if len(stmt.Net) != 1 || stmt.Net[0].String() != "1000.00 CAD" {
 		t.Errorf("net = %+v, want only the in-range line", stmt.Net)
+	}
+}
+
+// Off a terminal, report defaults to json rather than the text a person at a keyboard wants -- the
+// same rule books follows, so the two commands cannot drift on what "no flag given" means.
+func TestReportDefaultsToJSONWhenStdoutIsNotATerminal(t *testing.T) {
+	bookHere(t)
+	seedTx(t, "tx1")
+
+	out, err := withPipedStdout(t, func() error { return reportCmd(nil) })
+	if err != nil {
+		t.Fatalf("reportCmd: %v", err)
+	}
+	var parsed struct {
+		Income  json.RawMessage `json:"income"`
+		Balance json.RawMessage `json:"balance"`
+	}
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("output was not JSON: %v\n%s", err, out)
+	}
+	if parsed.Income == nil || parsed.Balance == nil {
+		t.Errorf("parsed = %+v, want both income and balance in the default view", parsed)
 	}
 }

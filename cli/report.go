@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
@@ -525,8 +526,8 @@ type reportView struct {
 
 // reportCmd renders the full picture of the books: an income statement over the period and a balance
 // sheet as of its end. -income, -balance, or -gains narrows to one; -account narrows to a property,
-// client, or symbol; -basis reads it on cash (the default) or accrual; -format picks text (the
-// default) or html; -out writes to a file.
+// client, or symbol; -basis reads it on cash (the default) or accrual; -format picks text or html for
+// a person, or json (the default off a terminal) for a script or an agent; -out writes to a file.
 func reportCmd(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
 	account := fs.String("account", "", "narrow to accounts whose path contains this text, e.g. a property, client, or symbol")
@@ -535,7 +536,7 @@ func reportCmd(args []string) error {
 	incomeOnly := fs.Bool("income", false, "show only the income statement")
 	balanceOnly := fs.Bool("balance", false, "show only the balance sheet")
 	gainsOnly := fs.Bool("gains", false, "show only the capital-gains schedule")
-	format := fs.String("format", "text", "text or html")
+	format := fs.String("format", defaultFormat(os.Stdout, "text", "json"), "text, html, or json (default: text at a terminal, json off one)")
 	basis := fs.String("basis", "cash", "cash or accrual: accrual recognizes invoices and bills when earned, before their cash")
 	value := fs.String("value", "", "value foreign income and holdings in this commodity, e.g. CAD, using the @@ prices in the log")
 	rate := fs.String("rate", "", "per-unit rates for amounts with no recorded price under -value, e.g. USD=1.35 (comma-separated)")
@@ -559,8 +560,8 @@ func reportCmd(args []string) error {
 	if only > 1 {
 		return fmt.Errorf("give one of -income, -balance, or -gains")
 	}
-	if *format != "text" && *format != "html" {
-		return fmt.Errorf("-format must be text or html")
+	if *format != "text" && *format != "html" && *format != "json" {
+		return fmt.Errorf("-format must be text, html, or json")
 	}
 	from, err := parseDay(*fromStr)
 	if err != nil {
@@ -601,10 +602,109 @@ func reportCmd(args []string) error {
 	warnUnvalued(val)
 
 	render := renderReportText
-	if *format == "html" {
+	switch *format {
+	case "html":
 		render = renderReportHTML
+	case "json":
+		render = renderReportJSON
 	}
 	return writeOut(*out, func(w io.Writer) error { return render(w, view) })
+}
+
+// amountRow is one account's total, its amount rendered as the string every other json format in
+// this tool uses (e.g. "1600.00 CAD"), so a machine reader never has to reconstruct an amount from a
+// units/scale/commodity triple.
+type amountRow struct {
+	Account string `json:"account"`
+	Amount  string `json:"amount"`
+}
+
+func jsonRows(rows []reportRow) []amountRow {
+	out := make([]amountRow, len(rows))
+	for i, r := range rows {
+		out[i] = amountRow{Account: r.Account, Amount: r.Amount.String()}
+	}
+	return out
+}
+
+func jsonAmounts(as []model.Amount) []string {
+	out := make([]string, len(as))
+	for i, a := range as {
+		out[i] = a.String()
+	}
+	return out
+}
+
+type incomeStatementJSON struct {
+	From     string      `json:"from,omitempty"`
+	To       string      `json:"to,omitempty"`
+	Income   []amountRow `json:"income"`
+	Expenses []amountRow `json:"expenses"`
+	Net      []string    `json:"net"`
+}
+
+type balanceSheetJSON struct {
+	AsOf        string      `json:"as_of,omitempty"`
+	Assets      []amountRow `json:"assets"`
+	Liabilities []amountRow `json:"liabilities"`
+	Equity      []amountRow `json:"equity"`
+	Net         []string    `json:"net"`
+}
+
+type gainRowJSON struct {
+	Date     string `json:"date"`
+	Symbol   string `json:"symbol"`
+	Quantity string `json:"quantity"`
+	Proceeds string `json:"proceeds"`
+	Base     string `json:"base"`
+	Gain     string `json:"gain"`
+}
+
+type gainsScheduleJSON struct {
+	From  string        `json:"from,omitempty"`
+	To    string        `json:"to,omitempty"`
+	Rows  []gainRowJSON `json:"rows"`
+	Total []string      `json:"total"`
+}
+
+// renderReportJSON is report's machine-readable form, the same role -format json plays on books: a
+// statement is present only when the command built it, so an agent parsing the default view sees
+// both income and balance, and report gains sees only gains.
+func renderReportJSON(w io.Writer, v reportView) error {
+	var out struct {
+		Income  *incomeStatementJSON `json:"income,omitempty"`
+		Balance *balanceSheetJSON    `json:"balance,omitempty"`
+		Gains   *gainsScheduleJSON   `json:"gains,omitempty"`
+	}
+	if v.Income != nil {
+		out.Income = &incomeStatementJSON{
+			From: v.Income.From, To: v.Income.To,
+			Income: jsonRows(v.Income.Income), Expenses: jsonRows(v.Income.Expenses),
+			Net: jsonAmounts(v.Income.Net),
+		}
+	}
+	if v.Balance != nil {
+		out.Balance = &balanceSheetJSON{
+			AsOf:        v.Balance.AsOf,
+			Assets:      jsonRows(v.Balance.Assets),
+			Liabilities: jsonRows(v.Balance.Liabilities),
+			Equity:      jsonRows(v.Balance.Equity),
+			Net:         jsonAmounts(v.Balance.Net),
+		}
+	}
+	if v.Gains != nil {
+		rows := make([]gainRowJSON, len(v.Gains.Rows))
+		for i, r := range v.Gains.Rows {
+			rows[i] = gainRowJSON{
+				Date: r.Date, Symbol: r.Symbol, Quantity: r.Quantity.String(),
+				Proceeds: r.Proceeds.String(), Base: r.Base.String(), Gain: r.Gain.String(),
+			}
+		}
+		out.Gains = &gainsScheduleJSON{From: v.Gains.From, To: v.Gains.To, Rows: rows, Total: jsonAmounts(v.Gains.Total)}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
 
 // warnUnvalued tells the reader, on stderr, which commodities the lens could not value and so left

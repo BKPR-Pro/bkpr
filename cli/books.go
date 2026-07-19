@@ -37,7 +37,7 @@ func (a *accountsFlag) Set(s string) error {
 func renderBooks(args []string) error {
 	fs := flag.NewFlagSet("books", flag.ExitOnError)
 	var accounts accountsFlag
-	format := fs.String("format", "table", "output format: table, json, or ledger")
+	format := fs.String("format", defaultFormat(os.Stdout, "table", "json"), "output format: table, json, or ledger (default: table at a terminal, json off one)")
 	basis := fs.String("basis", "cash", "accounting basis: cash or accrual")
 	since := fs.String("since", "", "on -basis accrual, book only invoices/bills dated on or after this (YYYY-MM-DD)")
 	fs.Var(&accounts, "account", "show only lines posting to an account matching this pattern; repeatable, any match keeps the line")
