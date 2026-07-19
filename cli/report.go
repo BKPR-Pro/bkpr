@@ -516,95 +516,153 @@ func reportEntries(log *eventlog.Log, accrual bool) ([]model.Transaction, []mode
 	return books.LedgerBasis(log, basis)
 }
 
-// reportView is what a render is handed: a statement is nil when a flag narrowed it out.
+// reportView is what a render is handed: a statement is nil when the command did not build it.
 type reportView struct {
 	Income  *incomeStatement
 	Balance *balanceSheet
 	Gains   *gainsSchedule
 }
 
-// reportCmd renders the full picture of the books: an income statement over the period and a balance
-// sheet as of its end. -income, -balance, or -gains narrows to one; -account narrows to a property,
-// client, or symbol; -basis reads it on cash (the default) or accrual; -format picks text (the
-// default) or html; -out writes to a file.
+// reportCmd dispatches to one statement (report income|balance|gains) or, with no subcommand, the
+// combined income statement and balance sheet the README calls the company's "full picture".
+// Each is its own command rather than a mode flag, so `report income` does exactly one thing.
 func reportCmd(args []string) error {
-	fs := flag.NewFlagSet("report", flag.ExitOnError)
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		switch args[0] {
+		case "income":
+			return reportIncomeCmd(args[1:])
+		case "balance":
+			return reportBalanceCmd(args[1:])
+		case "gains":
+			return reportGainsCmd(args[1:])
+		default:
+			return fmt.Errorf("unknown report subcommand %q; income, balance, or gains", args[0])
+		}
+	}
+	return reportDefaultCmd(args)
+}
+
+// reportFlags is the shared surface every report command reads: what to narrow to (-account,
+// -from, -to), how to read the log (-basis), how to render it (-format, -out), and the lens to
+// value it through (-value, -rate).
+type reportFlags struct {
+	account  string
+	from, to time.Time
+	accrual  bool
+	format   string
+	val      *valuer
+	out      string
+}
+
+// parseReportFlags parses and validates the flags common to report, report income, report balance,
+// and report gains, so the four commands cannot drift out of sync on what a shared flag means.
+func parseReportFlags(name string, args []string) (reportFlags, error) {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
 	account := fs.String("account", "", "narrow to accounts whose path contains this text, e.g. a property, client, or symbol")
 	fromStr := fs.String("from", "", "start date (inclusive), YYYY-MM-DD")
 	toStr := fs.String("to", "", "end date (inclusive), YYYY-MM-DD")
-	incomeOnly := fs.Bool("income", false, "show only the income statement")
-	balanceOnly := fs.Bool("balance", false, "show only the balance sheet")
-	gainsOnly := fs.Bool("gains", false, "show only the capital-gains schedule")
 	format := fs.String("format", "text", "text or html")
 	basis := fs.String("basis", "cash", "cash or accrual: accrual recognizes invoices and bills when earned, before their cash")
 	value := fs.String("value", "", "value foreign income and holdings in this commodity, e.g. CAD, using the @@ prices in the log")
 	rate := fs.String("rate", "", "per-unit rates for amounts with no recorded price under -value, e.g. USD=1.35 (comma-separated)")
 	out := fs.String("out", "", "write to this file instead of stdout")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return reportFlags{}, err
 	}
 	if *basis != "cash" && *basis != "accrual" {
-		return fmt.Errorf("-basis must be cash or accrual")
+		return reportFlags{}, fmt.Errorf("-basis must be cash or accrual")
+	}
+	if *format != "text" && *format != "html" {
+		return reportFlags{}, fmt.Errorf("-format must be text or html")
 	}
 	rates, err := parseRates(*rate, *value)
 	if err != nil {
-		return err
-	}
-	only := 0
-	for _, b := range []bool{*incomeOnly, *balanceOnly, *gainsOnly} {
-		if b {
-			only++
-		}
-	}
-	if only > 1 {
-		return fmt.Errorf("give one of -income, -balance, or -gains")
-	}
-	if *format != "text" && *format != "html" {
-		return fmt.Errorf("-format must be text or html")
+		return reportFlags{}, err
 	}
 	from, err := parseDay(*fromStr)
 	if err != nil {
-		return fmt.Errorf("-from: %w", err)
+		return reportFlags{}, fmt.Errorf("-from: %w", err)
 	}
 	to, err := parseDay(*toStr)
 	if err != nil {
-		return fmt.Errorf("-to: %w", err)
+		return reportFlags{}, fmt.Errorf("-to: %w", err)
 	}
+	return reportFlags{
+		account: *account,
+		from:    from,
+		to:      to,
+		accrual: *basis == "accrual",
+		format:  *format,
+		val:     newValuer(*value, rates),
+		out:     *out,
+	}, nil
+}
 
+// runReport owns the plumbing every report command shares: parse flags, fold the log on the chosen
+// basis, hand build the transactions and entries to turn into a view, then render and write it. Each
+// command supplies only build, which is the one thing it does.
+func runReport(name string, args []string, build func(txs []model.Transaction, entries []model.Entry, f reportFlags) reportView) error {
+	f, err := parseReportFlags(name, args)
+	if err != nil {
+		return err
+	}
 	s, err := store.OpenReader(".")
 	if err != nil {
 		return err
 	}
 	defer s.Close()
 
-	txs, entries, err := reportEntries(s.Log, *basis == "accrual")
+	txs, entries, err := reportEntries(s.Log, f.accrual)
 	if err != nil {
 		return err
 	}
-
-	val := newValuer(*value, rates)
-	var view reportView
-	if *gainsOnly {
-		g := capitalGains(txs, entries, from, to, *account)
-		view.Gains = &g
-	} else {
-		if !*balanceOnly {
-			stmt := buildReport(txs, entries, from, to, *account, val)
-			view.Income = &stmt
-		}
-		if !*incomeOnly {
-			// The balance sheet is a position as of the period's end (or all of it, if no end was given).
-			sheet := buildBalanceSheet(txs, entries, to, *account, val)
-			view.Balance = &sheet
-		}
-	}
-	warnUnvalued(val)
+	view := build(txs, entries, f)
+	warnUnvalued(f.val)
 
 	render := renderReportText
-	if *format == "html" {
+	if f.format == "html" {
 		render = renderReportHTML
 	}
-	return writeOut(*out, func(w io.Writer) error { return render(w, view) })
+	return writeOut(f.out, func(w io.Writer) error { return render(w, view) })
+}
+
+// reportDefaultCmd is bare `report`: the income statement and balance sheet together, the "full
+// picture" the README describes. Splitting the three statements into verbs should not cost this
+// convenience, so it stays the no-subcommand default rather than needing a fourth verb of its own.
+func reportDefaultCmd(args []string) error {
+	return runReport("report", args, func(txs []model.Transaction, entries []model.Entry, f reportFlags) reportView {
+		stmt := buildReport(txs, entries, f.from, f.to, f.account, f.val)
+		// The balance sheet is a position as of the period's end (or all of it, if no end was given).
+		sheet := buildBalanceSheet(txs, entries, f.to, f.account, f.val)
+		return reportView{Income: &stmt, Balance: &sheet}
+	})
+}
+
+// reportIncomeCmd is `report income`: what was earned and spent over the period, by account, with
+// the net per commodity.
+func reportIncomeCmd(args []string) error {
+	return runReport("report income", args, func(txs []model.Transaction, entries []model.Entry, f reportFlags) reportView {
+		stmt := buildReport(txs, entries, f.from, f.to, f.account, f.val)
+		return reportView{Income: &stmt}
+	})
+}
+
+// reportBalanceCmd is `report balance`: assets held and liabilities owed as of -to (or today), and
+// net worth.
+func reportBalanceCmd(args []string) error {
+	return runReport("report balance", args, func(txs []model.Transaction, entries []model.Entry, f reportFlags) reportView {
+		sheet := buildBalanceSheet(txs, entries, f.to, f.account, f.val)
+		return reportView{Balance: &sheet}
+	})
+}
+
+// reportGainsCmd is `report gains`: the tax-time view off the same cost-basis fold, a disposal per
+// row with the total realized gain, for a filing (Canada's Schedule 3, the T5008 world).
+func reportGainsCmd(args []string) error {
+	return runReport("report gains", args, func(txs []model.Transaction, entries []model.Entry, f reportFlags) reportView {
+		g := capitalGains(txs, entries, f.from, f.to, f.account)
+		return reportView{Gains: &g}
+	})
 }
 
 // warnUnvalued tells the reader, on stderr, which commodities the lens could not value and so left
