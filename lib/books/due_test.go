@@ -77,6 +77,53 @@ func TestDueAccountsSurfacesDueAndMinimumMeta(t *testing.T) {
 	}
 }
 
+// A physical card split by purpose across several :child accounts nets to one row under the bare
+// parent, not one row per bucket -- a purpose bucket can look positive on its own even though the
+// card overall is owed money, and the report exists to say what is actually owed.
+func TestDueAccountsRollsUpAnAccountFamilyIntoOneNetRow(t *testing.T) {
+	log := newLog()
+	importOne(t, log, lineIn("a", "Liabilities:RBC Mastercard", 2, 37661, "PAYMENT"))
+	importOne(t, log, lineIn("b", "Liabilities:RBC Mastercard:Consulting", 2, -52432, "CHARGE"))
+	importOne(t, log, lineIn("c", "Liabilities:RBC Mastercard:Real Estate:9 Schoodic Street", 2, -95273, "CHARGE"))
+	books.SetAccountMeta(log, "human", "Liabilities:RBC Mastercard", map[string]string{
+		"due": "2026-08-05", "minimum": "25.00",
+	})
+
+	rows, err := books.DueAccounts(log)
+	if err != nil {
+		t.Fatalf("DueAccounts: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Account != "Liabilities:RBC Mastercard" {
+		t.Fatalf("rows = %+v, want one row for the family", rows)
+	}
+	if got := rows[0].Balance["CAD"]; got.String() != "-1100.44 CAD" {
+		t.Errorf("balance = %s, want the family net", got)
+	}
+	if rows[0].Due != "2026-08-05" || rows[0].Minimum != "25.00" {
+		t.Errorf("due = %q, minimum = %q, want the parent's meta", rows[0].Due, rows[0].Minimum)
+	}
+}
+
+// A purpose bucket that nets to zero on its own still folds into the family total; only the family
+// as a whole dropping to zero removes the row.
+func TestDueAccountsKeepsAFamilyRowWhenOnlyAChildBucketIsZero(t *testing.T) {
+	log := newLog()
+	importOne(t, log, lineIn("a", "Liabilities:RBC Mastercard", 2, -100, "CHARGE"))
+	importOne(t, log, lineIn("b", "Liabilities:RBC Mastercard:Consulting", 2, -8420, "CHARGE"))
+	importOne(t, log, lineIn("c", "Liabilities:RBC Mastercard:Consulting", 3, 8420, "PAYMENT IN FULL"))
+
+	rows, err := books.DueAccounts(log)
+	if err != nil {
+		t.Fatalf("DueAccounts: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Account != "Liabilities:RBC Mastercard" {
+		t.Fatalf("rows = %+v, want one row for the family", rows)
+	}
+	if got := rows[0].Balance["CAD"]; got.String() != "-1.00 CAD" {
+		t.Errorf("balance = %s, want just the parent's own charge", got)
+	}
+}
+
 // Owing accounts come back sorted by due date, soonest first, so the accounts that need attention
 // lead the report; accounts with no due date set sort after every dated one.
 func TestDueAccountsSortsBySoonestDueDate(t *testing.T) {

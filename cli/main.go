@@ -640,11 +640,14 @@ var reference = []docGroup{
       by default; -sort amount orders by balance instead (-desc for largest first). An account holding
       more than one commodity sorts by the sum of its balances.
   accounts due [-format table|json]
-      Every Liabilities: account with a nonzero balance -- credit cards, lines of credit -- alongside
-      the due date and minimum payment recorded on it (accounts set <account> -meta due=<YYYY-MM-DD>
-      minimum=<amount>). An account owing money with neither key set still appears, with blank
-      columns, as a nudge to fill them in. Sorted soonest-due first; an account with no due date
-      sorts last. -format defaults to table at a terminal and json off one.
+      Every Liabilities: account family with a nonzero net balance -- credit cards, lines of credit --
+      alongside the due date and minimum payment recorded on it (accounts set <account> -meta
+      due=<YYYY-MM-DD> minimum=<amount>). A family is the bare account plus every purpose-split
+      :child account filed under it; their balances net into one row, read from and set on the bare
+      parent, so a split that leaves one bucket looking positive does not hide what the card overall
+      owes. A family owing money with neither key set still appears, with blank columns, as a nudge
+      to fill them in. Sorted soonest-due first; a family with no due date sorts last. -format
+      defaults to table at a terminal and json off one.
 `},
 		{[]string{"balance"}, `  balance set <account> <amount> [-as-of <YYYY-MM-DD>] [-actor <name>]
       Record what an account held on a date, by hand -- the anchor reconcile checks against, for an
