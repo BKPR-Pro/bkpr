@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -194,6 +195,7 @@ var usageSections = []usageSection{
 		{"policy list", ""},
 		{"accounts set", "<account> -meta <k=v> ... [-actor <name>]"},
 		{"accounts list", "[-sort amount [-desc]]"},
+		{"accounts due", "[-format table|json]"},
 		{"balance set", "<account> <amount> [-as-of <YYYY-MM-DD>] [-actor <name>]"},
 		{"reconcile", ""},
 		{"receipt", "-tx <fingerprint> [-as invoice|receipt] [-format text|html|json] [-out <file>]"},
@@ -637,6 +639,12 @@ var reference = []docGroup{
       account is yours once a statement imports against it or a connector posts to it. Listed by name
       by default; -sort amount orders by balance instead (-desc for largest first). An account holding
       more than one commodity sorts by the sum of its balances.
+  accounts due [-format table|json]
+      Every Liabilities: account with a nonzero balance -- credit cards, lines of credit -- alongside
+      the due date and minimum payment recorded on it (accounts set <account> -meta due=<YYYY-MM-DD>
+      minimum=<amount>). An account owing money with neither key set still appears, with blank
+      columns, as a nudge to fill them in. Sorted soonest-due first; an account with no due date
+      sorts last. -format defaults to table at a terminal and json off one.
 `},
 		{[]string{"balance"}, `  balance set <account> <amount> [-as-of <YYYY-MM-DD>] [-actor <name>]
       Record what an account held on a date, by hand -- the anchor reconcile checks against, for an
@@ -2427,18 +2435,21 @@ func policyList(args []string) error {
 	return w.Flush()
 }
 
-// accountCmd dispatches `accounts set|list`, the metadata an account carries (a letterhead address,
-// a customer's mailing address, a display name) that a document like an invoice reads.
+// accountCmd dispatches `accounts set|list|due`: the metadata an account carries (a letterhead
+// address, a customer's mailing address, a display name, a due date) that a document like an
+// invoice reads, and the due report that reads it back for liability accounts.
 func accountCmd(args []string) error {
 	if len(args) == 0 {
 		usage()
-		return fmt.Errorf("accounts needs set or list")
+		return fmt.Errorf("accounts needs set, list, or due")
 	}
 	switch args[0] {
 	case "set":
 		return accountSetMeta(args[1:])
 	case "list":
 		return accountList(args[1:])
+	case "due":
+		return accountDue(args[1:])
 	default:
 		usage()
 		return fmt.Errorf("unknown accounts subcommand %q", args[0])
@@ -2536,6 +2547,89 @@ func accountList(args []string) error {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", a, name, balanceCell(balances[a]), reconciledCell(recByAccount[a]))
 	}
 	return w.Flush()
+}
+
+// accountDue reports which liability accounts (credit cards, LOCs) owe money right now, alongside
+// the due date and minimum payment recorded on each via `accounts set -meta due=... minimum=...`.
+// It is the accounts-list-adjacent view invoice aging and bill aging have for receivables and
+// payables, but for the liability accounts themselves: a routine bookwork pass can ask "which
+// accounts need a payment soon and how much" without eyeballing balances and the bank site by hand.
+func accountDue(args []string) error {
+	fs := flag.NewFlagSet("accounts due", flag.ExitOnError)
+	format := fs.String("format", defaultFormat(os.Stdout, "table", "json"), "table or json (default: table at a terminal, json off one)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *format != "table" && *format != "json" {
+		return fmt.Errorf("accounts due -format takes table or json")
+	}
+
+	log, closeLog, err := openReader()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	rows, err := books.DueAccounts(log)
+	if err != nil {
+		return err
+	}
+
+	if *format == "json" {
+		return renderDueJSON(rows)
+	}
+	return printDue(rows)
+}
+
+// printDue is accountDue's human form: one row per owing liability account, a dash standing in for
+// a due date or minimum nobody has set yet.
+func printDue(rows []books.DueAccount) error {
+	if len(rows) == 0 {
+		fmt.Println("no liability accounts owing")
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ACCOUNT\tBALANCE\tDUE\tMINIMUM")
+	for _, r := range rows {
+		due, min := r.Due, r.Minimum
+		if due == "" {
+			due = "-"
+		}
+		if min == "" {
+			min = "-"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.Account, balanceCell(r.Balance), due, min)
+	}
+	return w.Flush()
+}
+
+// dueAccountJSON is accountDue's machine-readable form: a balance rendered the same way jsonAmounts
+// renders one everywhere else in this tool (a list of "amount commodity" strings), so a mixed-
+// commodity account never needs the reader to reconstruct an amount from parts.
+type dueAccountJSON struct {
+	Account string   `json:"account"`
+	Balance []string `json:"balance"`
+	Due     string   `json:"due,omitempty"`
+	Minimum string   `json:"minimum,omitempty"`
+}
+
+func renderDueJSON(rows []books.DueAccount) error {
+	out := make([]dueAccountJSON, 0, len(rows))
+	for _, r := range rows {
+		commodities := make([]string, 0, len(r.Balance))
+		for c := range r.Balance {
+			commodities = append(commodities, c)
+		}
+		sort.Strings(commodities)
+		balance := make([]string, 0, len(commodities))
+		for _, c := range commodities {
+			balance = append(balance, r.Balance[c].String())
+		}
+		out = append(out, dueAccountJSON{Account: r.Account, Balance: balance, Due: r.Due, Minimum: r.Minimum})
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
 
 // balanceCell renders an account's holdings, one amount per commodity (a USD fee beside CAD rent do
