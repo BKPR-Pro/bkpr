@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head><title>RBC Financial Group - Online Banking</title></head>
+<body>
+<a href="#">Skip Header Navigation</a>
+<a href="#">Customer Service</a>
+<p>TEST CUSTOMER</p>
+
+<!--
+  What RBC serves after "That was me" is confirmed: a prompt to review the Personal Verification
+  Questions before continuing. It is not a dead end -- the left navigation offers Account Summary --
+  but that navigation is injected by script and is not in the served markup, so the only way through
+  that is actually present here is the BalancesForm the nav itself submits.
+
+  The one visible control, "Update my security settings", changes security settings and must never be
+  taken automatically; going to the account summary instead is plain navigation.
+-->
+<h1>Sign In Protection - That Was Me</h1>
+<p>Please review and update your security settings and personal verification questions and answers
+   before continuing. The answers to your Personal Verification Questions should be easy for you to
+   remember, but difficult for others to guess.</p>
+
+<form method="POST" name="m3pref_DispPVQsAForm" action="/2-step-verification">
+  <input name="REQUEST" type="hidden" value="DispPVQsA">
+  <input name="FromPreSignIn_SIP" type="hidden" value="Y">
+</form>
+<a href="javascript:document.m3pref_DispPVQsAForm.submit();">Update my security settings</a>
+
+<form name="BalancesForm" method="POST" action="/eBGRenderPage">
+  <input name="F22" type="hidden" value="HTPCBINET">
+  <input name="LANGUAGE" type="hidden" value="ENGLISH">
+  <input name="REQUEST" type="hidden" value="AcctBalanceInquiry">
+</form>
+</body>
+</html>

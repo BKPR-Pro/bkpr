@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head><title>RBC Financial Group - Online Banking</title></head>
+<body>
+<a href="#">Skip Header Navigation</a>
+<a href="#">Customer Service</a>
+<a href="#">Sign Out</a>
+<p>TEST CUSTOMER</p>
+
+<!--
+  RBC serves this alert from an ISAMSecureRequest URL with the full post-sign-in chrome, and its
+  SPA settles slowly: the confirmation controls are not in the first paint. The delay below stands
+  in for that -- a guard that only reads the CURRENT visibility of "That was me" sees nothing and
+  walks on to account navigation, which then fails on a missing nav element.
+-->
+<div id="alert"></div>
+<script>
+  setTimeout(function () {
+    document.getElementById('alert').innerHTML = [
+      '<h1>Sign-In Protection Alert</h1>',
+      '<p>There was an unsuccessful attempt to sign in with your Username/Client Card and password on:</p>',
+      '<p>Saturday, 25 Jul 2026 at 20:20:03 EDT</p>',
+      '<p>We disabled your Online Banking access because we couldn\'t verify your identity.</p>',
+      '<p>Did you try signing in to Online Banking on this date?</p>',
+      '<a role="button" id="id_btn_thatwasme" title="That was me"',
+      '   href="javascript:if(document.title!=\'\')document.sipwasme.submit();">That was me</a>',
+      '<a role="button" id="id_btn_thatwasnotme" title="That was not me"',
+      '   href="javascript:if(document.title!=\'\')document.sipnotme.submit();">That was not me</a>',
+      '<form name="sipwasme" method="post" action="/thatwasme">',
+      '  <input type="hidden" name="REQUEST" value="SIPThatWasMe">',
+      '</form>',
+      '<form name="sipnotme" method="post" action="/thatwasnotme">',
+      '  <input type="hidden" name="REQUEST" value="SIPThatWasNotMe">',
+      '</form>'
+    ].join('\n')
+  }, 4000)
+</script>
+</body>
+</html>
