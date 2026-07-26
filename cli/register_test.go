@@ -191,3 +191,40 @@ func TestTwinGroupsSkipASettledAccrualAndItsPayment(t *testing.T) {
 		t.Errorf("got %d groups, want none: the settlement already pairs these lines", len(groups))
 	}
 }
+
+// One door can serve one line twice. The fingerprint that would have caught the second is taken over
+// the memo, so when the bank changes how it writes the same purchase -- a truncated "Online Banking
+// payment" that later arrives as "Online Banking payment - 7604 PROV NB PROP TX" -- the dedupe misses
+// and the line lands again. Leaving every same-door collision alone assumes a door dedupes itself,
+// which is the assumption memo drift breaks; what the assumption really protects is the bank charging
+// the same amount twice in a day, and that case says the same memo both times.
+func TestTwinGroupsCatchOneDoorServingOneLineUnderTwoMemos(t *testing.T) {
+	tx1, e1 := regLine("aaa", 4, "Assets:Bank:Chequing", cad2(-15500), "Province of New Brunswick")
+	tx1.Description = "Online Banking payment"
+	tx2, e2 := regLine("bbb", 4, "Assets:Bank:Chequing", cad2(-15500), "Province of New Brunswick")
+	tx2.Description = "Online Banking payment - 7604 PROV NB PROP TX"
+	doors := map[string]string{"aaa": "connector:rbc-chequing", "bbb": "connector:rbc-chequing"}
+
+	groups := twinGroups([]model.Transaction{tx1, tx2}, []model.Entry{e1, e2}, doors, nil)
+	if len(groups) != 1 {
+		t.Fatalf("got %d groups, want the one memo-drift double the fingerprint could not catch", len(groups))
+	}
+	if len(groups[0].Rows) != 2 {
+		t.Errorf("group rows = %+v, want both sightings", groups[0].Rows)
+	}
+}
+
+// The same amount charged twice in a day through one door, described the same way both times, is two
+// real charges -- four identical Costco return credits, two coffees. Reporting those every run is how
+// a candidates report teaches its reader to skip it.
+func TestTwinGroupsLeaveARepeatedChargeAlone(t *testing.T) {
+	tx1, e1 := regLine("aaa", 4, "Liabilities:PC Mastercard", cad2(17250), "Costco")
+	tx1.Description = "WWW COSTCO CA"
+	tx2, e2 := regLine("bbb", 4, "Liabilities:PC Mastercard", cad2(17250), "Costco")
+	tx2.Description = "WWW COSTCO CA"
+	doors := map[string]string{"aaa": "connector:pcf", "bbb": "connector:pcf"}
+
+	if groups := twinGroups([]model.Transaction{tx1, tx2}, []model.Entry{e1, e2}, doors, nil); len(groups) != 0 {
+		t.Errorf("got %d groups, want none: one door, one memo, two real charges", len(groups))
+	}
+}

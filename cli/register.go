@@ -245,11 +245,19 @@ type twinGroup struct {
 	Rows   []twinRow
 }
 
-// twinGroups finds the candidate twins: lines sharing a date and an amount that entered through
-// different doors. That is the double the books cannot catch on their own -- fingerprints dedupe
-// within a door, and reconcile compares each door's lines to its own bank -- so a purchase entering
-// through two doors doubles silently. One door colliding with itself is left alone: a bank
-// legitimately charges the same amount twice in a day, and its own fingerprints already dedupe.
+// twinGroups finds the candidate twins: lines sharing a date and an amount that the books cannot catch
+// on their own. Two doors colliding is the classic case -- fingerprints dedupe within a door, and
+// reconcile compares each door's lines to its own bank -- so a purchase entering through two doors
+// doubles silently.
+//
+// One door colliding with itself is reported too, but only when the memos differ. A door does dedupe
+// itself, yet it does so by a fingerprint taken over the memo, so the moment a bank changes how it
+// writes a line it has already served -- a truncated "Online Banking payment" arriving later as
+// "Online Banking payment - 7604 PROV NB PROP TX" -- the dedupe misses and the line lands twice
+// through the one door. What the same-door exemption is really there to protect is a bank charging
+// the same amount twice in a day, and that case says the same memo both times; requiring the memos to
+// differ keeps those out while catching drift.
+//
 // A settled accrual and the line that paid it are one recorded flow, not a coincidence, so
 // settlements says which collisions the books have already explained. Voided lines and paired
 // transfers have already left the fold this reads.
@@ -270,14 +278,15 @@ func twinGroups(txs []model.Transaction, entries []model.Entry, doors, settlemen
 		if len(idxs) < 2 {
 			continue
 		}
-		crossed := false
+		suspect := false
 		for _, i := range idxs[1:] {
-			if doors[txs[i].ID] != doors[txs[idxs[0]].ID] {
-				crossed = true
+			if doors[txs[i].ID] != doors[txs[idxs[0]].ID] ||
+				txs[i].Description != txs[idxs[0]].Description {
+				suspect = true
 				break
 			}
 		}
-		if !crossed {
+		if !suspect {
 			continue
 		}
 		g := twinGroup{Date: txs[idxs[0]].Date, Amount: txs[idxs[0]].Amount}
