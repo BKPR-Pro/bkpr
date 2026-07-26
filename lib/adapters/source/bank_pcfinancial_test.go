@@ -93,6 +93,18 @@ func pcfSignedIn(body string) string {
 	return `<!doctype html><html><body><app-root>` + body + `</app-root></body></html>`
 }
 
+// pcfBalanceAndTable wraps rows in the Current balance tile and the transactions table, the shape of
+// a card page with no pending section.
+func pcfBalanceAndTable(rows string) string {
+	return `
+	  <balance-block><div class="balance-block transactions-lrg dollar"><div class="balance-block-content">
+	    <div class="description-container"><p class="description tooltip">Current balance</p></div>
+	    <div class="amount-container"><p class="amount"> $9,999.99 </p></div>
+	  </div></div></balance-block>
+	  <sortable-table amounttype="credit"><div class="table-sortable"><table><thead><tr><th>Description</th></tr></thead>
+	  <tbody class="credit">` + rows + `</tbody></table></div></sortable-table>`
+}
+
 // pcfRow builds one PC Financial transaction row. amountClass is "positive" for a charge (money owed,
 // which the books hold negative) or "negative" for a payment/refund (which the books hold positive).
 func pcfRow(desc, date, amount, amountClass string) string {
@@ -232,5 +244,99 @@ func TestPCFinancialPagesBackToTheFromDate(t *testing.T) {
 		if tx.Description == "OLD BUY" {
 			t.Errorf("the out-of-window Feb row should have been dropped: %+v", tx)
 		}
+	}
+}
+
+// A charge dated exactly on the from-date belongs to the window. It was being dropped: the window is
+// given as "Jul 16, 2026", which Date parses as LOCAL midnight, while a row's "2026-07-16" is an ISO
+// date-only string, which Date parses as UTC midnight -- so west of Greenwich every row on the
+// boundary day sorted before the boundary and was filtered out. On the real books this silently lost
+// three PC Mastercard charges totalling 4,587.81, while the run reported a clean seam, and the
+// documented way to seam an import (start at the last import's date) is exactly the case it breaks.
+func TestPCFinancialKeepsChargesDatedOnTheFromDate(t *testing.T) {
+	requireBrowserTests(t)
+	t.Setenv("TZ", "America/Halifax") // any zone west of UTC reproduces it; the books' own zone
+
+	body := pcfBalanceAndTable(
+		pcfRow("BOUNDARY BUY", "Jul 16, 2026", "$3,624.17", "positive") +
+			pcfRow("LATER BUY", "Jul 20, 2026", "$78.63", "positive"))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(pcfSignedIn(body)))
+	}))
+	defer srv.Close()
+
+	out, err := execBankScript(Bank{
+		Institution: "pcfinancial", LoginURL: srv.URL, DefaultCurrency: "CAD",
+		Account:     "Liabilities:Personal:PC Mastercard",
+		HistoryFrom: "Jul 16, 2026",
+	}, nil)
+	skipIfNoBrowser(t, err)
+	if err != nil {
+		t.Fatalf("reading with a from-date on a charge's own day: %v", err)
+	}
+
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:Personal:PC Mastercard", "CAD")
+	if err != nil {
+		t.Fatalf("parsing pcfinancial.js output %q: %v", out, err)
+	}
+	if len(res.Transactions) != 2 {
+		t.Fatalf("got %d transactions, want 2 -- the charge dated on the from-date was dropped: %q",
+			len(res.Transactions), out)
+	}
+}
+
+// PC Financial shows a charge twice while it settles: once under Pending and again under Posted
+// transactions. Reading both booked each one twice -- on the real books two Costco returns of 172.50
+// arrived as four credits, over-crediting the card by 345.00. Only the posted section is a statement
+// fact; a pending row posts within days and imports itself then, and the Current balance tile the
+// reconciliation anchors on counts posted only, so reading pending puts the rows and the anchor at
+// odds.
+func TestPCFinancialReadsOnlyThePostedSection(t *testing.T) {
+	requireBrowserTests(t)
+
+	pending := `<sortable-table amounttype="credit"><div class="table-sortable"><table><thead><tr><th>Description</th></tr></thead>
+	  <tbody class="credit">` +
+		pcfRow("WWW COSTCO CA", "Jul 22, 2026", "$172.50", "negative") +
+		pcfRow("WWW COSTCO CA", "Jul 22, 2026", "$172.50", "negative") +
+		`</tbody></table></div></sortable-table>`
+
+	posted := `<h2>Posted transactions</h2>
+	  <sortable-table amounttype="credit"><div class="table-sortable"><table><thead><tr><th>Description</th></tr></thead>
+	  <tbody class="credit">` +
+		pcfRow("WWW COSTCO CA", "Jul 22, 2026", "$172.50", "negative") +
+		pcfRow("WWW COSTCO CA", "Jul 22, 2026", "$172.50", "negative") +
+		pcfRow("KENT ST.STEPHEN", "Jul 21, 2026", "$82.74", "positive") +
+		`</tbody></table></div></sortable-table>`
+
+	body := `
+	  <balance-block><div class="balance-block transactions-lrg dollar"><div class="balance-block-content">
+	    <div class="description-container"><p class="description tooltip">Current balance</p></div>
+	    <div class="amount-container"><p class="amount"> $9,999.99 </p></div>
+	  </div></div></balance-block>` + pending + posted
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(pcfSignedIn(body)))
+	}))
+	defer srv.Close()
+
+	out, err := execBankScript(Bank{
+		Institution: "pcfinancial", LoginURL: srv.URL, DefaultCurrency: "CAD",
+		Account: "Liabilities:Personal:PC Mastercard",
+	}, nil)
+	skipIfNoBrowser(t, err)
+	if err != nil {
+		t.Fatalf("reading a page with a pending section: %v", err)
+	}
+
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:Personal:PC Mastercard", "CAD")
+	if err != nil {
+		t.Fatalf("parsing pcfinancial.js output %q: %v", out, err)
+	}
+	if len(res.Transactions) != 3 {
+		t.Fatalf("got %d transactions, want the 3 posted rows only -- the pending sightings were counted too: %q",
+			len(res.Transactions), out)
 	}
 }
