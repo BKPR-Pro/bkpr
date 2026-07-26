@@ -2718,9 +2718,9 @@ func reconcileCmd(args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ACCOUNT\tAS OF\tBANK\tBOOKS\tDELTA")
+	fmt.Fprintln(w, "ACCOUNT\tCHECKED\tBANK\tBOOKS\tDELTA")
 	allReconciled := true
-	var stale []string
+	var stale, anchored []string
 	for _, r := range recs {
 		status := r.Delta.String()
 		if r.Reconciled {
@@ -2732,9 +2732,24 @@ func reconcileCmd(args []string) error {
 			status += ", not checked since"
 			stale = append(stale, r.Account)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.Account, r.AsOf.Format("2006-01-02"), r.Bank, r.Books, status)
+		// The window the verdict covers, not just the date it ends. Everything before the first
+		// assertion is inside the derived opening balance, so it is anchored rather than checked, and an
+		// account measured only once has not been checked at all.
+		window := r.Since.Format("2006-01-02") + " → " + r.AsOf.Format("2006-01-02")
+		if r.Anchored {
+			window = "anchored " + r.AsOf.Format("2006-01-02")
+			status = "0 (by construction)"
+			anchored = append(anchored, r.Account)
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.Account, window, r.Bank, r.Books, status)
 	}
 	w.Flush()
+	if len(anchored) > 0 {
+		fmt.Printf("\n%d account(s) carry a single bank figure, which derived their opening balance: they agree by\nconstruction and nothing has tested them yet.\n", len(anchored))
+		for _, a := range anchored {
+			fmt.Println("  " + a)
+		}
+	}
 	// A stale anchor is not a mismatch, so it must not read as one -- but it must not be swallowed by an
 	// unqualified all-clear either: the account agreed with the bank on its AS OF date and has not been
 	// measured since, which is a different claim from the one the other rows are making.

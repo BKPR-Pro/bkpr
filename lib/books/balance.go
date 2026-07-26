@@ -110,14 +110,23 @@ func balanceAssertions(log *eventlog.Log) (map[string][]balanceAssertion, error)
 // reporting a balance -- reading the wrong page, or never reading one at all -- goes on reconciling
 // against the last figure recorded, in the same words an account measured this morning uses. Only the
 // AS OF column tells them apart, and it is the easiest column to read past.
+//
+// Since and Anchored say how much of the account the verdict covers. The first assertion derives the
+// opening balance -- the bank's figure less what the books fold to that day -- so the account agrees on
+// that date by construction, and every line dated on or before it sits inside the derived offset where
+// no error can produce a delta. Since is that date: the check is real from there forward and derived
+// before it. Anchored means the account has only ever been measured once, so nothing has tested the
+// derivation at all; it would agree whatever the account held.
 type Reconciliation struct {
 	Account    string
 	AsOf       time.Time
+	Since      time.Time
 	Bank       model.Amount
 	Books      model.Amount
 	Delta      model.Amount
 	Reconciled bool
 	Stale      bool
+	Anchored   bool
 }
 
 // staleAfterDays is how far an account's bank figure may sit behind the rest of the book before the
@@ -195,8 +204,9 @@ func Reconcile(log *eventlog.Log) ([]Reconciliation, error) {
 			continue
 		}
 		out = append(out, Reconciliation{
-			Account: account, AsOf: latest.Date,
-			Bank: latest.Amount, Books: books, Delta: delta,
+			Account: account, AsOf: latest.Date, Since: first.Date,
+			Anchored: len(list) == 1,
+			Bank:     latest.Amount, Books: books, Delta: delta,
 			Reconciled: delta.IsZero(),
 			Stale:      latest.Date.Before(booksThrough.AddDate(0, 0, -staleAfterDays)),
 		})

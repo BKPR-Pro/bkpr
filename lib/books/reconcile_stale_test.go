@@ -120,3 +120,49 @@ func TestABalanceAfterRetiringReanchorsTheAccount(t *testing.T) {
 		t.Errorf("as-of = %s, want the later assertion's date", r.AsOf.Format("2006-01-02"))
 	}
 }
+
+// "Reconciled" names a narrower claim than it reads as. The first assertion for an account derives the
+// opening balance, so the account matches at that date by construction -- every line dated on or before
+// it sits inside the derived offset and no error among them can ever show a delta. On the real books
+// the chequing's first anchor was dated 2026-07-14, and when an import re-served five 2026-07-14 lines
+// under fuller memos, $702.03 was double-counted on the anchor date itself and reconcile went on
+// reporting 0 to the penny -- correctly by its own definition, and uselessly. Say which window the
+// verdict covers, so the anchored part is visible as anchored rather than checked.
+func TestReconcileReportsTheWindowItActuallyChecks(t *testing.T) {
+	log := newLog()
+	importOne(t, log, lineIn("a", "Assets:Bank:Chequing", 1, 10000, "DEPOSIT"))
+	books.AssertBalance(log, "rbc", "Assets:Bank:Chequing", on(5), cad(50000))
+	importOne(t, log, lineIn("b", "Assets:Bank:Chequing", 10, -3000, "WITHDRAW"))
+	if err := books.AssertBalance(log, "rbc", "Assets:Bank:Chequing", on(12), cad(47000)); err != nil {
+		t.Fatalf("AssertBalance: %v", err)
+	}
+
+	r := reconcileOne(t, log, "Assets:Bank:Chequing")
+	if !r.Since.Equal(on(5)) {
+		t.Errorf("since = %s, want the first anchor's date -- everything before it is derived, not checked",
+			r.Since.Format("2006-01-02"))
+	}
+	if r.Anchored {
+		t.Errorf("an account with a later assertion has been checked against the bank; want Anchored false")
+	}
+}
+
+// An account carrying a single assertion has never been checked at all: that one figure defined its
+// opening balance, so it agrees by construction and would agree whatever the account held. It reports
+// exactly like an account measured twice and found correct, which is the confusion worth ending -- the
+// PC Mastercard sat that way while it was 6,032.21 short of its statement.
+func TestReconcileMarksAnAccountThatOnlyAnchored(t *testing.T) {
+	log := newLog()
+	importOne(t, log, lineIn("a", "Liabilities:Card", 3, -2500, "CHARGE"))
+	if err := books.AssertBalance(log, "rbc", "Liabilities:Card", on(5), cad(-9999)); err != nil {
+		t.Fatalf("AssertBalance: %v", err)
+	}
+
+	r := reconcileOne(t, log, "Liabilities:Card")
+	if !r.Reconciled {
+		t.Fatalf("a first anchor makes the account agree by construction, got delta %s", r.Delta)
+	}
+	if !r.Anchored {
+		t.Errorf("one assertion is an anchor, not a check; want Anchored true")
+	}
+}
