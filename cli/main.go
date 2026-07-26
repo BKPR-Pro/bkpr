@@ -81,6 +81,8 @@ func main() {
 		err = renderBooks(os.Args[2:])
 	case "register":
 		err = registerCmd(os.Args[2:])
+	case "categorize-ui":
+		err = categorizeUI(os.Args[2:])
 	case "completion":
 		err = completionCmd(os.Args[2:])
 	case "__complete":
@@ -171,6 +173,8 @@ var usageSections = []usageSection{
 		{"import", "<connector> [-relogin] [-history <days> | -from <date> [-to <date>]]"},
 		{"import", "-all [-relogin] [-history <days> | -from <date> [-to <date>]]"},
 		{"categorize", "<fingerprint> (-category <account> [-tax-rate <pct> -tax-account <account>] | -post <account>=<amount> ...) [-payee <name>] [-invoice <n>] [-source <account>] [-why <reason>] [-actor <name>]"},
+		{"categorize-ui", "[-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-out <file>]"},
+		{"categorize-ui apply", "<file.json> [-actor <name>] [-why <reason>]"},
 		{"comment", "<fingerprint> (-text <note> | -remove) [-account <a>] [-why <reason>] [-actor <name>]"},
 		{"void", "<fingerprint> [-why <reason>] [-actor <name>]"},
 		{"match", "<fingerprint> (-with <fingerprint> | -break) [-actor <name>]"},
@@ -481,6 +485,23 @@ var reference = []docGroup{
       still reconciles to the one bank balance. It is the per-line form of a rules -source route.
       -actor records who decided (default human), so a model driving this command is told
       apart from a person in the log; rules set and void take it too.
+`},
+		{[]string{"categorize-ui"}, `  categorize-ui [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-out <file>]
+      Render a self-contained HTML page listing every line in the window (default: the four
+      months up to -to, or today), its payee, amount, and current category next to it in a text
+      box with autocomplete drawn from every account a posting has ever landed on. Open it in a
+      browser, edit whatever categories are wrong, and its Export button downloads a JSON file
+      of just the changed lines -- fingerprint, old and new category -- for categorize-ui apply
+      to read back, or for a person to hand to an agent. Nothing here writes to the books; the
+      page and its export are both read-only until applied. -out writes the page to a file
+      instead of stdout.
+  categorize-ui apply <file.json> [-actor <name>] [-why <reason>]
+      Read an export back in and assert each line's new category, the same as running
+      categorize <fingerprint> -category <account> by hand for every row. A line whose export
+      carries a tax split is skipped with a warning: the export names only the one category a
+      plain assertion would replace both postings with, so applying it would silently drop the
+      tax leg; recategorize that line with categorize -tax-rate or -post instead. -actor records
+      who decided (default human); -why is recorded with each assertion (default "categorize-ui").
 `},
 		{[]string{"comment"}, `  comment <fingerprint> (-text <note> | -remove) [-account <a>] [-why <reason>] [-actor <name>]
       Leave a free-text note on one posting of a line, or clear it with -remove. The note is
