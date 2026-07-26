@@ -201,6 +201,7 @@ var usageSections = []usageSection{
 		{"accounts list", "[-sort amount [-desc]]"},
 		{"accounts due", "[-format table|json]"},
 		{"balance set", "<account> <amount> [-as-of <YYYY-MM-DD>] [-actor <name>]"},
+		{"balance rm", "<account> [-actor <name>]"},
 		{"reconcile", ""},
 		{"receipt", "-tx <fingerprint> [-as invoice|receipt] [-format text|html|json] [-out <file>]"},
 		{"report", "[-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
@@ -670,7 +671,16 @@ var reference = []docGroup{
       to fill them in. Sorted soonest-due first; a family with no due date sorts last. -format
       defaults to table at a terminal and json off one.
 `},
-		{[]string{"balance"}, `  balance set <account> <amount> [-as-of <YYYY-MM-DD>] [-actor <name>]
+		{[]string{"balance"}, `  balance rm <account> [-actor <name>]
+      Stop reconciling an account: it is finished, so leave it out of the report. Nothing is
+      deleted -- its transactions and recorded balances stay in the log, and recording a balance
+      afterwards starts the account over from there. This is for an account that was emptied
+      rather than one that was wrong (a connector re-pointed away from it, its lines collapsed
+      onto the account they belonged to). Asserting 0.00 does not do this: the first balance an
+      account carries derives its opening figure, so it matches by construction however little it
+      holds, and a later zero reads as a delta rather than as a close.
+
+  balance set <account> <amount> [-as-of <YYYY-MM-DD>] [-actor <name>]
       Record what an account held on a date, by hand -- the anchor reconcile checks against, for an
       account no connector reports (one imported from CSV or ledger). A connector records this on
       every import; this is the same fact entered by hand. The amount carries its commodity, e.g.

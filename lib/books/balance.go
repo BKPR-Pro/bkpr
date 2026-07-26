@@ -20,6 +20,15 @@ const CollectionBalance = "balance"
 // ActionAsserted records a bank-stated balance for an account on a date.
 const ActionAsserted = "asserted"
 
+// ActionRetired closes an account's reconciliation: it is finished, and reconcile should stop
+// reporting it. An account gets here by being emptied rather than by being wrong -- a connector
+// re-pointed away from it, or its lines collapsed onto the account they belonged to -- and until now
+// it could not be said. The first assertion for an account derives its opening balance, so the account
+// matches by construction however little it holds, and asserting zero does not retire it: the first
+// anchor stays first, its derived offset stays, and the zero reads as a delta the size of the offset.
+// Retiring drops the assertions before it; a balance recorded afterwards starts the account over.
+const ActionRetired = "retired"
+
 type balanceData struct {
 	Date   time.Time    `json:"date"`
 	Amount model.Amount `json:"amount"`
@@ -43,6 +52,19 @@ func AssertBalance(log *eventlog.Log, actor, account string, date time.Time, amo
 	return err
 }
 
+// RetireBalance closes an account's reconciliation. Nothing is deleted: the account's transactions and
+// its recorded balances stay in the log, and a later AssertBalance re-anchors it from that point.
+func RetireBalance(log *eventlog.Log, actor, account string) error {
+	if account == "" {
+		return fmt.Errorf("books: retiring a balance needs an account")
+	}
+	_, err := log.Track(eventlog.Event{
+		Collection: CollectionBalance, RecordID: account, Action: ActionRetired,
+		Version: version, Actor: actor,
+	})
+	return err
+}
+
 type balanceAssertion struct {
 	Date   time.Time
 	Amount model.Amount
@@ -56,7 +78,16 @@ func balanceAssertions(log *eventlog.Log) (map[string][]balanceAssertion, error)
 	}
 	out := map[string][]balanceAssertion{}
 	for _, e := range events {
-		if e.Collection != CollectionBalance || e.Action != ActionAsserted {
+		if e.Collection != CollectionBalance {
+			continue
+		}
+		// A retire ends what came before it. Later assertions accumulate as usual, so an account that is
+		// measured again after being retired simply anchors afresh.
+		if e.Action == ActionRetired {
+			delete(out, e.RecordID)
+			continue
+		}
+		if e.Action != ActionAsserted {
 			continue
 		}
 		var d balanceData

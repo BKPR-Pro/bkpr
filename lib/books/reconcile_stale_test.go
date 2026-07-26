@@ -62,3 +62,61 @@ func TestReconcileAllowsOrdinaryDriftWithinACycle(t *testing.T) {
 		t.Errorf("an anchor one day behind the newest is ordinary cycle drift; want not Stale")
 	}
 }
+
+// An account can be finished: a connector re-pointed away from it, or its lines collapsed onto the
+// account they belonged to. What it must not do is go on reporting. Its first assertion derives the
+// opening balance, so it matches by construction no matter what it now holds -- an emptied slice kept
+// printing "-16,515.19  0 (reconciled)" with no lines in it at all. Asserting zero cannot fix that: the
+// first anchor stays first and the derived offset stays, so the zero reads as a delta. Retiring drops
+// the account from the check entirely, leaving its history untouched.
+func TestRetiringAnAccountDropsItFromReconcile(t *testing.T) {
+	log := newLog()
+	importOne(t, log, lineIn("card", "Liabilities:Card:Slice", 3, -2500, "CHARGE"))
+	if err := books.AssertBalance(log, "rbc", "Liabilities:Card:Slice", on(5), cad(-2500)); err != nil {
+		t.Fatalf("AssertBalance: %v", err)
+	}
+	if reconcileOne(t, log, "Liabilities:Card:Slice").Account == "" {
+		t.Fatal("the account should be reconciling before it is retired")
+	}
+
+	if err := books.RetireBalance(log, "human", "Liabilities:Card:Slice"); err != nil {
+		t.Fatalf("RetireBalance: %v", err)
+	}
+
+	recs, err := books.Reconcile(log)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	for _, r := range recs {
+		if r.Account == "Liabilities:Card:Slice" {
+			t.Errorf("the retired account still reports: %+v", r)
+		}
+	}
+}
+
+// Retiring is not deletion: the account's own history stays, and a bank figure recorded afterwards
+// starts the account over -- that later assertion anchors it, and the figures from before the retire
+// do not come back to derive an offset against.
+func TestABalanceAfterRetiringReanchorsTheAccount(t *testing.T) {
+	log := newLog()
+	importOne(t, log, lineIn("card", "Liabilities:Card:Slice", 3, -2500, "CHARGE"))
+	books.AssertBalance(log, "rbc", "Liabilities:Card:Slice", on(5), cad(-2500))
+	if err := books.RetireBalance(log, "human", "Liabilities:Card:Slice"); err != nil {
+		t.Fatalf("RetireBalance: %v", err)
+	}
+
+	if err := books.AssertBalance(log, "rbc", "Liabilities:Card:Slice", on(20), cad(-9999)); err != nil {
+		t.Fatalf("AssertBalance after retiring: %v", err)
+	}
+
+	r := reconcileOne(t, log, "Liabilities:Card:Slice")
+	if !r.Reconciled {
+		t.Errorf("the re-anchored account should reconcile by construction, got delta %s", r.Delta)
+	}
+	if r.Bank.String() != "-99.99 CAD" {
+		t.Errorf("bank = %s, want the assertion made after the retire", r.Bank)
+	}
+	if !r.AsOf.Equal(on(20)) {
+		t.Errorf("as-of = %s, want the later assertion's date", r.AsOf.Format("2006-01-02"))
+	}
+}

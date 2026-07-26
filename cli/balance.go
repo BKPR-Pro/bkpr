@@ -15,14 +15,47 @@ import (
 // it leaves room for `balance` to grow (a list, a clear) without the grammar moving.
 func balanceCmd(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("balance needs a subcommand: set")
+		return fmt.Errorf("balance needs a subcommand: set, rm")
 	}
 	switch args[0] {
 	case "set":
 		return balanceSet(args[1:])
+	case "rm":
+		return balanceRm(args[1:])
 	default:
-		return fmt.Errorf("unknown balance subcommand %q; try set", args[0])
+		return fmt.Errorf("unknown balance subcommand %q; try set or rm", args[0])
 	}
+}
+
+// balanceRm retires an account's reconciliation: the account is finished and reconcile should stop
+// reporting it. Nothing is deleted -- its transactions and its recorded balances stay in the log, and
+// recording a balance afterwards starts it over. This is the verb for an account that was emptied
+// rather than one that was wrong: a connector re-pointed away from it, or its lines collapsed onto the
+// account they belonged to. Asserting zero is not the same thing, because the first assertion for an
+// account derives its opening balance -- the account then matches by construction however little it
+// holds, and a later zero reads as a delta the size of that derived offset rather than as a close.
+func balanceRm(args []string) error {
+	account, rest, err := firstArg(args, "the account to stop reconciling")
+	if err != nil {
+		return err
+	}
+	fs := flag.NewFlagSet("balance rm", flag.ExitOnError)
+	actor := fs.String("actor", "human", "who retired the account; the log records who decided")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+
+	s, err := store.Open(".")
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	if err := books.RetireBalance(s.Log, *actor, account); err != nil {
+		return err
+	}
+	fmt.Printf("retired: %s is no longer reconciled; its history is untouched\n", account)
+	return nil
 }
 
 // balanceSet anchors a file-imported account the way a connector anchors a live one: it records the
