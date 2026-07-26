@@ -2660,6 +2660,9 @@ func reconciledCell(r books.Reconciliation) string {
 		return "-" // no bank balance recorded for this account yet
 	}
 	if r.Reconciled {
+		if r.Stale {
+			return "as of " + r.AsOf.Format("2006-01-02") + ", not checked since"
+		}
 		return "yes, as of " + r.AsOf.Format("2006-01-02")
 	}
 	return fmt.Sprintf("off by %s (as of %s)", r.Delta, r.AsOf.Format("2006-01-02"))
@@ -2686,6 +2689,7 @@ func reconcileCmd(args []string) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "ACCOUNT\tAS OF\tBANK\tBOOKS\tDELTA")
 	allReconciled := true
+	var stale []string
 	for _, r := range recs {
 		status := r.Delta.String()
 		if r.Reconciled {
@@ -2693,11 +2697,26 @@ func reconcileCmd(args []string) error {
 		} else {
 			allReconciled = false
 		}
+		if r.Stale {
+			status += ", not checked since"
+			stale = append(stale, r.Account)
+		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.Account, r.AsOf.Format("2006-01-02"), r.Bank, r.Books, status)
 	}
 	w.Flush()
-	if allReconciled {
+	// A stale anchor is not a mismatch, so it must not read as one -- but it must not be swallowed by an
+	// unqualified all-clear either: the account agreed with the bank on its AS OF date and has not been
+	// measured since, which is a different claim from the one the other rows are making.
+	if len(stale) > 0 {
+		fmt.Printf("\n%d account(s) last measured against the bank before the rest of the books; nothing has checked them since:\n", len(stale))
+		for _, a := range stale {
+			fmt.Println("  " + a)
+		}
+	}
+	if allReconciled && len(stale) == 0 {
 		fmt.Println("\nall accounts reconcile to the penny")
+	} else if allReconciled {
+		fmt.Println("\nevery account reconciles to the penny as of the date shown")
 	}
 	return nil
 }

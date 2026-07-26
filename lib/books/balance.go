@@ -73,6 +73,12 @@ func balanceAssertions(log *eventlog.Log) (map[string][]balanceAssertion, error)
 
 // Reconciliation is one account's standing against the bank: what the bank last said it held, what the
 // books fold to as of that date, and the difference. Reconciled is true when they agree to the penny.
+//
+// Stale says the verdict is old news: the books carry activity dated after this account's last bank
+// figure, so "reconciled" speaks about AsOf and nothing since. An account whose connector quietly stops
+// reporting a balance -- reading the wrong page, or never reading one at all -- goes on reconciling
+// against the last figure recorded, in the same words an account measured this morning uses. Only the
+// AS OF column tells them apart, and it is the easiest column to read past.
 type Reconciliation struct {
 	Account    string
 	AsOf       time.Time
@@ -80,7 +86,15 @@ type Reconciliation struct {
 	Books      model.Amount
 	Delta      model.Amount
 	Reconciled bool
+	Stale      bool
 }
+
+// staleAfterDays is how far an account's bank figure may sit behind the rest of the book before the
+// gap stops being ordinary. The connectors of one cycle do not land together -- one bank is read
+// tonight and another tomorrow morning, and a balance-only account trails either -- so a day or two of
+// drift is the normal shape of a healthy book and must not be reported. A week is a different thing:
+// by then the account has missed a cycle, and the reason is always that nothing is measuring it.
+const staleAfterDays = 3
 
 // Reconcile checks every account that carries a bank-stated balance: does the books balance, folded to
 // the date of the latest assertion, agree with what the bank said there?
@@ -106,6 +120,23 @@ func Reconcile(log *eventlog.Log) ([]Reconciliation, error) {
 		accounts = append(accounts, a)
 	}
 	sort.Strings(accounts)
+
+	// How current the book is: the latest of anything it knows, whether a movement or a measurement.
+	// The newest transaction alone is not enough -- an import that lands no new lines still records what
+	// the bank said, and that is precisely the cycle an account left behind is being compared against.
+	// An account whose own last bank figure predates this has been passed by: whatever its verdict, the
+	// verdict is about its own AsOf.
+	var booksThrough time.Time
+	for _, tx := range txs {
+		if tx.Date.After(booksThrough) {
+			booksThrough = tx.Date
+		}
+	}
+	for _, list := range asserts {
+		if len(list) > 0 && list[len(list)-1].Date.After(booksThrough) {
+			booksThrough = list[len(list)-1].Date
+		}
+	}
 
 	var out []Reconciliation
 	for _, account := range accounts {
@@ -136,6 +167,7 @@ func Reconcile(log *eventlog.Log) ([]Reconciliation, error) {
 			Account: account, AsOf: latest.Date,
 			Bank: latest.Amount, Books: books, Delta: delta,
 			Reconciled: delta.IsZero(),
+			Stale:      latest.Date.Before(booksThrough.AddDate(0, 0, -staleAfterDays)),
 		})
 	}
 	return out, nil
