@@ -1025,8 +1025,21 @@ func importFrom(log *eventlog.Log, label string, src Source) error {
 		return err
 	}
 	fmt.Printf("%d entries read: %d imported, %d already in the log\n", len(txs), result.Imported, result.Skipped)
+	reportTwins(log, result)
 	uncategorizedHint(log)
 	return nil
+}
+
+// reportTwins checks the lines an import just landed against everything already in the book and says
+// so when any of them collide. Every import path calls it: a duplicate does not care which door it
+// came through, and the ledger and CSV readers land lines exactly as a connector does. Never fatal --
+// a warning about the books is not a reason to fail an import that already succeeded.
+func reportTwins(log *eventlog.Log, result books.ImportResult) {
+	groups, err := twinsAmong(log, result.IDs)
+	if err != nil {
+		return
+	}
+	warnTwins(os.Stdout, groups)
 }
 
 // importConnector fetches a registered connector's lines and lands them through the same import
@@ -1131,6 +1144,7 @@ func importLedger(log *eventlog.Log, path string) error {
 	}
 	fmt.Printf("%d entries read: %d imported, %d already in the log; %d categorized from the file, %d left to the rules; %d account(s) described\n",
 		len(txs), result.Imported, result.Skipped, carried, skipped, metaSet)
+	reportTwins(log, result)
 	uncategorizedHint(log)
 	return nil
 }
@@ -1194,6 +1208,7 @@ func importCSV(log *eventlog.Log, path string, args []string) error {
 	}
 
 	fmt.Printf("%d lines read: %d imported, %d already in the log\n", len(txs), result.Imported, result.Skipped)
+	reportTwins(log, result)
 	uncategorizedHint(log)
 	return nil
 }

@@ -40,7 +40,8 @@ type importedData struct {
 // ImportResult reports what one statement did to the log.
 type ImportResult struct {
 	Imported int
-	Skipped  int // already in the log, because statements overlap
+	Skipped  int      // already in the log, because statements overlap
+	IDs      []string // the lines this import actually landed, so a caller can check just them
 }
 
 // Import records each statement line exactly once, keyed by its fingerprint. A line already in
@@ -85,6 +86,7 @@ func Import(log *eventlog.Log, actor string, txs []model.Transaction) (ImportRes
 			return result, fmt.Errorf("books: %s: %w", tx.ID, err)
 		default:
 			result.Imported++
+			result.IDs = append(result.IDs, tx.ID)
 			// A note on the source leg is a separate fact from the import, latest-wins, so it is carried
 			// as its own event rather than baked in. Only on a fresh import: a re-import is a no-op, and
 			// re-carrying the file's note would clobber a note the comment command left in the meantime.
