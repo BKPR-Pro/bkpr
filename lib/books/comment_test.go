@@ -191,3 +191,33 @@ func TestCommentRefusesAnAmbiguousSplit(t *testing.T) {
 		t.Fatal("a split with no account named should be refused")
 	}
 }
+
+// A note is an assertion about one leg, and asserting it re-states the line as it stands -- so it
+// must re-state all of it. Source routing and the invoice number are part of the line's answer, and
+// dropping them silently sends the elided leg back to the account the line was imported on. Found on
+// the real books: re-sourcing a card's history onto the card itself, then restoring each posting's
+// note, put 174 lines back on the purpose slices they had just been moved off. With categorize unable
+// to express a comment and comment unable to keep a source, the two facts could not be held at once.
+func TestCommentKeepsTheLinesSourceAndInvoice(t *testing.T) {
+	log := newLog()
+	importOne(t, log, line("a", 2, -8420, "KENT"))
+	if err := books.Categorize(log, "human", "", "a", "2074", "Kent",
+		"Liabilities:RBC Mastercard", whole("Expenses:Real Estate:Materials:90 King Street", -8420)); err != nil {
+		t.Fatalf("Categorize: %v", err)
+	}
+
+	if err := books.Comment(log, "human", "", "a", "", "Closet doors", false); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+
+	got := entryFor(t, log, "a")
+	if got.Postings[0].Comment != "Closet doors" {
+		t.Errorf("comment = %q, want the note recorded", got.Postings[0].Comment)
+	}
+	if got.Source != "Liabilities:RBC Mastercard" {
+		t.Errorf("source = %q, want the routing to survive the note", got.Source)
+	}
+	if got.Invoice != "2074" {
+		t.Errorf("invoice = %q, want 2074 to survive the note", got.Invoice)
+	}
+}

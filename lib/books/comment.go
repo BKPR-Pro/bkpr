@@ -53,10 +53,12 @@ func Comment(log *eventlog.Log, actor, why, txID, account, text string, remove b
 	entry.Postings[idx].Comment = text
 
 	// The freeze re-asserts the entry as it stands, and it must not soften it: legs the caller spelled
-	// stay spelled, so a note never opens a deliberate no-split to a later tax overlay.
+	// stay spelled, so a note never opens a deliberate no-split to a later tax overlay -- and the
+	// routing and invoice the line already carries are re-asserted with it. Leaving Source out sent the
+	// elided leg back to the account the line was imported on, so a note silently undid a re-source.
 	data, err := json.Marshal(categorizedData{
-		Payee: entry.Payee, Postings: entry.Postings, Gain: entry.Gain,
-		BlockComments: entry.BlockComments, Why: why, ExplicitPosts: explicitPosts,
+		Payee: entry.Payee, Invoice: entry.Invoice, Postings: entry.Postings, Gain: entry.Gain,
+		Source: entry.Source, BlockComments: entry.BlockComments, Why: why, ExplicitPosts: explicitPosts,
 	})
 	if err != nil {
 		return err
