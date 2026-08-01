@@ -533,8 +533,13 @@ var reference = []docGroup{
       Write rent the books already booked out to a registered connector (see connectors register),
       so its paid/unpaid state stays current. Each rent deposit that a rule attributed to a
       lease (via -meta rentapp.lease=<id>) is recorded against that lease, keyed by the
-      deposit's fingerprint so a repeat is a no-op. Without -confirm it is a dry run that
-      prints what it would send.
+      deposit's fingerprint so a repeat is a no-op. When the deposit settles a numbered invoice,
+      its number rides along as the reference the app cites in the payment's description.
+      Without -confirm it is a dry run that prints what it would send.
+      A period can be marked paid from either side: a human recording it in the app's own UI, or
+      this export recording it here. When the app already has a period recorded, the export
+      reports it as already recorded rather than an error -- the other valid path simply got
+      there first.
 `},
 		{[]string{"books"}, `  books [-format table|json|ledger] [-basis cash|accrual] [-since YYYY-MM-DD] [-account <re> ...]
         [-from YYYY-MM-DD] [-to YYYY-MM-DD] [-sort amount [-desc]] [-value <c> [-rate <C=n> ...]] [-stdout]

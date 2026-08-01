@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -19,19 +20,22 @@ import (
 // travels as rentapp.lease, set on the tenant's rule where the description already identifies them.
 const rentappLeaseKey = "rentapp.lease"
 
-// exportPlan is one rent deposit ready to record: which lease, how much, when.
+// exportPlan is one rent deposit ready to record: which lease, how much, when, and -- when the
+// deposit settles a numbered invoice -- the number to cite in the app's rent description.
 type exportPlan struct {
-	txID   string
-	lease  string
-	amount int64 // cents
-	date   string
-	payee  string
+	txID      string
+	lease     string
+	amount    int64 // cents
+	date      string
+	payee     string
+	reference string // an invoice number, when this deposit settles one; empty otherwise
 }
 
 // exportResult reports what an export did, or would do on a dry run.
 type exportResult struct {
 	Planned  []exportPlan // what a dry run would send
 	Recorded []exportPlan // what was recorded this run
+	Skipped  []exportPlan // already recorded in the app -- the other valid path got there first
 	Failed   []exportFailure
 }
 
@@ -53,6 +57,10 @@ func exportPlans(log *eventlog.Log) ([]exportPlan, error) {
 	if err != nil {
 		return nil, err
 	}
+	references, err := invoiceNumbersBySettlingTx(log)
+	if err != nil {
+		return nil, err
+	}
 
 	var plans []exportPlan
 	for i, tx := range txs {
@@ -67,9 +75,35 @@ func exportPlans(log *eventlog.Log) ([]exportPlan, error) {
 		plans = append(plans, exportPlan{
 			txID: tx.ID, lease: lease, amount: cents,
 			date: tx.Date.Format("2006-01-02"), payee: entries[i].Payee,
+			reference: references[tx.ID],
 		})
 	}
 	return plans, nil
+}
+
+// invoiceNumbersBySettlingTx maps the transaction that settled an invoice to that invoice's number,
+// so exportPlans can look one up per deposit without a lookup per plan. An invoice raised with no
+// number, or not yet settled, contributes nothing -- the ordinary rule-categorized rent line is the
+// common case and must stay free of any invoice lookup failure.
+func invoiceNumbersBySettlingTx(log *eventlog.Log) (map[string]string, error) {
+	invs, err := books.Invoices(log)
+	if err != nil {
+		return nil, err
+	}
+	settlements, err := books.InvoiceSettlements(log)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, inv := range invs {
+		if inv.Number == "" {
+			continue
+		}
+		if txID := settlements[inv.ID]; txID != "" {
+			out[txID] = inv.Number
+		}
+	}
+	return out, nil
 }
 
 // exportRent records each planned rent deposit against its lease in the rent app, then marks it
@@ -90,8 +124,16 @@ func exportRent(log *eventlog.Log, client *rentapp.Client, connector string, con
 	for _, p := range plans {
 		rec, err := client.RecordRent(rentapp.Payment{
 			LeaseID: p.lease, AmountCents: p.amount, PaidOn: p.date, IdempotencyKey: p.txID,
+			Reference: p.reference,
 		})
 		if err != nil {
+			// A 409 means the app already has this period recorded -- almost always because a human
+			// used the app's own UI first. That is the other valid path having gotten there first,
+			// not a bug, so it is skipped rather than failed and does not sour the run.
+			if errors.Is(err, rentapp.ErrAlreadyRecorded) {
+				res.Skipped = append(res.Skipped, p)
+				continue
+			}
 			res.Failed = append(res.Failed, exportFailure{plan: p, err: err})
 			continue
 		}
@@ -184,6 +226,9 @@ func reportExport(out io.Writer, res exportResult, confirm bool) {
 
 	fmt.Fprintf(out, "recorded %d rent payment(s)\n", len(res.Recorded))
 	writePlans(out, res.Recorded)
+	for _, p := range res.Skipped {
+		fmt.Fprintf(out, "already recorded in the app: %s to lease %s\n", p.date, p.lease)
+	}
 	for _, f := range res.Failed {
 		fmt.Fprintf(out, "FAILED %s to lease %s: %v\n", f.plan.date, f.plan.lease, f.err)
 	}

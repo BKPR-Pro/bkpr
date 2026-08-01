@@ -2,6 +2,7 @@ package rentapp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,16 +10,22 @@ import (
 	"strings"
 )
 
-// Payment is a cleared rent payment to record against a lease. Method and PaidOn are optional; an
-// empty one is not sent, so the endpoint falls back to its own default. IdempotencyKey makes the
-// export safe to repeat: the rent app records the payment at most once per key, so re-running the
-// export never double-records.
+// ErrAlreadyRecorded means the app already has this period recorded as paid -- almost always
+// because a human recorded it from the app's own UI first. It is not a failure: the caller should
+// treat it as the other valid path having gotten there first, not as something to retry.
+var ErrAlreadyRecorded = errors.New("rentapp: already recorded")
+
+// Payment is a cleared rent payment to record against a lease. Method, PaidOn, and Reference are
+// optional; an empty one is not sent, so the endpoint falls back to its own default. IdempotencyKey
+// makes the export safe to repeat: the rent app records the payment at most once per key, so
+// re-running the export never double-records.
 type Payment struct {
 	LeaseID        string
 	AmountCents    int64
 	Method         string
 	PaidOn         string // ISO date
 	IdempotencyKey string
+	Reference      string // e.g. an invoice number, appended to the app's rent description
 }
 
 // Recorded is what the rent app booked. Created distinguishes a fresh record (201) from a replay
@@ -39,6 +46,9 @@ func (c *Client) RecordRent(p Payment) (Recorded, error) {
 	}
 	if p.PaidOn != "" {
 		form.Set("paid_on", p.PaidOn)
+	}
+	if p.Reference != "" {
+		form.Set("reference", p.Reference)
 	}
 
 	u := fmt.Sprintf("%s/rentroll/record/%s.json", c.baseURL, url.PathEscape(p.LeaseID))
@@ -62,7 +72,12 @@ func (c *Client) RecordRent(p Payment) (Recorded, error) {
 	if err != nil {
 		return Recorded{}, err
 	}
-	// 201 created, 200 replayed. Anything else is a real failure.
+	// 201 created, 200 replayed: both success. 409 is the app refusing a second recording of an
+	// already-paid period -- wrap ErrAlreadyRecorded so the caller can tell it apart from a real
+	// failure. Anything else is a real failure.
+	if resp.StatusCode == http.StatusConflict {
+		return Recorded{}, fmt.Errorf("rentapp: recording rent for %s: %s: %w", p.LeaseID, strings.TrimSpace(string(body)), ErrAlreadyRecorded)
+	}
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		return Recorded{}, fmt.Errorf("rentapp: recording rent returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}

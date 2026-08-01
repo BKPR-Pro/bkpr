@@ -1,6 +1,7 @@
 package rentapp_test
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -72,14 +73,58 @@ func TestRecordRentTreatsAReplayAsSuccess(t *testing.T) {
 	}
 }
 
+// A validation failure (422, wrong token, etc.) is a genuine error distinct from an
+// already-recorded period, and must not be mistaken for one.
 func TestRecordRentSurfacesARejection(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "conflict", http.StatusConflict)
+		http.Error(w, "unprocessable", http.StatusUnprocessableEntity)
 	}))
 	defer srv.Close()
 
-	if _, err := rentapp.New(srv.URL, "tok").RecordRent(rentapp.Payment{LeaseID: "L1", AmountCents: 1, IdempotencyKey: "k"}); err == nil {
-		t.Fatal("a 409 should surface as an error")
+	_, err := rentapp.New(srv.URL, "tok").RecordRent(rentapp.Payment{LeaseID: "L1", AmountCents: 1, IdempotencyKey: "k"})
+	if err == nil {
+		t.Fatal("a 422 should surface as an error")
+	}
+	if errors.Is(err, rentapp.ErrAlreadyRecorded) {
+		t.Errorf("a 422 must not be mistaken for ErrAlreadyRecorded: %v", err)
+	}
+}
+
+// The app refuses a second attempt to record an already-paid period with 409 -- almost always
+// because a human recorded it from the app's own UI first. RecordRent must let a caller tell that
+// apart from a real failure, so the export can treat it as skipped rather than failed.
+func TestRecordRentReportsAlreadyRecordedOn409(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "already paid", http.StatusConflict)
+	}))
+	defer srv.Close()
+
+	_, err := rentapp.New(srv.URL, "tok").RecordRent(rentapp.Payment{LeaseID: "L1", AmountCents: 1, IdempotencyKey: "k"})
+	if !errors.Is(err, rentapp.ErrAlreadyRecorded) {
+		t.Fatalf("err = %v, want it to wrap ErrAlreadyRecorded", err)
+	}
+}
+
+// The invoice number behind a settled deposit is carried through as reference, so the app's rent
+// description can cite it; an empty reference is simply not sent.
+func TestRecordRentSendsReferenceWhenGiven(t *testing.T) {
+	var form url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		form = r.PostForm
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"transaction":{"id":"TX"}}`))
+	}))
+	defer srv.Close()
+
+	_, err := rentapp.New(srv.URL, "tok").RecordRent(rentapp.Payment{
+		LeaseID: "L1", AmountCents: 168000, IdempotencyKey: "k", Reference: "2086",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if form.Get("reference") != "2086" {
+		t.Errorf("reference = %q, want 2086", form.Get("reference"))
 	}
 }
 
