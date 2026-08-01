@@ -146,18 +146,22 @@ func leaf(account string) string {
 	return account
 }
 
-// invoiceTemplate mirrors fastfinance's print-transaction view: a right-aligned title and biller
-// address, the reference and date, a floated PAID, the bill-to, then a plain table of line items
-// with a ruled spacer above the total. The CSS is fastfinance's (uppercase faint headers, a right
-// column, a floated PAID), so the document reads the same off either app.
+// invoiceTemplate lays the document out the way the older print-transaction view did: a right-aligned
+// title and biller address, the reference and date, a floated PAID, the bill-to, then a plain table of
+// line items with a ruled spacer above the total, and its uppercase faint headers. The type is this
+// book's own: these invoices have always been set in mono, and columns of figures line up in a mono
+// face in a way they do not in a proportional one.
 var invoiceTemplate = template.Must(template.New("invoice").Parse(`<!doctype html>
 <meta charset="utf-8">
 <title>{{.Kind}} {{.Reference}}</title>
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #000; background: #fff; max-width: 42rem; margin: 2rem auto; padding: 0 1.5rem; line-height: 1.5; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; color: #000; background: #fff; max-width: 42rem; margin: 2rem auto; padding: 0 1.5rem; line-height: 1.5; }
   #transaction-invoice { overflow: hidden; }
   p { margin: 0 0 0.75rem; }
   .tr { text-align: right; }
+  /* An amount is "1600.00 CAD": without this a narrow column breaks the commodity onto its own line
+     and the total stops lining up with the items above it. */
+  td.tr { white-space: nowrap; }
   .float-right { float: right; }
   table { width: 100%; border-collapse: collapse; clear: both; }
   th { text-transform: uppercase; font-size: 0.75rem; opacity: 0.5; border-bottom: 1px solid #ccc; }

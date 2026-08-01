@@ -203,6 +203,28 @@ func TestRenderInvoiceEmitsHTML(t *testing.T) {
 	}
 }
 
+// The document is set in a monospace face: that is how these invoices have always read, and figures
+// only line up column-wise in mono. The proportional system stack must not come back.
+func TestRenderInvoiceSetsTheDocumentInMonospace(t *testing.T) {
+	doc := buildInvoice(cadTx("abc123", 160000), model.Entry{Payee: "J. Smith",
+		Postings: []model.Posting{{Account: "Income:Rent", Amount: model.Amount{Units: -160000, Scale: 2, Commodity: "CAD"}}}},
+		nil, "invoice")
+
+	var buf bytes.Buffer
+	if err := renderInvoiceHTML(&buf, doc); err != nil {
+		t.Fatalf("renderInvoiceHTML: %v", err)
+	}
+	html := buf.String()
+	if !strings.Contains(html, "font-family: ui-monospace") || !strings.Contains(html, "monospace;") {
+		t.Errorf("rendered HTML declares no monospace family:\n%s", html)
+	}
+	for _, unwanted := range []string{"-apple-system", "sans-serif"} {
+		if strings.Contains(html, unwanted) {
+			t.Errorf("rendered HTML still declares the proportional stack %q", unwanted)
+		}
+	}
+}
+
 // The text form is the default: the same fields, no markup.
 func TestRenderInvoiceTextCarriesTheFields(t *testing.T) {
 	doc := buildInvoice(cadTx("abc123", 160000), model.Entry{Payee: "J. Smith",
