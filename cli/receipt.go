@@ -55,9 +55,11 @@ func buildInvoice(tx model.Transaction, entry model.Entry, meta map[string]map[s
 		Title:     strings.ToUpper(kind),
 		Kind:      strings.ToUpper(kind[:1]) + kind[1:],
 		Biller:    partyFor(tx.Account, tx.Account, meta),
-		Reference: tx.ID,
+		Reference: docReference(tx, entry),
 		Date:      tx.Date.Format("January 2, 2006"),
-		Paid:      true, // every line bkpr holds came off a statement, so it has cleared
+		// Paid is a read of the entry's own clearing flag: a line off a statement is cleared, so it
+		// reads PAID, while a raised invoice whose cash has not arrived is pending and does not.
+		Paid: !entry.Pending,
 	}
 
 	// The bill-to is the categorized account's own metadata (a customer's name and address) when it
@@ -89,20 +91,36 @@ func buildInvoice(tx model.Transaction, entry model.Entry, meta map[string]map[s
 	return doc
 }
 
+// docReference is what the document is quoted by: the invoice or bill number when the entry carries
+// one, since that is the number a reader and a payer both cite, and the line's fingerprint otherwise.
+func docReference(tx model.Transaction, entry model.Entry) string {
+	if entry.Invoice != "" {
+		return entry.Invoice
+	}
+	return tx.ID
+}
+
 // partyFor reads a name and address off an account's metadata, falling back to the given name when
-// the account carries none.
+// the account carries none. An account with an address but no name is headed by the address's first
+// line, since that line is the name written there, rather than by a raw account path.
 func partyFor(account, fallbackName string, meta map[string]map[string]string) party {
 	p := party{Name: fallbackName}
 	m := meta[account]
 	if m == nil {
 		return p
 	}
-	if name := m["name"]; name != "" {
+	name, addr := m["name"], m["address"]
+	lines := []string(nil)
+	if addr != "" {
+		lines = strings.Split(addr, "\n")
+	}
+	switch {
+	case name != "":
 		p.Name = name
+	case len(lines) > 0:
+		p.Name, lines = lines[0], lines[1:]
 	}
-	if addr := m["address"]; addr != "" {
-		p.Address = strings.Split(addr, "\n")
-	}
+	p.Address = lines
 	return p
 }
 
@@ -235,7 +253,9 @@ func receiptCmd(args []string) error {
 	}
 	defer s.Close()
 
-	txs, entries, err := books.Ledger(s.Log)
+	// The accrual basis, so a raised invoice or a received bill has a document before its cash moves;
+	// on the cash basis it is not in the books being searched at all.
+	txs, entries, err := books.LedgerBasis(s.Log, books.AccrualBasis)
 	if err != nil {
 		return err
 	}
@@ -245,7 +265,7 @@ func receiptCmd(args []string) error {
 	}
 
 	for i, tx := range txs {
-		if tx.ID != *txID {
+		if !matchesTx(tx.ID, *txID) {
 			continue
 		}
 		doc := buildInvoice(tx, entries[i], meta, *as)
@@ -259,6 +279,13 @@ func receiptCmd(args []string) error {
 		return writeOut(*out, func(w io.Writer) error { return render(w, doc) })
 	}
 	return fmt.Errorf("invoice: no transaction %q in the books", *txID)
+}
+
+// matchesTx says whether a folded line's id is the one asked for. An accrual's line is namespaced by
+// its kind ("invoice:<fingerprint>"), but the fingerprint a person holds is the bare one invoice list
+// printed, so both forms find it. A bank line matches only itself.
+func matchesTx(id, want string) bool {
+	return id == want || id == "invoice:"+want || id == "bill:"+want
 }
 
 // renderInvoiceJSON is the document's machine-readable form: the same fields the template renders,

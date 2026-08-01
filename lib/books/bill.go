@@ -35,6 +35,11 @@ type Bill struct {
 	Category string       // the Expenses account the expense is recognized in
 	Account  string       // the Liabilities:Payable account it parks in until paid
 	Number   string       // the bill number (the vendor's invoice number), rendered as the ledger (code)
+
+	// Sales tax the vendor charged, the mirror of an invoice's: Amount is the tax-inclusive gross owed,
+	// the net is recognized in Category, and the tax lands in TaxAccount, where it is recoverable.
+	TaxRate    string // e.g. "15%"
+	TaxAccount string // the account the tax is claimed back through
 }
 
 // ReceiveBill records a bill: an expense incurred and billed before the cash leaves. It returns the
@@ -53,14 +58,18 @@ func ReceiveBill(log *eventlog.Log, actor, why string, bill Bill) (Bill, bool, e
 	case bill.Date.IsZero():
 		return Bill{}, false, fmt.Errorf("books: a bill needs a date")
 	}
+	if _, _, err := accrualTax("a bill's", bill.TaxRate, bill.TaxAccount); err != nil {
+		return Bill{}, false, err
+	}
 	if bill.Account == "" {
 		bill.Account = defaultPayable
 	}
-	bill.ID = accrualFingerprint(CollectionBill, bill.Date, bill.Party, bill.Amount, bill.Category, bill.Account)
+	bill.ID = accrualFingerprint(CollectionBill, bill.Date, bill.Party, bill.Amount, bill.Category, bill.Account, bill.TaxRate, bill.TaxAccount)
 
 	data, err := json.Marshal(accrualData{
 		Date: bill.Date, Party: bill.Party, Amount: bill.Amount,
 		Category: bill.Category, Account: bill.Account, Number: bill.Number, Why: why,
+		TaxRate: bill.TaxRate, TaxAccount: bill.TaxAccount,
 	})
 	if err != nil {
 		return Bill{}, false, err
@@ -137,6 +146,7 @@ func Bills(log *eventlog.Log) ([]Bill, error) {
 		out = append(out, Bill{
 			ID: e.RecordID, Date: data.Date, Party: data.Party,
 			Amount: data.Amount, Category: data.Category, Account: data.Account, Number: data.Number,
+			TaxRate: data.TaxRate, TaxAccount: data.TaxAccount,
 		})
 	}
 	return out, nil
@@ -178,10 +188,14 @@ func billLines(log *eventlog.Log) ([]accrualLine, error) {
 	}
 	out := make([]accrualLine, 0, len(bills))
 	for _, b := range bills {
+		// ReceiveBill refused an unreadable rate, so a recorded one parses; a log hand-edited past that
+		// is read as untaxed rather than failing the whole fold.
+		num, den, _ := accrualTax("a bill's", b.TaxRate, b.TaxAccount)
 		out = append(out, accrualLine{
 			kind: CollectionBill, id: b.ID, date: b.Date, party: b.Party,
 			parkedAccount: b.Account, parkedAmount: b.Amount.Negate(), category: b.Category,
 			invoice: b.Number, settledBy: settled[b.ID],
+			taxAccount: b.TaxAccount, taxNum: num, taxDen: den,
 		})
 	}
 	return out, nil

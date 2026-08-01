@@ -36,6 +36,12 @@ type accrualData struct {
 	Account  string       `json:"account"`
 	Number   string       `json:"number,omitempty"` // the invoice or bill number, rendered as the ledger (code)
 	Why      string       `json:"why,omitempty"`
+
+	// The tax an accrual carries, in the same vocabulary a rule uses: the amount is tax-inclusive, so
+	// the rate divides it into the category's net and the tax account's share. Omitted when untaxed,
+	// so the payload of every accrual already recorded is unchanged.
+	TaxRate    string `json:"tax_rate,omitempty"`
+	TaxAccount string `json:"tax_account,omitempty"`
 }
 
 type settledData struct {
@@ -56,6 +62,9 @@ type accrualLine struct {
 	category      string       // the income (invoice) or expense (bill) account
 	invoice       string       // the invoice or bill number, rendered as the ledger (code)
 	settledBy     string       // the bank line that paid it, or "" while open
+	taxAccount    string       // where the tax lands, or "" when the accrual carries none
+	taxNum        int64        // the rate, as the numerator/denominator ParsePercent read (15% is 15, 100)
+	taxDen        int64
 }
 
 // transaction and entry render the accrual as a synthetic balanced line, so the ledger writer that
@@ -75,11 +84,21 @@ func (a accrualLine) entry() model.Entry {
 	// The clearing flag is a folded read of settlement: while the accrual is open its cash has not
 	// arrived, so the line is pending (!); once a bank line settles it, it is cleared (*). Nothing is
 	// stored -- the flag is derived here from the settle events the fold already read.
+	// The parked amount is the gross: the receivable or payable is the whole sum owed. Where the
+	// accrual carries tax, only the category's side splits, into the net and the tax, and the two sum
+	// back to the gross exactly (SplitInclusive gives the tax the remainder), so the line cannot be
+	// unbalanced by rounding.
+	full := a.parkedAmount.Negate()
+	postings := []model.Posting{{Account: a.category, Amount: full}}
+	if a.taxAccount != "" && a.taxDen != 0 {
+		net, tax := full.SplitInclusive(a.taxNum, a.taxDen)
+		postings = []model.Posting{{Account: a.category, Amount: net}, {Account: a.taxAccount, Amount: tax}}
+	}
 	return model.Entry{
 		Payee:    a.party,
 		Invoice:  a.invoice,
 		Pending:  a.settledBy == "",
-		Postings: []model.Posting{{Account: a.category, Amount: a.parkedAmount.Negate()}},
+		Postings: postings,
 	}
 }
 
@@ -366,16 +385,44 @@ func trackVoid(log *eventlog.Log, actor, collection, why, recordID string) error
 // accrualFingerprint hashes an accrual by its content, the way a statement line is fingerprinted, so
 // recording the same one twice collapses to one fact. The kind is in the hash so an invoice and a
 // bill that happen to share fields still take different ids.
-func accrualFingerprint(kind string, date time.Time, party string, amount model.Amount, category, account string) string {
-	sum := sha256.Sum256([]byte(strings.Join([]string{
+//
+// The tax fields join the hash only when the accrual carries tax, so an untaxed one still hashes the
+// six fields it always did, byte for byte. Books already hold invoice and bill fingerprints, and
+// every settlement keys to one; a wider hash would orphan them all.
+func accrualFingerprint(kind string, date time.Time, party string, amount model.Amount, category, account, taxRate, taxAccount string) string {
+	fields := []string{
 		kind,
 		date.Format("2006-01-02"),
 		strings.Join(strings.Fields(strings.ToLower(party)), " "),
 		amount.String(),
 		category,
 		account,
-	}, "\x00")))
+	}
+	if taxAccount != "" {
+		fields = append(fields, taxRate, taxAccount)
+	}
+	sum := sha256.Sum256([]byte(strings.Join(fields, "\x00")))
 	return hex.EncodeToString(sum[:])[:16]
+}
+
+// accrualTax validates the tax half of an invoice or a bill and reads the rate. A rate and an account
+// are one fact in two halves, exactly as they are on a rule, so either alone is refused; noun names
+// the thing being recorded so the message reads in its own words.
+func accrualTax(noun, taxRate, taxAccount string) (numer, denom int64, err error) {
+	if taxRate == "" && taxAccount == "" {
+		return 0, 0, nil
+	}
+	if taxRate == "" {
+		return 0, 0, fmt.Errorf("books: %s tax account needs a tax rate", noun)
+	}
+	if taxAccount == "" {
+		return 0, 0, fmt.Errorf("books: %s tax rate needs a tax account", noun)
+	}
+	numer, denom, err = model.ParsePercent(taxRate)
+	if err != nil {
+		return 0, 0, fmt.Errorf("books: %s: %w", noun, err)
+	}
+	return numer, denom, nil
 }
 
 // sortByDate orders the lines and their entries together, by date and then id, so the artifact is

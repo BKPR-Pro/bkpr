@@ -38,6 +38,12 @@ type Invoice struct {
 	Category string       // the Income account the revenue is recognized in
 	Account  string       // the Assets:Receivable account it parks in until paid
 	Number   string       // the invoice number, rendered as the ledger (code); metadata, not part of the fingerprint
+
+	// Sales tax collected on the customer's behalf, in the same words a rule uses. Amount is the
+	// tax-inclusive gross owed, so the rate divides it: the net is recognized in Category and the tax
+	// is parked in TaxAccount until it is remitted.
+	TaxRate    string // e.g. "15%"
+	TaxAccount string // the Liabilities account the tax is owed from
 }
 
 // Raise records an invoice: revenue earned and billed before the cash moves. It returns the stored
@@ -56,14 +62,18 @@ func Raise(log *eventlog.Log, actor, why string, inv Invoice) (Invoice, bool, er
 	case inv.Date.IsZero():
 		return Invoice{}, false, fmt.Errorf("books: an invoice needs a date")
 	}
+	if _, _, err := accrualTax("an invoice's", inv.TaxRate, inv.TaxAccount); err != nil {
+		return Invoice{}, false, err
+	}
 	if inv.Account == "" {
 		inv.Account = defaultReceivable
 	}
-	inv.ID = accrualFingerprint(CollectionInvoice, inv.Date, inv.Party, inv.Amount, inv.Category, inv.Account)
+	inv.ID = accrualFingerprint(CollectionInvoice, inv.Date, inv.Party, inv.Amount, inv.Category, inv.Account, inv.TaxRate, inv.TaxAccount)
 
 	data, err := json.Marshal(accrualData{
 		Date: inv.Date, Party: inv.Party, Amount: inv.Amount,
 		Category: inv.Category, Account: inv.Account, Number: inv.Number, Why: why,
+		TaxRate: inv.TaxRate, TaxAccount: inv.TaxAccount,
 	})
 	if err != nil {
 		return Invoice{}, false, err
@@ -142,6 +152,7 @@ func Invoices(log *eventlog.Log) ([]Invoice, error) {
 		out = append(out, Invoice{
 			ID: e.RecordID, Date: data.Date, Party: data.Party,
 			Amount: data.Amount, Category: data.Category, Account: data.Account, Number: data.Number,
+			TaxRate: data.TaxRate, TaxAccount: data.TaxAccount,
 		})
 	}
 	return out, nil
@@ -183,10 +194,14 @@ func invoiceLines(log *eventlog.Log) ([]accrualLine, error) {
 	}
 	out := make([]accrualLine, 0, len(invs))
 	for _, inv := range invs {
+		// Raise refused an unreadable rate, so a recorded one parses; a log hand-edited past that is
+		// read as untaxed rather than failing the whole fold.
+		num, den, _ := accrualTax("an invoice's", inv.TaxRate, inv.TaxAccount)
 		out = append(out, accrualLine{
 			kind: CollectionInvoice, id: inv.ID, date: inv.Date, party: inv.Party,
 			parkedAccount: inv.Account, parkedAmount: inv.Amount, category: inv.Category,
 			invoice: inv.Number, settledBy: settled[inv.ID],
+			taxAccount: inv.TaxAccount, taxNum: num, taxDen: den,
 		})
 	}
 	return out, nil

@@ -7,10 +7,31 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dallasread/bkpr/lib/books"
 	"github.com/dallasread/bkpr/lib/model"
+	"github.com/dallasread/bkpr/lib/store"
 )
 
 func on(day int) time.Time { return time.Date(2026, 3, day, 0, 0, 0, 0, time.UTC) }
+
+// raiseTestInvoice raises one open invoice in the book here and returns its fingerprint, the one
+// invoice list prints.
+func raiseTestInvoice(t *testing.T) string {
+	t.Helper()
+	s, err := store.Open(".")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	inv, _, err := books.Raise(s.Log, "human", "", books.Invoice{
+		Date: on(15), Party: "J. Smith", Amount: model.Amount{Units: 160000, Scale: 2, Commodity: "CAD"},
+		Category: "Income:Consulting", Number: "2086",
+	})
+	if err != nil {
+		t.Fatalf("Raise: %v", err)
+	}
+	return inv.ID
+}
 
 func cadTx(id string, cents int64) model.Transaction {
 	return model.Transaction{ID: id, Account: "Assets:Bank:Chequing", Date: on(15), Amount: model.Amount{Units: cents, Scale: 2, Commodity: "CAD"}}
@@ -141,6 +162,99 @@ func TestRenderInvoiceTextCarriesTheFields(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("text missing %q", want)
 		}
+	}
+}
+
+// An entry the bank has cleared renders PAID: an ordinary imported line carries no pending flag, so
+// the document reads as money that moved, exactly as it did before Paid was derived.
+func TestBuildInvoiceMarksAClearedEntryPaid(t *testing.T) {
+	doc := buildInvoice(cadTx("abc123", 160000), model.Entry{Payee: "J. Smith",
+		Postings: []model.Posting{{Account: "Income:Rent", Amount: model.Amount{Units: -160000, Scale: 2, Commodity: "CAD"}}}},
+		nil, "invoice")
+	if !doc.Paid {
+		t.Errorf("paid = %v, want a cleared bank line to read PAID", doc.Paid)
+	}
+}
+
+// A raised invoice whose cash has not arrived is pending, so the document must not claim it is paid.
+func TestBuildInvoiceLeavesAPendingEntryUnpaid(t *testing.T) {
+	doc := buildInvoice(cadTx("invoice:abc123", 160000), model.Entry{Payee: "J. Smith", Pending: true,
+		Postings: []model.Posting{{Account: "Income:Rent", Amount: model.Amount{Units: -160000, Scale: 2, Commodity: "CAD"}}}},
+		nil, "invoice")
+	if doc.Paid {
+		t.Errorf("paid = %v, want an unsettled accrual to read unpaid", doc.Paid)
+	}
+}
+
+// The reference a reader quotes is the invoice number, not the fingerprint the fold keyed the line
+// under, so a document raised as invoice 2086 reads "Invoice No: 2086".
+func TestBuildInvoicePrefersTheInvoiceNumberAsTheReference(t *testing.T) {
+	doc := buildInvoice(cadTx("invoice:4f3a", 160000), model.Entry{Payee: "J. Smith", Invoice: "2086",
+		Postings: []model.Posting{{Account: "Income:Rent", Amount: model.Amount{Units: -160000, Scale: 2, Commodity: "CAD"}}}},
+		nil, "invoice")
+	if doc.Reference != "2086" {
+		t.Errorf("reference = %q, want the invoice number", doc.Reference)
+	}
+}
+
+// Without a number the fingerprint is still the reference, so an ordinary line keeps its identity on
+// the document.
+func TestBuildInvoiceFallsBackToTheFingerprintAsTheReference(t *testing.T) {
+	doc := buildInvoice(cadTx("abc123", 160000), model.Entry{Payee: "J. Smith",
+		Postings: []model.Posting{{Account: "Income:Rent", Amount: model.Amount{Units: -160000, Scale: 2, Commodity: "CAD"}}}},
+		nil, "invoice")
+	if doc.Reference != "abc123" {
+		t.Errorf("reference = %q, want the transaction fingerprint", doc.Reference)
+	}
+}
+
+// An account carrying an address but no name heads the letterhead with the address's first line,
+// since that line is the name a person wrote there; the rest stays the address. Otherwise the
+// document would be headed by a raw account path.
+func TestPartyForNamesTheLetterheadFromTheAddressWhenThereIsNoName(t *testing.T) {
+	p := partyFor("Assets:Consulting:Chequing", "Assets:Consulting:Chequing", map[string]map[string]string{
+		"Assets:Consulting:Chequing": {"address": "Excite Creative\n123 Main St\nOttawa ON"},
+	})
+	if p.Name != "Excite Creative" {
+		t.Errorf("name = %q, want the address's first line", p.Name)
+	}
+	if len(p.Address) != 2 || p.Address[0] != "123 Main St" || p.Address[1] != "Ottawa ON" {
+		t.Errorf("address = %+v, want the remaining lines", p.Address)
+	}
+}
+
+// A name in the metadata still wins, and the whole address stays the address.
+func TestPartyForPrefersTheNameMetadata(t *testing.T) {
+	p := partyFor("Assets:Bank:Chequing", "fallback", map[string]map[string]string{
+		"Assets:Bank:Chequing": {"name": "Excite Creative", "address": "123 Main St\nOttawa ON"},
+	})
+	if p.Name != "Excite Creative" {
+		t.Errorf("name = %q", p.Name)
+	}
+	if len(p.Address) != 2 || p.Address[0] != "123 Main St" {
+		t.Errorf("address = %+v, want both address lines", p.Address)
+	}
+}
+
+// receipt reads the accrual basis, so an invoice raised but not yet paid has a document at all; and
+// -tx takes the bare fingerprint invoice list printed, not the fold's namespaced id.
+func TestReceiptRendersARaisedInvoiceByItsBareFingerprint(t *testing.T) {
+	bookHere(t)
+	id := raiseTestInvoice(t)
+
+	out, err := withPipedStdout(t, func() error { return receiptCmd([]string{"-tx", id, "-as", "invoice"}) })
+	if err != nil {
+		t.Fatalf("receiptCmd: %v", err)
+	}
+	var doc invoiceDoc
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("output was not JSON: %v\n%s", err, out)
+	}
+	if doc.Paid {
+		t.Errorf("paid = %v, want an unsettled raised invoice to read unpaid", doc.Paid)
+	}
+	if doc.Reference != "2086" {
+		t.Errorf("reference = %q, want the invoice number", doc.Reference)
 	}
 }
 
