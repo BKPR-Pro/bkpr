@@ -344,17 +344,29 @@ func TestReadLedgerSkipsDirectivesAndPeriodicEntries(t *testing.T) {
 }
 
 // A commodity whose postings cancel among themselves (a unit placeholder moved between accounts)
-// needs no price: only a commodity that leaves a remainder must be the statement line's own.
+// needs no price: only a commodity that leaves a remainder must be the statement line's own. The
+// self-cancelling legs still ride in the carried categorization, and because they cancel, that side
+// balances the reconstructed line — so an import carries the whole entry rather than dropping the
+// cash split to Uncategorized.
 func TestReadLedgerDropsASelfBalancingCommodity(t *testing.T) {
-	txs := readLedger(t, `2026/03/01  * Purchase
+	txs, entries, err := source.ReadLedger(strings.NewReader(`2026/03/01  * Purchase
   Equity:Prop  -1 Property
   Assets:Prop  1 Property
   Expenses:Legal  100.00 CAD
   Assets:Bank:Chequing
-`)
+`), "books.ledger")
+	if err != nil {
+		t.Fatalf("ReadLedger: %v", err)
+	}
 	tx := txs[0]
 	if tx.Account != "Assets:Bank:Chequing" || tx.Amount.String() != "-100.00 CAD" {
 		t.Errorf("got %q %q, want the CAD remainder on the elided account", tx.Account, tx.Amount)
+	}
+	if len(entries[0].Postings) != 3 {
+		t.Fatalf("postings = %+v, want all three legs carried", entries[0].Postings)
+	}
+	if !entries[0].Balances(tx) {
+		t.Error("the carried categorization does not balance its line, so the import would drop it")
 	}
 }
 

@@ -118,3 +118,47 @@ func TestImportingACategorizedLedgerNeedsNoManualCategorize(t *testing.T) {
 		}
 	}
 }
+
+// A property-purchase opening entry mixes a non-currency Property placeholder that cancels among its
+// own postings with a cash split. The self-cancelling Property needs no price, so the whole entry
+// still accounts for its cash line and carries on import — the cash split is not dropped to
+// Uncategorized just because a Property unit rode along in the entry.
+func TestImportingAMixedCommodityEntryCarriesTheCashSplit(t *testing.T) {
+	log := newLog() // no rules: without the carry, the cash split falls to Uncategorized
+
+	txs, entries, err := source.ReadLedger(strings.NewReader(`2023/03/01  * 22 Cedar Street Purchase
+  Assets:Real Estate:22 Cedar Street  1 Property
+  Equity:Opening  -1 Property
+  Expenses:Legal Fees  1500.00 CAD
+  Assets:Bank:Chequing
+`), "books.ledger")
+	if err != nil {
+		t.Fatalf("ReadLedger: %v", err)
+	}
+	if _, err := books.Import(log, "import:acct.txt", txs); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	carried, skipped, err := books.CarryCategorizations(log, "import:acct.txt", "from acct.txt", txs, entries)
+	if err != nil {
+		t.Fatalf("CarryCategorizations: %v", err)
+	}
+	if carried != 1 || skipped != 0 {
+		t.Fatalf("got carried=%d skipped=%d, want 1 and 0: the mixed-commodity entry was not carried", carried, skipped)
+	}
+
+	_, entriesFolded := ledger(t, log)
+	got := map[string]bool{}
+	for _, e := range entriesFolded {
+		for _, p := range e.Postings {
+			got[p.Account] = true
+		}
+		if e.Uncategorized() {
+			t.Errorf("the cash split folded to Uncategorized despite the file naming its account: %+v", e)
+		}
+	}
+	for _, want := range []string{"Expenses:Legal Fees", "Assets:Real Estate:22 Cedar Street", "Equity:Opening"} {
+		if !got[want] {
+			t.Errorf("folded books missing %q; the mixed-commodity categorization was not carried", want)
+		}
+	}
+}

@@ -4,6 +4,7 @@
 package model
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -156,16 +157,45 @@ func (e Entry) Balances(tx Transaction) bool {
 // balances, and on a sale it is exactly the amount the capital-gains posting takes, the difference
 // between the proceeds and the cost base the shares left at. The error is the mixed-commodity one:
 // a posting that cannot be summed against the line, because it carries no price or a foreign one.
+//
+// Balancing is per commodity, as a ledger's is. Each posting's value is added to the running sum for
+// its own commodity: a same-commodity or priced posting lands in the line's commodity, an unpriced
+// foreign posting in its own. The line's commodity must reach the line's negation; every other
+// commodity must cancel to zero among its own postings. A foreign commodity left with a remainder
+// had no price to resolve it, so the entry does not balance — but one whose postings cancel (a
+// property unit moved between accounts) asks nothing of the line and needs none.
 func (e Entry) Shortfall(tx Transaction) (Amount, error) {
-	sum := Amount{Commodity: tx.Amount.Commodity}
+	line := Amount{Commodity: tx.Amount.Commodity}
+	others := map[string]Amount{} // unpriced foreign commodities, each summed against itself
+	var order []string            // map order is random; report a stray commodity stably
 	for _, p := range e.Postings {
-		next, err := sum.Add(p.value())
+		v := p.value()
+		if v.Commodity == tx.Amount.Commodity {
+			next, err := line.Add(v)
+			if err != nil {
+				return Amount{}, err
+			}
+			line = next
+			continue
+		}
+		prev, seen := others[v.Commodity]
+		if !seen {
+			others[v.Commodity] = v
+			order = append(order, v.Commodity)
+			continue
+		}
+		next, err := prev.Add(v)
 		if err != nil {
 			return Amount{}, err
 		}
-		sum = next
+		others[v.Commodity] = next
 	}
-	return tx.Amount.Negate().Add(sum.Negate())
+	for _, c := range order {
+		if !others[c].IsZero() {
+			return Amount{}, fmt.Errorf("posting in %s has no price to balance against %s", c, tx.Amount.Commodity)
+		}
+	}
+	return tx.Amount.Negate().Add(line.Negate())
 }
 
 // Uncategorized reports whether any posting stops short of a full account path.

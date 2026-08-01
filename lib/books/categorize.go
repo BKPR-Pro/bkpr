@@ -84,12 +84,14 @@ func assertCategorized(log *eventlog.Log, actor, why, txID, invoice, payee, sour
 // already names its accounts — a ledger file, not a raw statement — needs no manual categorize per
 // line. The transactions must already be imported, and txs[i] is categorized by entries[i].
 //
-// An entry with no postings, or one that does not account for its line (a mixed-commodity
-// placeholder the books cannot post), is left to the rules and counted as skipped rather than
-// asserted: the import carries what it faithfully can and never writes a broken entry. The carried
-// facts are ordinary assertions, so a later human correction still wins over them. A file spells
-// its own legs, so the carry records them as spelled: a rule's tax overlay never restates a carried
-// entry, and a re-imported historical book keeps its splits exactly as written.
+// An entry with no postings, or one that does not account for its line (a foreign commodity left
+// with a remainder and no price to resolve it), is left to the rules and counted as skipped rather
+// than asserted: the import carries what it faithfully can and never writes a broken entry. A
+// foreign commodity whose own postings cancel needs no price and does account for its line, so it
+// carries. The carried facts are ordinary assertions, so a later human correction still wins over
+// them. A file spells its own legs, so the carry records them as spelled: a rule's tax overlay
+// never restates a carried entry, and a re-imported historical book keeps its splits exactly as
+// written.
 func CarryCategorizations(log *eventlog.Log, actor, why string, txs []model.Transaction, entries []model.Entry) (carried, skipped int, err error) {
 	if len(txs) != len(entries) {
 		return 0, 0, fmt.Errorf("books: %d transactions but %d categorizations", len(txs), len(entries))
