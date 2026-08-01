@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bkpr/lib/books"
-	"github.com/dallasread/bkpr/lib/model"
-	"github.com/dallasread/bkpr/lib/rules"
-	"github.com/dallasread/bkpr/lib/store"
+	"bkpr.pro/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/rules"
+	"bkpr.pro/bkpr/lib/store"
 )
 
 // bookHere creates an empty book in a temp dir and chdirs into it, so the commands (which open the

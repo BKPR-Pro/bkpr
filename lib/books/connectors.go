@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/dallasread/bkpr/lib/eventlog"
+	"bkpr.pro/bkpr/lib/eventlog"
 )
 
 const (

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dallasread/bkpr/lib/eventlog"
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/eventlog"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 // CollectionBalance is keyed by an account path. Each event asserts what the bank said an account's

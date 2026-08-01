@@ -3,8 +3,8 @@ package books_test
 import (
 	"testing"
 
-	"github.com/dallasread/bkpr/lib/books"
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 // Every line remembers the door it entered through: the actor that imported it. The register shows

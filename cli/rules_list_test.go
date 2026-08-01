@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dallasread/bkpr/lib/model"
-	"github.com/dallasread/bkpr/lib/rules"
+	"bkpr.pro/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/rules"
 )
 
 // A rule's amount predicate is part of its identity, so rules list shows it -- otherwise two rules

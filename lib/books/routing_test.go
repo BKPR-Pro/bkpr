@@ -3,8 +3,8 @@ package books_test
 import (
 	"testing"
 
-	"github.com/dallasread/bkpr/lib/books"
-	"github.com/dallasread/bkpr/lib/rules"
+	"bkpr.pro/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/rules"
 )
 
 // A physical card imported on one registered account is split by purpose: a categorization routes

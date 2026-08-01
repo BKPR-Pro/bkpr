@@ -1,7 +1,7 @@
 package books
 
 import (
-	"github.com/dallasread/bkpr/lib/eventlog"
+	"bkpr.pro/bkpr/lib/eventlog"
 )
 
 // Doors folds the log into where each line of the books entered: an imported line maps to the actor

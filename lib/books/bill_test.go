@@ -3,8 +3,8 @@ package books_test
 import (
 	"testing"
 
-	"github.com/dallasread/bkpr/lib/books"
-	"github.com/dallasread/bkpr/lib/eventlog"
+	"bkpr.pro/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/eventlog"
 )
 
 // receive records a bill to a vendor on the given day, defaulting the parked account to

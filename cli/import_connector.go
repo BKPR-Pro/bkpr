@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dallasread/bkpr/lib/adapters/source"
-	"github.com/dallasread/bkpr/lib/books"
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/adapters/source"
+	"bkpr.pro/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 // fetchResult is what a connector fetch yields: the lines to import, and -- for a bank that showed it

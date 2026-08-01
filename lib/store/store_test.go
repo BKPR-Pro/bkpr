@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dallasread/bkpr/lib/eventlog"
-	"github.com/dallasread/bkpr/lib/store"
+	"bkpr.pro/bkpr/lib/eventlog"
+	"bkpr.pro/bkpr/lib/store"
 )
 
 // The marker directory is .bkpr, the short name the CLI goes by.

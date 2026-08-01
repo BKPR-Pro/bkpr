@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dallasread/bkpr/lib/eventlog"
+	"bkpr.pro/bkpr/lib/eventlog"
 )
 
 // Every storage adapter answers to the same suite. The in-memory one is what the rest of the

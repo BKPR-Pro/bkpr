@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dallasread/bkpr/lib/eventlog"
-	"github.com/dallasread/bkpr/lib/model"
-	"github.com/dallasread/bkpr/lib/rules"
+	"bkpr.pro/bkpr/lib/eventlog"
+	"bkpr.pro/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/rules"
 )
 
 const (

@@ -3,8 +3,8 @@ package rules_test
 import (
 	"testing"
 
-	"github.com/dallasread/bkpr/lib/model"
-	"github.com/dallasread/bkpr/lib/rules"
+	"bkpr.pro/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/rules"
 )
 
 func txAmt(description string, cents int64) model.Transaction {

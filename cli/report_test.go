@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bkpr/lib/books"
-	"github.com/dallasread/bkpr/lib/eventlog"
-	"github.com/dallasread/bkpr/lib/model"
-	"github.com/dallasread/bkpr/lib/store"
+	"bkpr.pro/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/eventlog"
+	"bkpr.pro/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/store"
 )
 
 func cad2(cents int64) model.Amount { return model.Amount{Units: cents, Scale: 2, Commodity: "CAD"} }

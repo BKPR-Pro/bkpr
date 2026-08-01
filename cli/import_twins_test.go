@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bkpr/lib/books"
-	"github.com/dallasread/bkpr/lib/eventlog"
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/eventlog"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 func twinTx(id, account string, day int, cents int64, description string) model.Transaction {

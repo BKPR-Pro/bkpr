@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 func usd(cents int64) model.Amount { return model.Amount{Units: cents, Scale: 2, Commodity: "USD"} }

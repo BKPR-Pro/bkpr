@@ -3,9 +3,9 @@ package books_test
 import (
 	"testing"
 
-	"github.com/dallasread/bkpr/lib/books"
-	"github.com/dallasread/bkpr/lib/eventlog"
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/eventlog"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 // balanceOf folds the log into one account's current CAD balance, the figure accounts list shows.

@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 func amt(t *testing.T, s string) model.Amount {

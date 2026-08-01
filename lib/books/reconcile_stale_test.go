@@ -3,7 +3,7 @@ package books_test
 import (
 	"testing"
 
-	"github.com/dallasread/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/books"
 )
 
 // An account whose connector stops reporting a balance keeps reconciling forever against whatever

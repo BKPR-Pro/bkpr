@@ -18,7 +18,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 // WriteAccounts renders the account directives an account's metadata describes, so a hand-kept

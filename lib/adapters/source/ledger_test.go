@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dallasread/bkpr/lib/adapters/source"
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/adapters/source"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 func readLedger(t *testing.T, text string) []model.Transaction {

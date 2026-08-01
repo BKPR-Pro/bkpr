@@ -7,11 +7,11 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/dallasread/bkpr/lib/adapters/rentapp"
-	"github.com/dallasread/bkpr/lib/books"
-	"github.com/dallasread/bkpr/lib/eventlog"
-	"github.com/dallasread/bkpr/lib/model"
-	"github.com/dallasread/bkpr/lib/store"
+	"bkpr.pro/bkpr/lib/adapters/rentapp"
+	"bkpr.pro/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/eventlog"
+	"bkpr.pro/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/store"
 )
 
 // rentappLeaseKey is the metadata key the rentapp connector reads off a categorized line. A

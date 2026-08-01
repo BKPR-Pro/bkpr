@@ -25,12 +25,12 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/dallasread/bkpr/lib/adapters/source"
-	"github.com/dallasread/bkpr/lib/books"
-	"github.com/dallasread/bkpr/lib/eventlog"
-	"github.com/dallasread/bkpr/lib/model"
-	"github.com/dallasread/bkpr/lib/rules"
-	"github.com/dallasread/bkpr/lib/store"
+	"bkpr.pro/bkpr/lib/adapters/source"
+	"bkpr.pro/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/eventlog"
+	"bkpr.pro/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/rules"
+	"bkpr.pro/bkpr/lib/store"
 )
 
 func main() {

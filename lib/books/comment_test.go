@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dallasread/bkpr/lib/books"
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 // Commenting the sole posting of a line records the note on that leg. The account need not be named

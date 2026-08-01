@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dallasread/bkpr/lib/adapters/source"
-	"github.com/dallasread/bkpr/lib/books"
-	"github.com/dallasread/bkpr/lib/store"
+	"bkpr.pro/bkpr/lib/adapters/source"
+	"bkpr.pro/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/store"
 )
 
 // orderConnectorsByLogin clusters connectors that share a login (their token-env) so `import -all` can

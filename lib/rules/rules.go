@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 // Rule matches a transaction's description and supplies a payee, an account to post to, or both.

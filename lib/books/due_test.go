@@ -3,7 +3,7 @@ package books_test
 import (
 	"testing"
 
-	"github.com/dallasread/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/books"
 )
 
 // Owing a liability account is enough to show up in the due report, even before anyone has ever

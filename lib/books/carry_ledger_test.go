@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dallasread/bkpr/lib/adapters/source"
-	"github.com/dallasread/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/adapters/source"
+	"bkpr.pro/bkpr/lib/books"
 )
 
 // A standalone note a person kept inside an entry must survive the whole import path: the reader

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 // A bank is another source, imported like a CSV or a ledger file but read from the bank's website

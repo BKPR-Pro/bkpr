@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bkpr/lib/books"
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 // An open invoice offers the deposit that plausibly settles it: same amount, within the window, not

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 // ReadLedger parses plain-text ledger — the form bkpr writes back, or a hand-kept file —

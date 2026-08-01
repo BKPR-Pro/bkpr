@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bkpr/lib/adapters/ledger"
-	"github.com/dallasread/bkpr/lib/adapters/source"
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/adapters/ledger"
+	"bkpr.pro/bkpr/lib/adapters/source"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 func on(day int) time.Time {

@@ -21,7 +21,7 @@ executable, and put it on your `PATH`:
 ```sh
 # pick your os/arch: darwin-arm64, darwin-amd64, linux-arm64, linux-amd64
 os_arch="darwin-arm64"
-curl -fsSL -o bkpr "https://github.com/dallasread/bkpr/releases/latest/download/bkpr-${os_arch}"
+curl -fsSL -o bkpr "https://github.com/BKPR-Pro/bkpr/releases/latest/download/bkpr-${os_arch}"
 chmod +x bkpr
 sudo mv bkpr /usr/local/bin/     # anywhere on your PATH
 

@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bkpr/lib/adapters/ledger"
-	"github.com/dallasread/bkpr/lib/books"
-	"github.com/dallasread/bkpr/lib/eventlog"
-	"github.com/dallasread/bkpr/lib/model"
-	"github.com/dallasread/bkpr/lib/rules"
+	"bkpr.pro/bkpr/lib/adapters/ledger"
+	"bkpr.pro/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/eventlog"
+	"bkpr.pro/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/rules"
 )
 
 // Off a terminal -- a pipe, a redirect, an agent capturing output -- books defaults to json rather

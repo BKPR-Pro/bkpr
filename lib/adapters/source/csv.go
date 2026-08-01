@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 // CSV is one account and how to read its statements. The account is where its lines land; the

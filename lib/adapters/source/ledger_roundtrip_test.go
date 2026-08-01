@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dallasread/bkpr/lib/adapters/ledger"
-	"github.com/dallasread/bkpr/lib/adapters/source"
-	"github.com/dallasread/bkpr/lib/model"
+	"bkpr.pro/bkpr/lib/adapters/ledger"
+	"bkpr.pro/bkpr/lib/adapters/source"
+	"bkpr.pro/bkpr/lib/model"
 )
 
 // A comment left on one leg of a split must survive the writer and the reader: it renders inline,

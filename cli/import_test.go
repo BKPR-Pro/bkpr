@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dallasread/bkpr/lib/books"
-	"github.com/dallasread/bkpr/lib/store"
+	"bkpr.pro/bkpr/lib/books"
+	"bkpr.pro/bkpr/lib/store"
 )
 
 // End to end: import dispatches a .ledger file to the parser and records its reconstructed lines.
