@@ -7,11 +7,11 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"bkpr.pro/bkpr/lib/adapters/rentapp"
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/eventlog"
-	"bkpr.pro/bkpr/lib/model"
-	"bkpr.pro/bkpr/lib/store"
+	"github.com/BKPR-Pro/bkpr/lib/adapters/rentapp"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/store"
 )
 
 // rentappLeaseKey is the metadata key the rentapp connector reads off a categorized line. A

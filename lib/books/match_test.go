@@ -3,9 +3,9 @@ package books_test
 import (
 	"testing"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/eventlog"
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 func lineIn(id, account string, day int, cents int64, description string) model.Transaction {
@@ -197,11 +197,11 @@ func TestTwoAssertedOppositeLinesAreNotFusedAsATransfer(t *testing.T) {
 	// The card account must be owned for the loose fold to consider the pair at all, so a card
 	// statement line anchors it as a source account. Its size and date keep it clear of the pair.
 	importOne(t, log, lineIn("card", "Liabilities:Card", 25, -7300, "CARD STATEMENT"))
-	importOne(t, log, lineIn("pay", "Liabilities:Shareholder Loan", 7, 100000, "Dallas Read"))
+	importOne(t, log, lineIn("pay", "Liabilities:Shareholder Loan", 7, 100000, "A Shareholder"))
 	importOne(t, log, lineIn("bill", "Assets:Bank:Chequing", 12, -100000, "RBC Mastercard"))
 
 	// The paycheck: money left chequing into the shareholder loan, with a note on the leg.
-	if err := books.Categorize(log, "human", "carried", "pay", "", "Dallas Read", "",
+	if err := books.Categorize(log, "human", "carried", "pay", "", "A Shareholder", "",
 		[]model.Posting{{Account: "Assets:Bank:Chequing", Amount: cad(-100000), Comment: "Paycheque"}}); err != nil {
 		t.Fatalf("Categorize pay: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestTwoAssertedOppositeLinesAreNotFusedAsATransfer(t *testing.T) {
 	}
 	for i, tx := range txs {
 		if tx.ID == "pay" {
-			if entries[i].Payee != "Dallas Read" {
+			if entries[i].Payee != "A Shareholder" {
 				t.Errorf("paycheck payee wiped to %q, want it kept", entries[i].Payee)
 			}
 			if len(entries[i].Postings) != 1 || entries[i].Postings[0].Comment != "Paycheque" {

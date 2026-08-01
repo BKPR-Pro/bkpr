@@ -25,12 +25,12 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"bkpr.pro/bkpr/lib/adapters/source"
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/eventlog"
-	"bkpr.pro/bkpr/lib/model"
-	"bkpr.pro/bkpr/lib/rules"
-	"bkpr.pro/bkpr/lib/store"
+	"github.com/BKPR-Pro/bkpr/lib/adapters/source"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/rules"
+	"github.com/BKPR-Pro/bkpr/lib/store"
 )
 
 func main() {
@@ -486,7 +486,7 @@ var reference = []docGroup{
       depend on remembering where the sequence got to; a number you were given -- a vendor's -- is
       recorded exactly as you type it.
       -source routes this line's card/liability leg to a sub-account instead of the account it was
-      imported on, e.g. -source "Liabilities:PC Mastercard:9 Schoodic"; the parent it rolls up to
+      imported on, e.g. -source "Liabilities:PC Mastercard:9 Birch Street"; the parent it rolls up to
       still reconciles to the one bank balance. It is the per-line form of a rules -source route.
       -actor records who decided (default human), so a model driving this command is told
       apart from a person in the log; rules set and void take it too.
@@ -1442,7 +1442,7 @@ func ruleSetOne(args []string) error {
 	r.Match = pattern
 	fs.StringVar(&r.Category, "category", "", "account to post the line to")
 	fs.StringVar(&r.Payee, "payee", "", "payee to record on the entry")
-	fs.StringVar(&r.Source, "source", "", "route the matched line's card/liability leg to a sub-account, e.g. \"Liabilities:PC Mastercard:9 Schoodic\"; the parent it rolls up to still reconciles to the one bank balance")
+	fs.StringVar(&r.Source, "source", "", "route the matched line's card/liability leg to a sub-account, e.g. \"Liabilities:PC Mastercard:9 Birch Street\"; the parent it rolls up to still reconciles to the one bank balance")
 	amount := fs.String("amount", "", "narrow the rule to lines of this magnitude, e.g. 175 (a bare amount is read as CAD; \"175 USD\" names another); its pattern and amount together are the rule's identity")
 	fs.StringVar(&r.TaxRate, "tax-rate", "", "sales tax the total already includes, e.g. 15%; splits the tax onto -tax-account")
 	fs.StringVar(&r.TaxAccount, "tax-account", "", "account the extracted tax posts to, e.g. \"Assets:HST ITC\"; may reference -tax-category capture groups ($1)")
@@ -1817,7 +1817,7 @@ func categorize(args []string) error {
 	category := fs.String("category", "", "post the whole line to this one account")
 	payee := fs.String("payee", "", "the payee to record on the entry")
 	invoice := fs.String("invoice", "", "the invoice or bill number for this entry, the ledger (code); \"next\" takes the one after the highest the book has issued")
-	source := fs.String("source", "", "route this line's card/liability leg to a sub-account, e.g. \"Liabilities:PC Mastercard:9 Schoodic\"; the parent it rolls up to still reconciles to the one bank balance")
+	source := fs.String("source", "", "route this line's card/liability leg to a sub-account, e.g. \"Liabilities:PC Mastercard:9 Birch Street\"; the parent it rolls up to still reconciles to the one bank balance")
 	why := fs.String("why", "", "why this line is categorized so; recorded with the assertion")
 	gain := fs.String("gain", "", "on a sale, the account its capital gain or loss lands in, e.g. Income:Capital Gains")
 	taxRate := fs.String("tax-rate", "", "sales tax the -category total already includes, e.g. 15%; splits the tax onto -tax-account, the same arithmetic a taxed rule uses")
@@ -2608,7 +2608,7 @@ func accountSetMeta(args []string) error {
 	}
 	meta := metaFlag{}
 	fs := flag.NewFlagSet("accounts set", flag.ExitOnError)
-	fs.Var(&meta, "meta", "key=value, repeatable; e.g. -meta name=\"Excite Creative\" -meta address=\"123 Main St\"")
+	fs.Var(&meta, "meta", "key=value, repeatable; e.g. -meta name=\"Northwind Studio\" -meta address=\"123 Main St\"")
 	actor := fs.String("actor", "human", "who is setting this; the log records who decided")
 	if err := fs.Parse(rest); err != nil {
 		return err

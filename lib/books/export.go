@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"bkpr.pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
 )
 
 // ActionExported records that a transaction was written out to a connector (e.g. the rent app

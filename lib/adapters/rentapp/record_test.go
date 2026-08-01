@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"testing"
 
-	"bkpr.pro/bkpr/lib/adapters/rentapp"
+	"github.com/BKPR-Pro/bkpr/lib/adapters/rentapp"
 )
 
 // A recorded rent payment is exported to the lease's rent-roll endpoint, carrying the real cleared

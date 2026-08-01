@@ -3,9 +3,9 @@ package books_test
 import (
 	"testing"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/eventlog"
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 // raise records a 1600.00 CAD invoice to a party on the given day, defaulting the parked account to
@@ -26,8 +26,8 @@ func raise(t *testing.T, log *eventlog.Log, party string, day int, cents int64, 
 func TestRaiseCarriesTheInvoiceNumber(t *testing.T) {
 	log := newLog()
 	inv, _, err := books.Raise(log, "human", "", books.Invoice{
-		Date: on(1), Party: "DNSimple", Amount: cad(900000),
-		Category: "Income:Consulting:Contract:DNSimple", Number: "2073",
+		Date: on(1), Party: "Acme Corp", Amount: cad(900000),
+		Category: "Income:Consulting:Contract:Acme Corp", Number: "2073",
 	})
 	if err != nil {
 		t.Fatalf("Raise: %v", err)
@@ -43,7 +43,7 @@ func TestRaiseCarriesTheInvoiceNumber(t *testing.T) {
 	_, entries := booksOn(t, log, books.AccrualBasis)
 	var got *model.Entry
 	for i := range entries {
-		if entries[i].Payee == "DNSimple" {
+		if entries[i].Payee == "Acme Corp" {
 			got = &entries[i]
 		}
 	}
@@ -138,34 +138,34 @@ func TestSettlementClearsTheReceivableWithoutDoubleBookingIncome(t *testing.T) {
 
 // A foreign invoice is cleared by the domestic cash that settled it: a 9000 USD receivable paid by a
 // 12495.25 CAD deposit clears in its own commodity, priced at the CAD that actually landed, so the
-// receivable nets to zero rather than being left holding two currencies. This is the DNSimple case --
+// receivable nets to zero rather than being left holding two currencies. This is the Acme Corp case --
 // billed in USD, paid in CAD -- booked once with no double count.
 func TestFXSettlementClearsAForeignReceivable(t *testing.T) {
 	log := newLog()
 	usd := model.Amount{Units: 900000, Scale: 2, Commodity: "USD"}
 	inv, _, err := books.Raise(log, "human", "", books.Invoice{
-		Date: on(1), Party: "DNSimple", Amount: usd,
-		Category: "Income:Consulting:Contract:DNSimple",
-		Account:  "Assets:Receivable:DNSimple", Number: "2073",
+		Date: on(1), Party: "Acme Corp", Amount: usd,
+		Category: "Income:Consulting:Contract:Acme Corp",
+		Account:  "Assets:Receivable:Acme Corp", Number: "2073",
 	})
 	if err != nil {
 		t.Fatalf("Raise: %v", err)
 	}
-	importOne(t, log, line("pay", 6, 1249525, "DNSimple Misc Payment")) // the CAD that landed, days later
+	importOne(t, log, line("pay", 6, 1249525, "Acme Corp Misc Payment")) // the CAD that landed, days later
 	if err := books.SettleInvoice(log, "human", inv.ID, "pay"); err != nil {
 		t.Fatalf("Settle: %v", err)
 	}
 
 	txs, entries := booksOn(t, log, books.AccrualBasis)
-	if bal := balances(txs, entries); bal["Assets:Receivable:DNSimple"] != 0 {
-		t.Errorf("foreign receivable = %d, want 0: the CAD deposit cleared the USD invoice", bal["Assets:Receivable:DNSimple"])
+	if bal := balances(txs, entries); bal["Assets:Receivable:Acme Corp"] != 0 {
+		t.Errorf("foreign receivable = %d, want 0: the CAD deposit cleared the USD invoice", bal["Assets:Receivable:Acme Corp"])
 	}
 	for i, tx := range txs {
 		if tx.ID != "pay" {
 			continue
 		}
 		p := entries[i].Postings[0]
-		if p.Account != "Assets:Receivable:DNSimple" {
+		if p.Account != "Assets:Receivable:Acme Corp" {
 			t.Errorf("paying line posts to %q, want the receivable", p.Account)
 		}
 		if p.Amount.Commodity != "USD" || p.Cost == nil || p.Cost.String() != "12495.25 CAD" {

@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"bkpr.pro/bkpr/lib/adapters/ledger"
-	"bkpr.pro/bkpr/lib/adapters/source"
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/adapters/ledger"
+	"github.com/BKPR-Pro/bkpr/lib/adapters/source"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 func on(day int) time.Time {
@@ -124,28 +124,28 @@ func TestIncomeEntry(t *testing.T) {
 // An entry's invoice or bill number is written as the ledger transaction code, "(2073)" before the
 // payee, so a number set as its own field renders where ledger tools read a check/invoice number.
 func TestInvoiceNumberRendersAsTheLedgerCode(t *testing.T) {
-	tx := chequing(1, 900000, "DNSimple")
+	tx := chequing(1, 900000, "Acme Corp")
 	e := model.Entry{
-		Payee:    "DNSimple",
+		Payee:    "Acme Corp",
 		Invoice:  "2073",
-		Postings: []model.Posting{{Account: "Income:Consulting:Contract:DNSimple", Amount: cad(-900000)}},
+		Postings: []model.Posting{{Account: "Income:Consulting:Contract:Acme Corp", Amount: cad(-900000)}},
 	}
 
 	got := write(t, tx, e)
-	if !strings.Contains(got, "* (2073) DNSimple\n") {
+	if !strings.Contains(got, "* (2073) Acme Corp\n") {
 		t.Errorf("header should carry the invoice as a (code):\n%s", got)
 	}
 }
 
-// A line whose raw description is just its coded title -- the shape a hand-kept "(2073) DNSimple"
+// A line whose raw description is just its coded title -- the shape a hand-kept "(2073) Acme Corp"
 // import leaves once the code is lifted into its own field -- writes no memo, because the memo would
 // only repeat the header. A description that differs for a real reason still shows.
 func TestNoRedundantMemoForACodedTitle(t *testing.T) {
-	tx := chequing(1, 900000, "(2073) DNSimple")
+	tx := chequing(1, 900000, "(2073) Acme Corp")
 	e := model.Entry{
-		Payee:    "DNSimple",
+		Payee:    "Acme Corp",
 		Invoice:  "2073",
-		Postings: []model.Posting{{Account: "Income:Consulting:Contract:DNSimple", Amount: cad(-900000)}},
+		Postings: []model.Posting{{Account: "Income:Consulting:Contract:Acme Corp", Amount: cad(-900000)}},
 	}
 	if got := write(t, tx, e); strings.Contains(got, "; memo:") {
 		t.Errorf("a description that is just the coded title should write no memo:\n%s", got)
@@ -180,16 +180,16 @@ func TestEveryEntryIsCleared(t *testing.T) {
 // bank has not reported yet is marked "!", not "*". That state is the writer's to keep, so a pending
 // entry renders with the pending flag rather than being asserted cleared.
 func TestAPendingEntryRendersPending(t *testing.T) {
-	tx := chequing(1, -900000, "(2073) DNSimple")
+	tx := chequing(1, -900000, "(2073) Acme Corp")
 	e := model.Entry{
-		Payee:    "(2073) DNSimple",
+		Payee:    "(2073) Acme Corp",
 		Pending:  true,
-		Postings: []model.Posting{{Account: "Income:Consulting:Contract:DNSimple", Amount: cad(900000)}},
+		Postings: []model.Posting{{Account: "Income:Consulting:Contract:Acme Corp", Amount: cad(900000)}},
 	}
 
 	got := write(t, tx, e)
 
-	if !strings.HasPrefix(got, "2026/03/01  ! (2073) DNSimple\n") {
+	if !strings.HasPrefix(got, "2026/03/01  ! (2073) Acme Corp\n") {
 		t.Errorf("a pending entry should render with the pending flag:\n%s", got)
 	}
 	if strings.Contains(got, "  * ") {
@@ -349,14 +349,14 @@ func TestMismatchedLengthsIsAnError(t *testing.T) {
 // the artifact round-trips.
 func TestWriteAccountsRoundTripsThroughTheReader(t *testing.T) {
 	meta := map[string]map[string]string{
-		"Assets:Consulting:Chequing": {"address": "742104 NB Inc.\n90 King Street\nBN: 770593416"},
+		"Assets:Consulting:Chequing": {"address": "888888 Example Inc.\n10 Maple Street\nBN: 999999999"},
 		"Liabilities:Consulting:HST": {"address": "HST"},
 	}
 	var buf bytes.Buffer
 	if err := ledger.WriteAccounts(&buf, meta); err != nil {
 		t.Fatalf("WriteAccounts: %v", err)
 	}
-	if !strings.Contains(buf.String(), "account Assets:Consulting:Chequing\n  address 742104 NB Inc.\n  address 90 King Street\n  address BN: 770593416\n") {
+	if !strings.Contains(buf.String(), "account Assets:Consulting:Chequing\n  address 888888 Example Inc.\n  address 10 Maple Street\n  address BN: 999999999\n") {
 		t.Fatalf("directive not rendered as address lines:\n%s", buf.String())
 	}
 	got, err := source.ReadLedgerAccounts(bytes.NewReader(buf.Bytes()))

@@ -3,9 +3,9 @@ package books_test
 import (
 	"testing"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/model"
-	"bkpr.pro/bkpr/lib/rules"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/rules"
 )
 
 func ruleAmt(match, category string, cents int64) rules.Rule {
@@ -18,8 +18,8 @@ func ruleAmt(match, category string, cents int64) rules.Rule {
 func TestTwoRulesShareAPatternButSplitByAmount(t *testing.T) {
 	log := newLog()
 	loaded(t, log,
-		ruleAmt("PROV NB PROP TX", "Expenses:Property:22 Lisgar", 17500),
-		ruleAmt("PROV NB PROP TX", "Expenses:Property:9 Schoodic", 15500),
+		ruleAmt("PROV NB PROP TX", "Expenses:Property:22 Cedar Street", 17500),
+		ruleAmt("PROV NB PROP TX", "Expenses:Property:9 Birch Street", 15500),
 	)
 
 	rs, err := books.Rules(log)

@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/store"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/store"
 )
 
 // Shell completion is computed in Go and forwarded through a hidden `__complete` command, so the

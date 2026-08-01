@@ -12,7 +12,7 @@ import (
 // same name and sits earlier in the DOM. Walking the account path by that label must click the
 // visible link, not the invisible option -- clicking a hidden option never becomes actionable, so it
 // times out and the run wrongly reports the account "was not found on the page". This mirrors the
-// real "22 Lisgar - Loan" import that stalled: the label was present, but on a hidden option first.
+// real "22 Cedar Street - Loan" import that stalled: the label was present, but on a hidden option first.
 // Skipped where Node or Playwright is not installed.
 func TestRBCWalksPastAHiddenOptionWithTheSameLabel(t *testing.T) {
 	requireBrowserTests(t)
@@ -25,15 +25,15 @@ func TestRBCWalksPastAHiddenOptionWithTheSameLabel(t *testing.T) {
 	  <a href="/signout">Sign Out</a>
 	  <a id="gotoBusinessHref" href="/business">Business Banking</a>
 	</body></html>`
-	// The trap: a hidden transfer-to dropdown repeats "22 Lisgar - Loan" and comes before the real
+	// The trap: a hidden transfer-to dropdown repeats "22 Cedar Street - Loan" and comes before the real
 	// account link in the DOM, so a plain first-match lands on the invisible option.
 	const business = `<!doctype html><html><body>
 	  <a href="/signout">Sign Out</a>
 	  <select style="display:none">
 	    <option value=""> Select ... </option>
-	    <option value="L002"> 22 Lisgar - Loan = N/A </option>
+	    <option value="L002"> 22 Cedar Street - Loan = N/A </option>
 	  </select>
-	  <a href="/account"><span> 22 Lisgar - Loan </span></a>
+	  <a href="/account"><span> 22 Cedar Street - Loan </span></a>
 	</body></html>`
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +53,7 @@ func TestRBCWalksPastAHiddenOptionWithTheSameLabel(t *testing.T) {
 		Institution:     "rbc",
 		LoginURL:        srv.URL,
 		DefaultCurrency: "CAD",
-		AccountPath:     []string{"#gotoBusinessHref", "22 Lisgar - Loan"},
+		AccountPath:     []string{"#gotoBusinessHref", "22 Cedar Street - Loan"},
 	}, nil)
 	skipIfNoBrowser(t, err)
 	if err != nil {

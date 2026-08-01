@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"bkpr.pro/bkpr/lib/eventlog"
-	"bkpr.pro/bkpr/lib/store"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/store"
 )
 
 // The marker directory is .bkpr, the short name the CLI goes by.

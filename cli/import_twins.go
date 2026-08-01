@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
 )
 
 // twinsAmong reports the candidate twins that the lines just landed are part of: the same date and

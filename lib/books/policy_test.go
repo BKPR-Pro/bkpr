@@ -3,9 +3,9 @@ package books_test
 import (
 	"testing"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/costbasis"
-	"bkpr.pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/costbasis"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
 )
 
 func policies(t *testing.T, log *eventlog.Log) books.PolicySet {

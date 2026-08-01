@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 func TestParseAndRenderRoundTrip(t *testing.T) {

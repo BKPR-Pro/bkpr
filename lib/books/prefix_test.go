@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"bkpr.pro/bkpr/lib/eventlog"
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 // prefixLog holds lines whose fingerprints share fronts, the shapes prefix matching must tell

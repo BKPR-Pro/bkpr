@@ -121,7 +121,7 @@ func TestSimpliiReadsALineOfCredit(t *testing.T) {
 	    </tr>
 	    <tr>
 	      <td class="date">Jul 7, 2026</td>
-	      <td class="transactions"><span class="transactionDescription"> INTERAC E-TRANSFER RECEIVE 742104 NB INC. </span></td>
+	      <td class="transactions"><span class="transactionDescription"> INTERAC E-TRANSFER RECEIVE 888888 EXAMPLE INC. </span></td>
 	      <td class="debit"><span class="hidden-text">Not applicable</span></td>
 	      <td class="credit"><span>$600.00</span></td>
 	      <td class="balance"><span class="negative">−$48,671.86</span></td>
@@ -165,7 +165,7 @@ func TestSimpliiReadsALineOfCredit(t *testing.T) {
 	}
 	// A payment (Funds in) reduces what is owed -> positive.
 	if res.Transactions[1].Amount.String() != "600.00 CAD" ||
-		res.Transactions[1].Description != "INTERAC E-TRANSFER RECEIVE 742104 NB INC." {
+		res.Transactions[1].Description != "INTERAC E-TRANSFER RECEIVE 888888 EXAMPLE INC." {
 		t.Errorf("payment row = %+v", res.Transactions[1])
 	}
 	if res.Transactions[2].Description != "INTEREST CHARGE" || res.Transactions[2].Amount.String() != "-405.71 CAD" {

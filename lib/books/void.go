@@ -3,7 +3,7 @@ package books
 import (
 	"encoding/json"
 
-	"bkpr.pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
 )
 
 // ActionVoided records that a recorded thing was annulled: a bad import thrown out, or an invoice

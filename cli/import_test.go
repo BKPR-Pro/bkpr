@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/store"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/store"
 )
 
 // End to end: import dispatches a .ledger file to the parser and records its reconstructed lines.

@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 // Policy is a cost-basis method: how a disposal's cost is drawn from what was acquired. The set is

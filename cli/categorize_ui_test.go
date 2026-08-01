@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 func dayAgo(months int) string {
@@ -135,7 +135,7 @@ func TestCategorizeUICategoriesIncludeAccountsOutsideTheWindow(t *testing.T) {
 func TestCategorizeUIAccountReflectsSourceRouting(t *testing.T) {
 	bookHere(t)
 	importDated(t, "tx1", dayAgo(1), "KENT BUILDING SUPPLIES", -10000)
-	if err := categorize([]string{"tx1", "-category", "Expenses:Materials", "-source", "Assets:Bank:Chequing:9 Schoodic Street"}); err != nil {
+	if err := categorize([]string{"tx1", "-category", "Expenses:Materials", "-source", "Assets:Bank:Chequing:9 Birch Street"}); err != nil {
 		t.Fatalf("categorize: %v", err)
 	}
 
@@ -144,7 +144,7 @@ func TestCategorizeUIAccountReflectsSourceRouting(t *testing.T) {
 		t.Fatalf("categorizeUIGenerate: %v", err)
 	}
 	data := extractCategorizeUIData(t, out)
-	if len(data.Txns) != 1 || data.Txns[0].Account != "Assets:Bank:Chequing:9 Schoodic Street" {
+	if len(data.Txns) != 1 || data.Txns[0].Account != "Assets:Bank:Chequing:9 Birch Street" {
 		t.Fatalf("txns = %+v, want the routed source account", data.Txns)
 	}
 }

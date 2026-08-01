@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"bkpr.pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
 )
 
 // NextInvoiceNumber folds the log for the number the next invoice should carry: one past the highest

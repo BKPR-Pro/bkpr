@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/model"
-	"bkpr.pro/bkpr/lib/store"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/store"
 )
 
 func importAmt(t *testing.T, id, desc string, cents int64) {
@@ -49,22 +49,22 @@ func categoriesByTx(t *testing.T) map[string]string {
 // rule each routes them to different accounts in one categorization pass, no per-line work.
 func TestRulesSetAmountRoutesLinesByAmount(t *testing.T) {
 	bookHere(t)
-	importAmt(t, "lisgar", "PROV NB PROP TX", -17500)
-	importAmt(t, "schoodic", "PROV NB PROP TX", -15500)
+	importAmt(t, "cedar street", "PROV NB PROP TX", -17500)
+	importAmt(t, "birch street", "PROV NB PROP TX", -15500)
 
-	if err := ruleSet([]string{"set", "PROV NB PROP TX", "-amount", "175", "-category", "Expenses:Property:22 Lisgar"}); err != nil {
+	if err := ruleSet([]string{"set", "PROV NB PROP TX", "-amount", "175", "-category", "Expenses:Property:22 Cedar Street"}); err != nil {
 		t.Fatalf("rules set 175: %v", err)
 	}
-	if err := ruleSet([]string{"set", "PROV NB PROP TX", "-amount", "155", "-category", "Expenses:Property:9 Schoodic"}); err != nil {
+	if err := ruleSet([]string{"set", "PROV NB PROP TX", "-amount", "155", "-category", "Expenses:Property:9 Birch Street"}); err != nil {
 		t.Fatalf("rules set 155: %v", err)
 	}
 
 	got := categoriesByTx(t)
-	if got["lisgar"] != "Expenses:Property:22 Lisgar" {
-		t.Errorf("$175 line -> %q, want 22 Lisgar", got["lisgar"])
+	if got["cedar street"] != "Expenses:Property:22 Cedar Street" {
+		t.Errorf("$175 line -> %q, want 22 Cedar Street", got["cedar street"])
 	}
-	if got["schoodic"] != "Expenses:Property:9 Schoodic" {
-		t.Errorf("$155 line -> %q, want 9 Schoodic", got["schoodic"])
+	if got["birch street"] != "Expenses:Property:9 Birch Street" {
+		t.Errorf("$155 line -> %q, want 9 Birch Street", got["birch street"])
 	}
 }
 
@@ -72,16 +72,16 @@ func TestRulesSetAmountRoutesLinesByAmount(t *testing.T) {
 // be corrected without removing the rule first.
 func TestRulesSetAmountEditsInPlace(t *testing.T) {
 	bookHere(t)
-	importAmt(t, "lisgar", "PROV NB PROP TX", -17500)
+	importAmt(t, "cedar street", "PROV NB PROP TX", -17500)
 
 	if err := ruleSet([]string{"set", "PROV NB PROP TX", "-amount", "175", "-category", "Wrong"}); err != nil {
 		t.Fatalf("first set: %v", err)
 	}
-	if err := ruleSet([]string{"set", "PROV NB PROP TX", "-amount", "175", "-category", "Expenses:Property:22 Lisgar"}); err != nil {
+	if err := ruleSet([]string{"set", "PROV NB PROP TX", "-amount", "175", "-category", "Expenses:Property:22 Cedar Street"}); err != nil {
 		t.Fatalf("second set: %v", err)
 	}
-	if got := categoriesByTx(t)["lisgar"]; got != "Expenses:Property:22 Lisgar" {
-		t.Errorf("line -> %q, want the corrected 22 Lisgar", got)
+	if got := categoriesByTx(t)["cedar street"]; got != "Expenses:Property:22 Cedar Street" {
+		t.Errorf("line -> %q, want the corrected 22 Cedar Street", got)
 	}
 }
 

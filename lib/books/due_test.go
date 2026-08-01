@@ -3,7 +3,7 @@ package books_test
 import (
 	"testing"
 
-	"bkpr.pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/books"
 )
 
 // Owing a liability account is enough to show up in the due report, even before anyone has ever
@@ -84,7 +84,7 @@ func TestDueAccountsRollsUpAnAccountFamilyIntoOneNetRow(t *testing.T) {
 	log := newLog()
 	importOne(t, log, lineIn("a", "Liabilities:RBC Mastercard", 2, 37661, "PAYMENT"))
 	importOne(t, log, lineIn("b", "Liabilities:RBC Mastercard:Consulting", 2, -52432, "CHARGE"))
-	importOne(t, log, lineIn("c", "Liabilities:RBC Mastercard:Real Estate:9 Schoodic Street", 2, -95273, "CHARGE"))
+	importOne(t, log, lineIn("c", "Liabilities:RBC Mastercard:Real Estate:9 Birch Street", 2, -95273, "CHARGE"))
 	books.SetAccountMeta(log, "human", "Liabilities:RBC Mastercard", map[string]string{
 		"due": "2026-08-05", "minimum": "25.00",
 	})

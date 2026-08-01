@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"bkpr.pro/bkpr/lib/store"
+	"github.com/BKPR-Pro/bkpr/lib/store"
 )
 
 // reset is the one command that destroys history, so without -confirm it must touch nothing.

@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/store"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/store"
 )
 
 // reconOf reopens the book and returns the reconciliation for one account.

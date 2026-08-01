@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/eventlog"
-	"bkpr.pro/bkpr/lib/model"
-	"bkpr.pro/bkpr/lib/store"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/store"
 )
 
 func cad2(cents int64) model.Amount { return model.Amount{Units: cents, Scale: 2, Commodity: "CAD"} }
@@ -144,10 +144,10 @@ func TestBalanceSheetHoldsAssetsAndOwesLiabilities(t *testing.T) {
 // owes on the child, and the parent holds nothing of it directly.
 func TestBalanceSheetPutsARoutedLegOnTheChild(t *testing.T) {
 	tx := model.Transaction{Date: on(1), Account: "Liabilities:PC Mastercard", Amount: cad2(-10000)}
-	e := model.Entry{Source: "Liabilities:PC Mastercard:9 Schoodic", Postings: []model.Posting{post("Expenses:Materials:9 Schoodic", cad2(10000))}}
+	e := model.Entry{Source: "Liabilities:PC Mastercard:9 Birch Street", Postings: []model.Posting{post("Expenses:Materials:9 Birch Street", cad2(10000))}}
 	sheet := buildBalanceSheet([]model.Transaction{tx}, []model.Entry{e}, time.Time{}, "", nil)
 
-	if got := rowAmount(t, sheet.Liabilities, "Liabilities:PC Mastercard:9 Schoodic"); got != "100.00 CAD" {
+	if got := rowAmount(t, sheet.Liabilities, "Liabilities:PC Mastercard:9 Birch Street"); got != "100.00 CAD" {
 		t.Errorf("routed child owes %q, want 100.00 CAD", got)
 	}
 	for _, r := range sheet.Liabilities {
@@ -265,21 +265,21 @@ func TestCapitalGainsIgnoresNonSales(t *testing.T) {
 
 func usd2(cents int64) model.Amount { return model.Amount{Units: cents, Scale: 2, Commodity: "USD"} }
 
-// priced pairs a foreign amount with a @@ cost in another commodity, the shape the DNSimple income
+// priced pairs a foreign amount with a @@ cost in another commodity, the shape the Acme Corp income
 // lines take: -9000 USD @@ 12157.12 CAD.
 func priced(account string, a, cost model.Amount) model.Posting {
 	return model.Posting{Account: account, Amount: a, Cost: &cost}
 }
 
 // Under a -value CAD lens, USD income that recorded its own @@ CAD price is read at that exact price,
-// not at its USD face. This is the whole ask: DNSimple's -9000 USD @@ 12157.12 CAD shows as the CAD
+// not at its USD face. This is the whole ask: Acme Corp's -9000 USD @@ 12157.12 CAD shows as the CAD
 // the books already kept for it.
 func TestReportValuesIncomeAtItsRecordedPrice(t *testing.T) {
-	tx, e := entryOn(1, priced("Income:Consulting:DNSimple", usd2(-900000), cad2(1215712)))
+	tx, e := entryOn(1, priced("Income:Consulting:Acme Corp", usd2(-900000), cad2(1215712)))
 	val := newValuer("CAD", nil)
 	stmt := buildReport([]model.Transaction{tx}, []model.Entry{e}, time.Time{}, time.Time{}, "", val)
 
-	if got := rowAmount(t, stmt.Income, "Income:Consulting:DNSimple"); got != "12157.12 CAD" {
+	if got := rowAmount(t, stmt.Income, "Income:Consulting:Acme Corp"); got != "12157.12 CAD" {
 		t.Errorf("income = %q, want it valued at the recorded @@ CAD price", got)
 	}
 	if len(stmt.Net) != 1 || stmt.Net[0].String() != "12157.12 CAD" {
@@ -293,11 +293,11 @@ func TestReportValuesIncomeAtItsRecordedPrice(t *testing.T) {
 // Foreign income with no recorded price is left in its own currency, and its commodity is remembered
 // so the command can warn. This is the recent USD-billed income that landed as USD.
 func TestReportLeavesUnpricedForeignIncomeNative(t *testing.T) {
-	tx, e := entryOn(1, post("Income:Consulting:DNSimple", usd2(-900000)))
+	tx, e := entryOn(1, post("Income:Consulting:Acme Corp", usd2(-900000)))
 	val := newValuer("CAD", nil)
 	stmt := buildReport([]model.Transaction{tx}, []model.Entry{e}, time.Time{}, time.Time{}, "", val)
 
-	if got := rowAmount(t, stmt.Income, "Income:Consulting:DNSimple"); got != "9000.00 USD" {
+	if got := rowAmount(t, stmt.Income, "Income:Consulting:Acme Corp"); got != "9000.00 USD" {
 		t.Errorf("income = %q, want it left in USD with no price to value it", got)
 	}
 	if !val.unpriced["USD"] {
@@ -307,11 +307,11 @@ func TestReportLeavesUnpricedForeignIncomeNative(t *testing.T) {
 
 // A -rate values the unpriced residual: one USD is worth 1.35 CAD, so 9000 USD reads as 12150.00 CAD.
 func TestReportValuesUnpricedForeignIncomeAtASuppliedRate(t *testing.T) {
-	tx, e := entryOn(1, post("Income:Consulting:DNSimple", usd2(-900000)))
+	tx, e := entryOn(1, post("Income:Consulting:Acme Corp", usd2(-900000)))
 	val := newValuer("CAD", map[string]model.Amount{"USD": cad2(135)})
 	stmt := buildReport([]model.Transaction{tx}, []model.Entry{e}, time.Time{}, time.Time{}, "", val)
 
-	if got := rowAmount(t, stmt.Income, "Income:Consulting:DNSimple"); got != "12150.00 CAD" {
+	if got := rowAmount(t, stmt.Income, "Income:Consulting:Acme Corp"); got != "12150.00 CAD" {
 		t.Errorf("income = %q, want 9000 USD at 1.35 = 12150.00 CAD", got)
 	}
 	if len(val.unpriced) != 0 {
@@ -353,9 +353,9 @@ func TestBalanceSheetLeavesUnpricedForeignCashNative(t *testing.T) {
 
 // With no lens (a nil valuer) the report is unchanged: amounts keep their own commodity.
 func TestReportWithoutLensIsUnchanged(t *testing.T) {
-	tx, e := entryOn(1, priced("Income:Consulting:DNSimple", usd2(-900000), cad2(1215712)))
+	tx, e := entryOn(1, priced("Income:Consulting:Acme Corp", usd2(-900000), cad2(1215712)))
 	stmt := buildReport([]model.Transaction{tx}, []model.Entry{e}, time.Time{}, time.Time{}, "", nil)
-	if got := rowAmount(t, stmt.Income, "Income:Consulting:DNSimple"); got != "9000.00 USD" {
+	if got := rowAmount(t, stmt.Income, "Income:Consulting:Acme Corp"); got != "9000.00 USD" {
 		t.Errorf("income = %q, want the untouched USD face without a lens", got)
 	}
 }

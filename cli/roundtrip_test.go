@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/model"
-	"bkpr.pro/bkpr/lib/store"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/store"
 )
 
 // This is the harness for working on the tool: a lengthy statement through the whole pipeline,

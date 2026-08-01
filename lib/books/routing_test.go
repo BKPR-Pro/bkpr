@@ -3,8 +3,8 @@ package books_test
 import (
 	"testing"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/rules"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/rules"
 )
 
 // A physical card imported on one registered account is split by purpose: a categorization routes
@@ -17,16 +17,16 @@ func TestCategorizeRoutesTheCardLegToASubAccount(t *testing.T) {
 	importOne(t, log, lineIn("k", "Liabilities:PC Mastercard", 3, -10000, "KENT BUILDING SUPPLIES"))
 
 	err := books.Categorize(log, "human", "Unit 1 reno", "k", "", "Kent",
-		"Liabilities:PC Mastercard:9 Schoodic Street",
-		whole("Expenses:Real Estate:Materials:9 Schoodic Street", -10000))
+		"Liabilities:PC Mastercard:9 Birch Street",
+		whole("Expenses:Real Estate:Materials:9 Birch Street", -10000))
 	if err != nil {
 		t.Fatalf("Categorize: %v", err)
 	}
 
-	if got := entryFor(t, log, "k").Source; got != "Liabilities:PC Mastercard:9 Schoodic Street" {
+	if got := entryFor(t, log, "k").Source; got != "Liabilities:PC Mastercard:9 Birch Street" {
 		t.Errorf("entry Source = %q, want the routed child", got)
 	}
-	if got := balanceOf(t, log, "Liabilities:PC Mastercard:9 Schoodic Street").String(); got != "-100.00 CAD" {
+	if got := balanceOf(t, log, "Liabilities:PC Mastercard:9 Birch Street").String(); got != "-100.00 CAD" {
 		t.Errorf("routed card leg = %s, want -100.00 CAD on the purpose child", got)
 	}
 	if got := balanceOf(t, log, "Liabilities:PC Mastercard"); got.Units != 0 {
@@ -46,8 +46,8 @@ func TestRoutedChildRollsUpIntoTheParentReconcile(t *testing.T) {
 	}
 	importOne(t, log, lineIn("c1", "Liabilities:PC Mastercard", 3, -10000, "KENT SUPPLIES"))
 	if err := books.Categorize(log, "human", "Unit 1 reno", "c1", "", "Kent",
-		"Liabilities:PC Mastercard:9 Schoodic Street",
-		whole("Expenses:Real Estate:Materials:9 Schoodic Street", -10000)); err != nil {
+		"Liabilities:PC Mastercard:9 Birch Street",
+		whole("Expenses:Real Estate:Materials:9 Birch Street", -10000)); err != nil {
 		t.Fatalf("Categorize: %v", err)
 	}
 	// The bank now says the whole card owes 100, after the routed charge.
@@ -68,8 +68,8 @@ func TestParentReconcileStillCatchesAMissedChargeOnAChild(t *testing.T) {
 	log := newLog()
 	books.AssertBalance(log, "rbc", "Liabilities:PC Mastercard", on(1), cad(0))
 	importOne(t, log, lineIn("c1", "Liabilities:PC Mastercard", 3, -10000, "KENT SUPPLIES"))
-	books.Categorize(log, "human", "", "c1", "", "Kent", "Liabilities:PC Mastercard:9 Schoodic Street",
-		whole("Expenses:Real Estate:Materials:9 Schoodic Street", -10000))
+	books.Categorize(log, "human", "", "c1", "", "Kent", "Liabilities:PC Mastercard:9 Birch Street",
+		whole("Expenses:Real Estate:Materials:9 Birch Street", -10000))
 	// The bank says the card owes 130 -- a 30 charge the books never captured.
 	books.AssertBalance(log, "rbc", "Liabilities:PC Mastercard", on(4), cad(-13000))
 
@@ -90,19 +90,19 @@ func TestARoutingRuleSelfRoutesEveryMatchingCharge(t *testing.T) {
 	log := newLog()
 	if err := books.AddRule(log, "human", rules.Rule{
 		Match:    "kent",
-		Category: "Expenses:Real Estate:Materials:9 Schoodic Street",
-		Source:   "Liabilities:PC Mastercard:9 Schoodic Street",
+		Category: "Expenses:Real Estate:Materials:9 Birch Street",
+		Source:   "Liabilities:PC Mastercard:9 Birch Street",
 	}, ""); err != nil {
 		t.Fatalf("AddRule: %v", err)
 	}
 	importOne(t, log, lineIn("k1", "Liabilities:PC Mastercard", 3, -10000, "KENT SUPPLIES"))
 	importOne(t, log, lineIn("k2", "Liabilities:PC Mastercard", 5, -5000, "KENT SUPPLIES #2"))
 
-	if got := entryFor(t, log, "k1").Source; got != "Liabilities:PC Mastercard:9 Schoodic Street" {
+	if got := entryFor(t, log, "k1").Source; got != "Liabilities:PC Mastercard:9 Birch Street" {
 		t.Errorf("k1 Source = %q, want the rule's route (survives the log)", got)
 	}
 	// Both charges self-routed to the purpose child, with no categorize on either line.
-	if got := balanceOf(t, log, "Liabilities:PC Mastercard:9 Schoodic Street").String(); got != "-150.00 CAD" {
+	if got := balanceOf(t, log, "Liabilities:PC Mastercard:9 Birch Street").String(); got != "-150.00 CAD" {
 		t.Errorf("routed child = %s, want -150.00 CAD (both charges routed by the rule)", got)
 	}
 	if got := balanceOf(t, log, "Liabilities:PC Mastercard"); got.Units != 0 {

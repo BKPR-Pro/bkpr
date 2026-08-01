@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"bkpr.pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
 )
 
 // CollectionAccount is keyed by an account path. It carries metadata about the account itself, not

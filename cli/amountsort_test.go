@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 func mkAmt(units int64, comm string) model.Amount {

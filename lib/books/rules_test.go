@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/eventlog"
-	"bkpr.pro/bkpr/lib/rules"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/rules"
 )
 
 func rule(match, category string) rules.Rule {
@@ -53,7 +53,7 @@ func TestAddRuleAppendsInOrder(t *testing.T) {
 // a rule that was registered in a past session.
 func TestARulesMetadataSurvivesTheLog(t *testing.T) {
 	log := newLog()
-	r := rule("hyungjin", "Income:Real Estate:Rent:22 Lisgar Street")
+	r := rule("taylor", "Income:Real Estate:Rent:22 Cedar Street")
 	r.Metadata = map[string]string{"rentapp.lease": "31"}
 	loaded(t, log, r)
 
@@ -88,7 +88,7 @@ func TestARulesTaxSurvivesTheLog(t *testing.T) {
 // authored in a past session still gates on the category and the date on every later read.
 func TestARulesTaxScopeSurvivesTheLog(t *testing.T) {
 	log := newLog()
-	r := rule("kent", "Expenses:Real Estate:Materials:9 Schoodic")
+	r := rule("kent", "Expenses:Real Estate:Materials:9 Birch Street")
 	r.TaxRate, r.TaxAccount = "15%", "Expenses:Real Estate:HST:ITC:$1"
 	r.TaxCategory, r.TaxFrom = `Materials:([^:]+)`, "2026-01-01"
 	loaded(t, log, r)
@@ -135,10 +135,10 @@ func TestLedgerSplitsTaxOnATaxedVendor(t *testing.T) {
 // deposit names the lease it should be recorded against.
 func TestLedgerCarriesRuleMetadataOntoTheEntry(t *testing.T) {
 	log := newLog()
-	r := rule("hyungjin", "Income:Real Estate:Rent:22 Lisgar Street")
+	r := rule("taylor", "Income:Real Estate:Rent:22 Cedar Street")
 	r.Metadata = map[string]string{"rentapp.lease": "31"}
 	loaded(t, log, r)
-	importOne(t, log, line("dep", 3, 168000, "E-TRANSFER FROM HYUNGJIN SON"))
+	importOne(t, log, line("dep", 3, 168000, "E-TRANSFER FROM JAMIE TAYLOR"))
 
 	_, entries := ledger(t, log)
 	if len(entries) != 1 || entries[0].Metadata["rentapp.lease"] != "31" {

@@ -3,7 +3,7 @@ package books_test
 import (
 	"testing"
 
-	"bkpr.pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/books"
 )
 
 // RecordExport marks that a transaction was written to a connector, and Exported folds those back,

@@ -15,7 +15,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"bkpr.pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
 )
 
 const (

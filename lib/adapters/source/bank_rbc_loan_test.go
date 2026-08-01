@@ -14,7 +14,7 @@ import (
 func TestRBCReadsABalanceOnlyLoan(t *testing.T) {
 	requireBrowserTests(t)
 	const page = `<!doctype html><html><body class="template-legacy">
-	  <h1 id="pagetitle">22 Lisgar - Loan</h1>
+	  <h1 id="pagetitle">22 Cedar Street - Loan</h1>
 	  <table>
 	    <tr>
 	      <th class="fieldLabel">Current  balance:</th>
@@ -39,7 +39,7 @@ func TestRBCReadsABalanceOnlyLoan(t *testing.T) {
 		t.Fatalf("reading the loan: %v", err)
 	}
 
-	res, err := parseBankOutput(out, "test-connector", "Liabilities:Real Estate:22 Lisgar - Loan", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:Real Estate:22 Cedar Street - Loan", "CAD")
 	if err != nil {
 		t.Fatalf("parsing rbc.js output %q: %v", out, err)
 	}
@@ -59,7 +59,7 @@ func TestRBCReadsABalanceOnlyLoan(t *testing.T) {
 func TestRBCBalanceOnlyLoanIgnoresAHistoryWindowQuickly(t *testing.T) {
 	requireBrowserTests(t)
 	const page = `<!doctype html><html><body class="template-legacy">
-	  <h1 id="pagetitle">22 Lisgar - Loan</h1>
+	  <h1 id="pagetitle">22 Cedar Street - Loan</h1>
 	  <table>
 	    <tr>
 	      <th class="fieldLabel">Current  balance:</th>
@@ -89,7 +89,7 @@ func TestRBCBalanceOnlyLoanIgnoresAHistoryWindowQuickly(t *testing.T) {
 		t.Errorf("balance-only loan with a history window took %s; the missing date form should be detected instantly", elapsed)
 	}
 
-	res, err := parseBankOutput(out, "test-connector", "Liabilities:Real Estate:22 Lisgar - Loan", "CAD")
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:Real Estate:22 Cedar Street - Loan", "CAD")
 	if err != nil {
 		t.Fatalf("parsing rbc.js output %q: %v", out, err)
 	}

@@ -3,9 +3,9 @@ package main
 import (
 	"testing"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/eventlog"
-	"bkpr.pro/bkpr/lib/rules"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/rules"
 )
 
 func ruleLog(t *testing.T) *eventlog.Log {
@@ -31,13 +31,13 @@ func find(t *testing.T, log *eventlog.Log, match string) rules.Rule {
 // set is one verb: a pattern not yet known is created.
 func TestUpsertRuleCreatesWhenAbsent(t *testing.T) {
 	log := ruleLog(t)
-	r := rules.Rule{Match: "hyungjin", Category: "Income:Rent:22 Lisgar", Metadata: map[string]string{"rentapp.lease": "31"}}
+	r := rules.Rule{Match: "taylor", Category: "Income:Rent:22 Cedar Street", Metadata: map[string]string{"rentapp.lease": "31"}}
 
 	if err := upsertRule(log, r, map[string]bool{"category": true, "meta": true}, "", "", "human"); err != nil {
 		t.Fatalf("upsertRule: %v", err)
 	}
-	got := find(t, log, "hyungjin")
-	if got.Category != "Income:Rent:22 Lisgar" || got.Metadata["rentapp.lease"] != "31" {
+	got := find(t, log, "taylor")
+	if got.Category != "Income:Rent:22 Cedar Street" || got.Metadata["rentapp.lease"] != "31" {
 		t.Errorf("created rule = %+v", got)
 	}
 }
@@ -94,18 +94,18 @@ func TestUpsertRuleRejectsTaxRateWithoutAccount(t *testing.T) {
 // change only the named fields move, so scoping an existing tax leaves its rate and account alone.
 func TestUpsertRuleSetsTheTaxScope(t *testing.T) {
 	log := ruleLog(t)
-	seed := rules.Rule{Match: "kent", Category: "Expenses:Real Estate:Materials:9 Schoodic", TaxRate: "15%", TaxAccount: "Assets:HST ITC"}
+	seed := rules.Rule{Match: "kent", Category: "Expenses:Real Estate:Materials:9 Birch Street", TaxRate: "15%", TaxAccount: "Assets:HST ITC"}
 	if err := books.AddRule(log, "human", seed, ""); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
-	change := rules.Rule{Match: "kent", TaxCategory: `9 schoodic`, TaxFrom: "2026-01-01"}
+	change := rules.Rule{Match: "kent", TaxCategory: `9 birch street`, TaxFrom: "2026-01-01"}
 	err := upsertRule(log, change, map[string]bool{"tax-category": true, "tax-from": true}, "", "scope the ITC", "human")
 	if err != nil {
 		t.Fatalf("upsertRule: %v", err)
 	}
 	got := find(t, log, "kent")
-	if got.TaxCategory != `9 schoodic` || got.TaxFrom != "2026-01-01" {
+	if got.TaxCategory != `9 birch street` || got.TaxFrom != "2026-01-01" {
 		t.Errorf("scoped rule = %+v, want the scope and from-date set", got)
 	}
 	if got.TaxRate != "15%" || got.TaxAccount != "Assets:HST ITC" {
@@ -117,7 +117,7 @@ func TestUpsertRuleSetsTheTaxScope(t *testing.T) {
 // account, before a poison rule can reach the log.
 func TestUpsertRuleRejectsATaxScopeWithoutATax(t *testing.T) {
 	log := ruleLog(t)
-	r := rules.Rule{Match: "kent", Category: "Expenses:Materials", TaxCategory: `9 schoodic`}
+	r := rules.Rule{Match: "kent", Category: "Expenses:Materials", TaxCategory: `9 birch street`}
 
 	if err := upsertRule(log, r, map[string]bool{"category": true, "tax-category": true}, "", "", "human"); err == nil {
 		t.Fatal("expected an error for a tax scope with no tax")
@@ -142,16 +142,16 @@ func TestTaxFromDateNormalizes(t *testing.T) {
 // Metadata merges per key on a change, so naming one key does not drop the others.
 func TestUpsertRuleMergesMetadata(t *testing.T) {
 	log := ruleLog(t)
-	seed := rules.Rule{Match: "hyungjin", Metadata: map[string]string{"rentapp.lease": "31", "channel": "etransfer"}}
+	seed := rules.Rule{Match: "taylor", Metadata: map[string]string{"rentapp.lease": "31", "channel": "etransfer"}}
 	if err := books.AddRule(log, "human", seed, ""); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
-	err := upsertRule(log, rules.Rule{Match: "hyungjin", Metadata: map[string]string{"rentapp.lease": "47"}}, map[string]bool{"meta": true}, "", "new lease", "human")
+	err := upsertRule(log, rules.Rule{Match: "taylor", Metadata: map[string]string{"rentapp.lease": "47"}}, map[string]bool{"meta": true}, "", "new lease", "human")
 	if err != nil {
 		t.Fatalf("upsertRule: %v", err)
 	}
-	got := find(t, log, "hyungjin")
+	got := find(t, log, "taylor")
 	if got.Metadata["rentapp.lease"] != "47" {
 		t.Errorf("rentapp.lease = %q, want the update 47", got.Metadata["rentapp.lease"])
 	}

@@ -3,8 +3,8 @@ package books_test
 import (
 	"testing"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
 )
 
 func accountMeta(t *testing.T, log *eventlog.Log, account string) map[string]string {
@@ -21,7 +21,7 @@ func accountMeta(t *testing.T, log *eventlog.Log, account string) map[string]str
 func TestImportAccountMetaRecordsEachAccount(t *testing.T) {
 	log := newLog()
 	n, err := books.ImportAccountMeta(log, "human", map[string]map[string]string{
-		"Assets:Bank:Chequing": {"address": "742104 NB Inc.\n90 King Street"},
+		"Assets:Bank:Chequing": {"address": "888888 Example Inc.\n10 Maple Street"},
 		"Liabilities:Bank:HST": {"address": "HST"},
 	})
 	if err != nil {
@@ -30,7 +30,7 @@ func TestImportAccountMetaRecordsEachAccount(t *testing.T) {
 	if n != 2 {
 		t.Fatalf("recorded %d, want 2", n)
 	}
-	if got := accountMeta(t, log, "Assets:Bank:Chequing")["address"]; got != "742104 NB Inc.\n90 King Street" {
+	if got := accountMeta(t, log, "Assets:Bank:Chequing")["address"]; got != "888888 Example Inc.\n10 Maple Street" {
 		t.Errorf("address = %q", got)
 	}
 }
@@ -39,7 +39,7 @@ func TestImportAccountMetaRecordsEachAccount(t *testing.T) {
 // is skipped, so the log does not grow an event on every re-run of a migration.
 func TestImportAccountMetaSkipsUnchanged(t *testing.T) {
 	log := newLog()
-	meta := map[string]map[string]string{"Assets:Bank:Chequing": {"address": "90 King Street"}}
+	meta := map[string]map[string]string{"Assets:Bank:Chequing": {"address": "10 Maple Street"}}
 	if _, err := books.ImportAccountMeta(log, "human", meta); err != nil {
 		t.Fatalf("ImportAccountMeta: %v", err)
 	}
@@ -58,12 +58,12 @@ func TestImportAccountMetaSkipsUnchanged(t *testing.T) {
 func TestAccountMetaFoldsBackByAccount(t *testing.T) {
 	log := newLog()
 	if err := books.SetAccountMeta(log, "human", "Assets:Bank:Chequing", map[string]string{
-		"name": "Excite Creative", "address": "123 Main St\nOttawa ON",
+		"name": "Northwind Studio", "address": "123 Main St\nOttawa ON",
 	}); err != nil {
 		t.Fatalf("SetAccountMeta: %v", err)
 	}
 	m := accountMeta(t, log, "Assets:Bank:Chequing")
-	if m["name"] != "Excite Creative" || m["address"] != "123 Main St\nOttawa ON" {
+	if m["name"] != "Northwind Studio" || m["address"] != "123 Main St\nOttawa ON" {
 		t.Errorf("meta = %+v", m)
 	}
 }

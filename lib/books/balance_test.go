@@ -3,8 +3,8 @@ package books_test
 import (
 	"testing"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
 )
 
 func reconcileOne(t *testing.T, log *eventlog.Log, account string) books.Reconciliation {

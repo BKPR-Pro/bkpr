@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"bkpr.pro/bkpr/lib/model"
-	"bkpr.pro/bkpr/lib/rules"
+	"github.com/BKPR-Pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/rules"
 )
 
 // A rule's amount predicate is part of its identity, so rules list shows it -- otherwise two rules
@@ -14,7 +14,7 @@ import (
 func TestRenderRulesShowsTheAmountPredicate(t *testing.T) {
 	a := model.Amount{Units: 17500, Scale: 2, Commodity: "CAD"}
 	set := []rules.Rule{
-		{Match: "PROV NB PROP TX", Category: "Expenses:Property:22 Lisgar", Amount: &a},
+		{Match: "PROV NB PROP TX", Category: "Expenses:Property:22 Cedar Street", Amount: &a},
 		{Match: "acme", Category: "Expenses:Repairs"},
 	}
 

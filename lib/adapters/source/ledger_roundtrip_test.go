@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"bkpr.pro/bkpr/lib/adapters/ledger"
-	"bkpr.pro/bkpr/lib/adapters/source"
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/adapters/ledger"
+	"github.com/BKPR-Pro/bkpr/lib/adapters/source"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 // A comment left on one leg of a split must survive the writer and the reader: it renders inline,
@@ -69,10 +69,10 @@ func TestLedgerSourcePostingCommentRoundTrips(t *testing.T) {
 	}
 
 	txs := []model.Transaction{{
-		ID: "s-1", Account: "Expenses:Consulting:Compensation:Dallas Read", Date: date,
-		Amount: cad(100000), Description: "Dallas Read", Comment: "1000 CAD",
+		ID: "s-1", Account: "Expenses:Consulting:Compensation:A Shareholder", Date: date,
+		Amount: cad(100000), Description: "A Shareholder", Comment: "1000 CAD",
 	}}
-	entries := []model.Entry{{Payee: "Dallas Read", Postings: []model.Posting{
+	entries := []model.Entry{{Payee: "A Shareholder", Postings: []model.Posting{
 		{Account: "Assets:Consulting:Chequing", Amount: cad(-48908), Comment: "On the 26th"},
 		{Account: "Liabilities:Consulting:RBC Mastercard", Amount: cad(-51092), Comment: "For Huntsman summer camp"},
 	}}}
@@ -120,8 +120,8 @@ func TestLedgerRoutedSourceLegRoundTrips(t *testing.T) {
 	}}
 	entries := []model.Entry{{
 		Payee:    "Kent Building Supplies",
-		Source:   "Liabilities:PC Mastercard:9 Schoodic Street",
-		Postings: []model.Posting{{Account: "Expenses:Real Estate:Materials:9 Schoodic Street", Amount: cad(10000)}},
+		Source:   "Liabilities:PC Mastercard:9 Birch Street",
+		Postings: []model.Posting{{Account: "Expenses:Real Estate:Materials:9 Birch Street", Amount: cad(10000)}},
 	}}
 
 	var first bytes.Buffer
@@ -129,7 +129,7 @@ func TestLedgerRoutedSourceLegRoundTrips(t *testing.T) {
 		t.Fatalf("WriteAll: %v", err)
 	}
 	// The child, not the parent, carries the elided leg in the file, so `ledger bal` agrees with us.
-	if !bytes.Contains(first.Bytes(), []byte("Liabilities:PC Mastercard:9 Schoodic Street")) {
+	if !bytes.Contains(first.Bytes(), []byte("Liabilities:PC Mastercard:9 Birch Street")) {
 		t.Fatalf("routed leg not rendered on the child:\n%s", first.String())
 	}
 
@@ -143,7 +143,7 @@ func TestLedgerRoutedSourceLegRoundTrips(t *testing.T) {
 	if gotTxs[0].Account != "Liabilities:PC Mastercard" {
 		t.Errorf("tx.Account = %q, want the registered parent (so the fingerprint holds)", gotTxs[0].Account)
 	}
-	if gotEntries[0].Source != "Liabilities:PC Mastercard:9 Schoodic Street" {
+	if gotEntries[0].Source != "Liabilities:PC Mastercard:9 Birch Street" {
 		t.Errorf("Entry.Source = %q, want the routed child recovered", gotEntries[0].Source)
 	}
 	if gotTxs[0].Comment != "" {
@@ -175,10 +175,10 @@ func TestLedgerBlockCommentsRoundTrip(t *testing.T) {
 
 	txs := []model.Transaction{{
 		ID: "b-1", Account: "Assets:Consulting:Chequing", Date: date,
-		Amount: cad(-100000), Description: "Dallas Read",
+		Amount: cad(-100000), Description: "A Shareholder",
 	}}
 	entries := []model.Entry{{
-		Payee:         "Dallas Read",
+		Payee:         "A Shareholder",
 		BlockComments: []string{"Sephora          238.05 CAD", "Store             55.78 CAD"},
 		Postings:      []model.Posting{{Account: "Expenses:Discretionary", Amount: cad(100000)}},
 	}}
@@ -222,13 +222,13 @@ func TestLedgerPendingFlagRoundTrips(t *testing.T) {
 
 	txs := []model.Transaction{{
 		ID: "p-1", Account: "Assets:Consulting:Chequing", Date: date,
-		Amount: usd(900000), Description: "DNSimple",
+		Amount: usd(900000), Description: "Acme Corp",
 	}}
 	entries := []model.Entry{{
-		Payee:    "DNSimple",
+		Payee:    "Acme Corp",
 		Invoice:  "2073",
 		Pending:  true,
-		Postings: []model.Posting{{Account: "Income:Consulting:Contract:DNSimple", Amount: usd(-900000)}},
+		Postings: []model.Posting{{Account: "Income:Consulting:Contract:Acme Corp", Amount: usd(-900000)}},
 	}}
 
 	var first bytes.Buffer
@@ -246,7 +246,7 @@ func TestLedgerPendingFlagRoundTrips(t *testing.T) {
 	if !gotEntries[0].Pending {
 		t.Errorf("the pending flag was lost on the round trip")
 	}
-	if gotEntries[0].Invoice != "2073" || gotEntries[0].Payee != "DNSimple" {
+	if gotEntries[0].Invoice != "2073" || gotEntries[0].Payee != "Acme Corp" {
 		t.Errorf("invoice/payee = {%q, %q}, want the (code) lifted and round-tripped", gotEntries[0].Invoice, gotEntries[0].Payee)
 	}
 
@@ -285,8 +285,8 @@ func TestLedgerCostBasisRoundTripsThroughTheWriter(t *testing.T) {
 		// A property buy: the two Property legs cancel in cash, a legal fee shares the CAD line, and
 		// the financing (a LOC) is the elided plug.
 		{
-			ID: "buy-2", Account: "Liabilities:Simplii LOC:9 Schoodic Street", Date: date("2024/10/10"),
-			Amount: cad(-500000), Description: "9 Schoodic Street",
+			ID: "buy-2", Account: "Liabilities:Simplii LOC:9 Birch Street", Date: date("2024/10/10"),
+			Amount: cad(-500000), Description: "9 Birch Street",
 		},
 	}
 	entries := []model.Entry{
@@ -294,9 +294,9 @@ func TestLedgerCostBasisRoundTripsThroughTheWriter(t *testing.T) {
 			{Account: "Assets:Brokerage:AAPL", Amount: model.Amount{Units: 10, Commodity: "AAPL"}, Cost: amt(usd(100000))},
 		}},
 		{Payee: "Vendor", Postings: []model.Posting{
-			{Account: "Equity:Real Estate:9 Schoodic Street", Amount: model.Amount{Units: -1, Commodity: "Property"}, Cost: amt(cad(5000000))},
-			{Account: "Assets:Real Estate:9 Schoodic Street", Amount: model.Amount{Units: 1, Commodity: "Property"}, Cost: amt(cad(5000000))},
-			{Account: "Expenses:Real Estate:Legal:9 Schoodic Street", Amount: cad(500000)},
+			{Account: "Equity:Real Estate:9 Birch Street", Amount: model.Amount{Units: -1, Commodity: "Property"}, Cost: amt(cad(5000000))},
+			{Account: "Assets:Real Estate:9 Birch Street", Amount: model.Amount{Units: 1, Commodity: "Property"}, Cost: amt(cad(5000000))},
+			{Account: "Expenses:Real Estate:Legal:9 Birch Street", Amount: cad(500000)},
 		}},
 	}
 

@@ -74,7 +74,7 @@ func TestPCFinancialSignsInAcrossTheThreatMetrixFrame(t *testing.T) {
 	out, err := execBankScript(Bank{
 		Institution: "pcfinancial", LoginURL: srv.URL, DefaultCurrency: "CAD",
 		Account: "Liabilities:Personal:PC Mastercard",
-	}, map[string]string{"username": "dallas", "password": "hunter2"})
+	}, map[string]string{"username": "testuser", "password": "hunter2"})
 	skipIfNoBrowser(t, err)
 	if err != nil {
 		t.Fatalf("signing in across the ThreatMetrix frame: %v", err)
@@ -138,7 +138,7 @@ func TestPCFinancialReadsTheMastercard(t *testing.T) {
 	  <div class="table-body"><h2>Posted transactions</h2>
 	  <sortable-table amounttype="credit"><div class="table-sortable"><table><thead><tr><th>Description</th></tr></thead>
 	  <tbody class="credit">` +
-		pcfRow("KENT ST.STEPHEN", "May 20, 2026", "$53.48", "positive") +
+		pcfRow("KENT SPRINGFIELD", "May 20, 2026", "$53.48", "positive") +
 		pcfRow("Payment RBC", "May 8, 2026", "$16,867.02", "negative") +
 		pcfRow("PURCHASE INTEREST CHARGE", "May 21, 2026", "$151.16", "positive") +
 		`</tbody></table></div></sortable-table></div>`
@@ -167,7 +167,7 @@ func TestPCFinancialReadsTheMastercard(t *testing.T) {
 	}
 	// A charge (PCF "positive") is money owed -> negative in the books.
 	if res.Transactions[0].Date.Format("2006-01-02") != "2026-05-20" ||
-		res.Transactions[0].Description != "KENT ST.STEPHEN" ||
+		res.Transactions[0].Description != "KENT SPRINGFIELD" ||
 		res.Transactions[0].Amount.String() != "-53.48 CAD" {
 		t.Errorf("charge row = %+v", res.Transactions[0])
 	}
@@ -307,7 +307,7 @@ func TestPCFinancialReadsOnlyThePostedSection(t *testing.T) {
 	  <tbody class="credit">` +
 		pcfRow("WWW COSTCO CA", "Jul 22, 2026", "$172.50", "negative") +
 		pcfRow("WWW COSTCO CA", "Jul 22, 2026", "$172.50", "negative") +
-		pcfRow("KENT ST.STEPHEN", "Jul 21, 2026", "$82.74", "positive") +
+		pcfRow("KENT SPRINGFIELD", "Jul 21, 2026", "$82.74", "positive") +
 		`</tbody></table></div></sortable-table>`
 
 	body := `

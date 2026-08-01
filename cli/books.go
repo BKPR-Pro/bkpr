@@ -13,10 +13,10 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"bkpr.pro/bkpr/lib/adapters/ledger"
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/model"
-	"bkpr.pro/bkpr/lib/store"
+	"github.com/BKPR-Pro/bkpr/lib/adapters/ledger"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/store"
 )
 
 // accountsFlag collects repeated -account patterns, so one reading can name several accounts and

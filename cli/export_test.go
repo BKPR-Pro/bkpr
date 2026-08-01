@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"bkpr.pro/bkpr/lib/adapters/rentapp"
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/eventlog"
-	"bkpr.pro/bkpr/lib/model"
-	"bkpr.pro/bkpr/lib/rules"
+	"github.com/BKPR-Pro/bkpr/lib/adapters/rentapp"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/rules"
 )
 
 // capture records what the mock rent app was asked to do, so a test can assert the export sent the
@@ -38,7 +38,7 @@ func rentDepositLog(t *testing.T) *eventlog.Log {
 	t.Helper()
 	log := eventlog.New(eventlog.NewMemory())
 	r := rules.Rule{
-		Match: "hyungjin", Category: "Income:Real Estate:Rent:22 Lisgar Street",
+		Match: "taylor", Category: "Income:Real Estate:Rent:22 Cedar Street",
 		Metadata: map[string]string{"rentapp.lease": "31"},
 	}
 	if err := books.AddRule(log, "human", r, ""); err != nil {
@@ -46,7 +46,7 @@ func rentDepositLog(t *testing.T) *eventlog.Log {
 	}
 	if _, err := books.Import(log, "statement:march", []model.Transaction{{
 		ID: "dep1", Account: "Assets:Bank:Chequing", Date: time.Date(2026, 3, 3, 0, 0, 0, 0, time.UTC),
-		Amount: model.Amount{Units: 168000, Scale: 2, Commodity: "CAD"}, Description: "E-TRANSFER FROM HYUNGJIN SON",
+		Amount: model.Amount{Units: 168000, Scale: 2, Commodity: "CAD"}, Description: "E-TRANSFER FROM JAMIE TAYLOR",
 	}}); err != nil {
 		t.Fatalf("Import: %v", err)
 	}

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"bkpr.pro/bkpr/lib/adapters/source"
-	"bkpr.pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/adapters/source"
+	"github.com/BKPR-Pro/bkpr/lib/books"
 )
 
 // A standalone note a person kept inside an entry must survive the whole import path: the reader
@@ -15,7 +15,7 @@ import (
 func TestCarryingKeepsAnEntrysBlockComments(t *testing.T) {
 	log := newLog()
 
-	txs, entries, err := source.ReadLedger(strings.NewReader(`2025/09/13  * Dallas Read
+	txs, entries, err := source.ReadLedger(strings.NewReader(`2025/09/13  * A Shareholder
   ; Sephora          238.05 CAD
   ; Store             55.78 CAD
   Expenses:Discretionary  1000.00 CAD
@@ -48,8 +48,8 @@ func TestCarryingKeepsAnEntrysBlockComments(t *testing.T) {
 func TestCarryingKeepsAnEntrysInvoiceNumber(t *testing.T) {
 	log := newLog()
 
-	txs, entries, err := source.ReadLedger(strings.NewReader(`2026/04/01  * (2073) DNSimple
-  Income:Consulting:Contract:DNSimple  -9000.00 USD
+	txs, entries, err := source.ReadLedger(strings.NewReader(`2026/04/01  * (2073) Acme Corp
+  Income:Consulting:Contract:Acme Corp  -9000.00 USD
   Assets:Consulting:Chequing
 `), "books.ledger")
 	if err != nil {
@@ -69,7 +69,7 @@ func TestCarryingKeepsAnEntrysInvoiceNumber(t *testing.T) {
 	if folded[0].Invoice != "2073" {
 		t.Fatalf("invoice number lost across the log: %q", folded[0].Invoice)
 	}
-	if folded[0].Payee != "DNSimple" {
+	if folded[0].Payee != "Acme Corp" {
 		t.Fatalf("payee = %q, want the code lifted off the name", folded[0].Payee)
 	}
 }

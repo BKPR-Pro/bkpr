@@ -3,7 +3,7 @@ package books_test
 import (
 	"testing"
 
-	"bkpr.pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/books"
 )
 
 // A description is what is being billed, and it labels the category leg. A taxed rent invoice books

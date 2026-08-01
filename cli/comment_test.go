@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"bkpr.pro/bkpr/lib/model"
-	"bkpr.pro/bkpr/lib/store"
+	"github.com/BKPR-Pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/store"
 )
 
 // lastActorOf returns the actor on the most recent event of the given collection and action, since a

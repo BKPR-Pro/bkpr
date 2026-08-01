@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"bkpr.pro/bkpr/lib/costbasis"
-	"bkpr.pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/costbasis"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
 )
 
 // CollectionPolicy is keyed by the account a cost-basis method applies to. The empty key is the

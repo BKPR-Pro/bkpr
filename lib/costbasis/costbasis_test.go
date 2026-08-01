@@ -3,8 +3,8 @@ package costbasis_test
 import (
 	"testing"
 
-	"bkpr.pro/bkpr/lib/costbasis"
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/costbasis"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 func usd(cents int64) model.Amount { return model.Amount{Units: cents, Scale: 2, Commodity: "USD"} }

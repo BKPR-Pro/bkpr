@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 // Commenting the sole posting of a line records the note on that leg. The account need not be named
@@ -202,7 +202,7 @@ func TestCommentKeepsTheLinesSourceAndInvoice(t *testing.T) {
 	log := newLog()
 	importOne(t, log, line("a", 2, -8420, "KENT"))
 	if err := books.Categorize(log, "human", "", "a", "2074", "Kent",
-		"Liabilities:RBC Mastercard", whole("Expenses:Real Estate:Materials:90 King Street", -8420)); err != nil {
+		"Liabilities:RBC Mastercard", whole("Expenses:Real Estate:Materials:10 Maple Street", -8420)); err != nil {
 		t.Fatalf("Categorize: %v", err)
 	}
 

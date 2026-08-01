@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"bkpr.pro/bkpr/lib/adapters/source"
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/adapters/source"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 func readLedger(t *testing.T, text string) []model.Transaction {
@@ -21,8 +21,8 @@ func readLedger(t *testing.T, text string) []model.Transaction {
 // an uncleared payment. That flag is real accounting state, so the reader carries it back on the
 // entry rather than stripping it, and a cleared entry comes back not pending.
 func TestReadLedgerCarriesThePendingFlag(t *testing.T) {
-	_, entries, err := source.ReadLedger(strings.NewReader(`2026/04/01  ! (2073) DNSimple
-  Income:Consulting:Contract:DNSimple  -9000.00 USD
+	_, entries, err := source.ReadLedger(strings.NewReader(`2026/04/01  ! (2073) Acme Corp
+  Income:Consulting:Contract:Acme Corp  -9000.00 USD
   Assets:Consulting:Chequing
 
 2026/04/02  * Swiss Chalet
@@ -38,7 +38,7 @@ func TestReadLedgerCarriesThePendingFlag(t *testing.T) {
 	if !entries[0].Pending {
 		t.Errorf("the ! entry came back not pending, want its pending state carried")
 	}
-	if entries[0].Payee != "DNSimple" {
+	if entries[0].Payee != "Acme Corp" {
 		t.Errorf("payee = %q, want the flag and code stripped off the name", entries[0].Payee)
 	}
 	if entries[0].Invoice != "2073" {
@@ -53,8 +53,8 @@ func TestReadLedgerCarriesThePendingFlag(t *testing.T) {
 // field, so a number is data rather than text buried in a name, and a payee with no code keeps its
 // whole name.
 func TestReadLedgerLiftsTheInvoiceCode(t *testing.T) {
-	_, entries, err := source.ReadLedger(strings.NewReader(`2026/04/01  * (2073) DNSimple
-  Income:Consulting:Contract:DNSimple  -9000.00 USD
+	_, entries, err := source.ReadLedger(strings.NewReader(`2026/04/01  * (2073) Acme Corp
+  Income:Consulting:Contract:Acme Corp  -9000.00 USD
   Assets:Consulting:Chequing
 
 2026/04/02  * Swiss Chalet
@@ -64,8 +64,8 @@ func TestReadLedgerLiftsTheInvoiceCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadLedger: %v", err)
 	}
-	if entries[0].Invoice != "2073" || entries[0].Payee != "DNSimple" {
-		t.Errorf("coded entry = {invoice %q, payee %q}, want {2073, DNSimple}", entries[0].Invoice, entries[0].Payee)
+	if entries[0].Invoice != "2073" || entries[0].Payee != "Acme Corp" {
+		t.Errorf("coded entry = {invoice %q, payee %q}, want {2073, Acme Corp}", entries[0].Invoice, entries[0].Payee)
 	}
 	if entries[1].Invoice != "" || entries[1].Payee != "Swiss Chalet" {
 		t.Errorf("uncoded entry = {invoice %q, payee %q}, want {\"\", Swiss Chalet}", entries[1].Invoice, entries[1].Payee)
@@ -288,9 +288,9 @@ func TestReadLedgerCarriesAPostingComment(t *testing.T) {
 // value, in file order, so a multi-line letterhead survives whole.
 func TestReadLedgerAccountsFoldsTheAddressBlock(t *testing.T) {
 	meta, err := source.ReadLedgerAccounts(strings.NewReader(`account Assets:Consulting:Chequing
-  address 742104 NB Inc.
-  address 90 King Street
-  address BN: 770593416
+  address 888888 Example Inc.
+  address 10 Maple Street
+  address BN: 999999999
 
 account Liabilities:Consulting:HST
   address HST
@@ -302,7 +302,7 @@ account Liabilities:Consulting:HST
 	if err != nil {
 		t.Fatalf("ReadLedgerAccounts: %v", err)
 	}
-	if got := meta["Assets:Consulting:Chequing"]["address"]; got != "742104 NB Inc.\n90 King Street\nBN: 770593416" {
+	if got := meta["Assets:Consulting:Chequing"]["address"]; got != "888888 Example Inc.\n10 Maple Street\nBN: 999999999" {
 		t.Fatalf("Chequing address = %q", got)
 	}
 	if got := meta["Liabilities:Consulting:HST"]["address"]; got != "HST" {
@@ -327,8 +327,8 @@ func TestReadLedgerAccountsOmitsAnEmptyDirective(t *testing.T) {
 
 func TestReadLedgerSkipsDirectivesAndPeriodicEntries(t *testing.T) {
 	txs := readLedger(t, `account Assets:Bank:Chequing
-  address 90 King Street
-  address St. Stephen
+  address 10 Maple Street
+  address Springfield
 
 ~ Monthly
   Income:Rent  -1300.00 CAD
@@ -435,16 +435,16 @@ func TestReadLedgerReadsAnAtAtPricedPosting(t *testing.T) {
 // nothing is left uncategorized — the round trip that a bare commodity unit could not make.
 func TestReadLedgerRoundTripsAPricedPropertyPurchase(t *testing.T) {
 	txs, entries, err := source.ReadLedger(strings.NewReader(`2024/10/10  * Vendor
-  Equity:Real Estate:9 Schoodic Street  -1 Property @@ 50000.00 CAD
-  Assets:Real Estate:9 Schoodic Street   1 Property @@ 50000.00 CAD
-  Expenses:Real Estate:Legal:9 Schoodic Street  5000.00 CAD
-  Liabilities:Simplii LOC:9 Schoodic Street
+  Equity:Real Estate:9 Birch Street  -1 Property @@ 50000.00 CAD
+  Assets:Real Estate:9 Birch Street   1 Property @@ 50000.00 CAD
+  Expenses:Real Estate:Legal:9 Birch Street  5000.00 CAD
+  Liabilities:Simplii LOC:9 Birch Street
 `), "books.ledger")
 	if err != nil {
 		t.Fatalf("ReadLedger: %v", err)
 	}
 	tx := txs[0]
-	if tx.Account != "Liabilities:Simplii LOC:9 Schoodic Street" {
+	if tx.Account != "Liabilities:Simplii LOC:9 Birch Street" {
 		t.Errorf("source account = %q, want the amountless Simplii LOC plug", tx.Account)
 	}
 	if tx.Amount.String() != "-5000.00 CAD" {

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"bkpr.pro/bkpr/lib/eventlog"
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 // transferDays is how far apart the two sightings of one movement may be dated. A transfer often

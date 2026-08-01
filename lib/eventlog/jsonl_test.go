@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"bkpr.pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
 )
 
 // The file is the book of record, so a fact survives the process that wrote it.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"bkpr.pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
 )
 
 // Every storage adapter answers to the same suite. The in-memory one is what the rest of the

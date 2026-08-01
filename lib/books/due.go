@@ -4,8 +4,8 @@ import (
 	"sort"
 	"strings"
 
-	"bkpr.pro/bkpr/lib/eventlog"
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 // DueAccount is one liability account you owe against right now: its balance, and the due date /

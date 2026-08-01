@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"bkpr.pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/books"
 )
 
 func asOf(y int, m time.Month, d int) time.Time {

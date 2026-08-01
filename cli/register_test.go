@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"testing"
 
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 // regLine pairs a statement line with its categorized entry, the two sides the register reads.
@@ -93,17 +93,17 @@ func TestRegisterAccountBalanceCountsAPostingLeg(t *testing.T) {
 func TestRegisterAccountBalanceFollowsARoutedSourceLeg(t *testing.T) {
 	tx, e := regLine("aaa", 5, "Liabilities:PC Mastercard", cad2(-8420), "Acme",
 		post("Expenses:Repairs", cad2(8420)))
-	e.Source = "Liabilities:PC Mastercard:9 Schoodic"
+	e.Source = "Liabilities:PC Mastercard:9 Birch Street"
 
 	rows, err := buildRegister([]model.Transaction{tx}, []model.Entry{e},
-		map[string]string{}, regexp.MustCompile("(?i)9 Schoodic"))
+		map[string]string{}, regexp.MustCompile("(?i)9 Birch Street"))
 	if err != nil {
 		t.Fatalf("buildRegister: %v", err)
 	}
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want the routed child to carry the movement", len(rows))
 	}
-	if rows[0].Account != "Liabilities:PC Mastercard:9 Schoodic" {
+	if rows[0].Account != "Liabilities:PC Mastercard:9 Birch Street" {
 		t.Errorf("account = %q, want the routed source account", rows[0].Account)
 	}
 }
@@ -199,9 +199,9 @@ func TestTwinGroupsSkipASettledAccrualAndItsPayment(t *testing.T) {
 // which is the assumption memo drift breaks; what the assumption really protects is the bank charging
 // the same amount twice in a day, and that case says the same memo both times.
 func TestTwinGroupsCatchOneDoorServingOneLineUnderTwoMemos(t *testing.T) {
-	tx1, e1 := regLine("aaa", 4, "Assets:Bank:Chequing", cad2(-15500), "Province of New Brunswick")
+	tx1, e1 := regLine("aaa", 4, "Assets:Bank:Chequing", cad2(-15500), "Province of Anystate")
 	tx1.Description = "Online Banking payment"
-	tx2, e2 := regLine("bbb", 4, "Assets:Bank:Chequing", cad2(-15500), "Province of New Brunswick")
+	tx2, e2 := regLine("bbb", 4, "Assets:Bank:Chequing", cad2(-15500), "Province of Anystate")
 	tx2.Description = "Online Banking payment - 7604 PROV NB PROP TX"
 	doors := map[string]string{"aaa": "connector:rbc-chequing", "bbb": "connector:rbc-chequing"}
 

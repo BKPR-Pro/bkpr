@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"bkpr.pro/bkpr/lib/eventlog"
-	"bkpr.pro/bkpr/lib/model"
-	"bkpr.pro/bkpr/lib/rules"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/rules"
 )
 
 // ActionCategorized records that a person or an agent asserted the postings for one transaction.

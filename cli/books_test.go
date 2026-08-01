@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"bkpr.pro/bkpr/lib/adapters/ledger"
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/eventlog"
-	"bkpr.pro/bkpr/lib/model"
-	"bkpr.pro/bkpr/lib/rules"
+	"github.com/BKPR-Pro/bkpr/lib/adapters/ledger"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/rules"
 )
 
 // Off a terminal -- a pipe, a redirect, an agent capturing output -- books defaults to json rather
@@ -302,13 +302,13 @@ func TestWriteJSONRoundTrips(t *testing.T) {
 }
 
 // foreignIncome is one USD-billed line whose categorized side records its own @@ CAD price, the shape
-// DNSimple income takes: a USD deposit posted to income at the CAD it was worth. The source line
+// Acme Corp income takes: a USD deposit posted to income at the CAD it was worth. The source line
 // records no price, only the USD that landed.
 func foreignIncome(cost *model.Amount) ([]model.Transaction, []model.Entry) {
-	txs := []model.Transaction{{ID: "dnsimple", Account: "Assets:Bank:USD",
+	txs := []model.Transaction{{ID: "acme", Account: "Assets:Bank:USD",
 		Date: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Amount: usd2(900000)}}
-	entries := []model.Entry{{Payee: "DNSimple", Postings: []model.Posting{
-		{Account: "Income:Consulting:DNSimple", Amount: usd2(-900000), Cost: cost}}}}
+	entries := []model.Entry{{Payee: "Acme Corp", Postings: []model.Posting{
+		{Account: "Income:Consulting:Acme Corp", Amount: usd2(-900000), Cost: cost}}}}
 	return txs, entries
 }
 

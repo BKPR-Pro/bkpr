@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"bkpr.pro/bkpr/lib/eventlog"
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 // Comment records a free-text note on one posting of a line, or clears it when remove is set. The

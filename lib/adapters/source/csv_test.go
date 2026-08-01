@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"bkpr.pro/bkpr/lib/adapters/source"
+	"github.com/BKPR-Pro/bkpr/lib/adapters/source"
 )
 
 func signedMapping() source.CSV {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"bkpr.pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/books"
 )
 
 func rentConnector() books.Connector {

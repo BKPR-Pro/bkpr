@@ -1,7 +1,7 @@
 package books
 
 import (
-	"bkpr.pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
 )
 
 // Doors folds the log into where each line of the books entered: an imported line maps to the actor

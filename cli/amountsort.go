@@ -4,7 +4,7 @@ import (
 	"math"
 	"sort"
 
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 // amountMagnitude is an amount's signed decimal value as a float, the key for sorting by amount. It

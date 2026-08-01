@@ -11,8 +11,8 @@ import (
 	"text/template"
 	"time"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 //go:embed templates/categorize_ui.html.tmpl

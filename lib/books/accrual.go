@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"bkpr.pro/bkpr/lib/eventlog"
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 // An accrual is value recognized before its cash: an invoice (money owed to you) or a bill (money

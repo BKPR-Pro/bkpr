@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"bkpr.pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
 // A bank is another source, imported like a CSV or a ledger file but read from the bank's website

@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"bkpr.pro/bkpr/lib/model"
-	"bkpr.pro/bkpr/lib/rules"
+	"github.com/BKPR-Pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/rules"
 )
 
 func tx(description string) model.Transaction {
@@ -52,15 +52,15 @@ func TestARuleNamesThePayeeAndTheAccountToPostTo(t *testing.T) {
 // one registered account self-routes each matching charge to its purpose child. Routing changes only
 // where the elided leg lands, never how much, so the categorized side still balances the whole line.
 func TestARuleRoutesTheSourceLegToASubAccount(t *testing.T) {
-	e := engine(t, rules.Rule{Match: `kent`, Category: "Expenses:Materials:9 Schoodic", Source: "Liabilities:PC Mastercard:9 Schoodic"})
+	e := engine(t, rules.Rule{Match: `kent`, Category: "Expenses:Materials:9 Birch Street", Source: "Liabilities:PC Mastercard:9 Birch Street"})
 
 	line := tx("KENT BUILDING SUPPLIES")
 	got := e.Apply(line)
 
-	if got.Source != "Liabilities:PC Mastercard:9 Schoodic" {
+	if got.Source != "Liabilities:PC Mastercard:9 Birch Street" {
 		t.Errorf("Source = %q, want the routed sub-account", got.Source)
 	}
-	if got.SourceAccount(line) != "Liabilities:PC Mastercard:9 Schoodic" {
+	if got.SourceAccount(line) != "Liabilities:PC Mastercard:9 Birch Street" {
 		t.Errorf("SourceAccount = %q, want the routed leg to land on the child", got.SourceAccount(line))
 	}
 	if !got.Balances(line) {
@@ -72,13 +72,13 @@ func TestARuleRoutesTheSourceLegToASubAccount(t *testing.T) {
 // broader rule still names the payee it left empty.
 func TestSourceIsFirstWinsPerField(t *testing.T) {
 	e := engine(t,
-		rules.Rule{Match: `kent`, Category: "Expenses:Materials:9 Schoodic", Source: "Liabilities:PC Mastercard:9 Schoodic"},
+		rules.Rule{Match: `kent`, Category: "Expenses:Materials:9 Birch Street", Source: "Liabilities:PC Mastercard:9 Birch Street"},
 		rules.Rule{Match: `building`, Source: "Liabilities:PC Mastercard:Wrong", Payee: "Kent Building Supplies"},
 	)
 
 	got := e.Apply(tx("KENT BUILDING SUPPLIES"))
 
-	if got.Source != "Liabilities:PC Mastercard:9 Schoodic" {
+	if got.Source != "Liabilities:PC Mastercard:9 Birch Street" {
 		t.Errorf("Source = %q, want the earlier rule's route", got.Source)
 	}
 	if got.Payee != "Kent Building Supplies" {
@@ -250,16 +250,16 @@ func datedTaxable(description string, units int64, date string) model.Transactio
 // to the categories it names; a category outside it stays gross.
 func TestTaxCategoryScopesTheSplitToMatchingCategories(t *testing.T) {
 	claimable := engine(t, rules.Rule{
-		Match: `kent`, Category: "Expenses:Real Estate:Materials:9 Schoodic",
-		TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxCategory: `9 schoodic`,
+		Match: `kent`, Category: "Expenses:Real Estate:Materials:9 Birch Street",
+		TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxCategory: `9 birch street`,
 	})
 	if got := claimable.Apply(taxable("KENT BUILDING SUPPLIES", -11500)); len(got.Postings) != 2 {
 		t.Errorf("a matching category should split, got %+v", got.Postings)
 	}
 
 	gross := engine(t, rules.Rule{
-		Match: `kent`, Category: "Expenses:Real Estate:Materials:22 Lisgar",
-		TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxCategory: `9 schoodic`,
+		Match: `kent`, Category: "Expenses:Real Estate:Materials:22 Cedar Street",
+		TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxCategory: `9 birch street`,
 	})
 	got := gross.Apply(taxable("KENT BUILDING SUPPLIES", -11500))
 	if len(got.Postings) != 1 {
@@ -274,8 +274,8 @@ func TestTaxCategoryScopesTheSplitToMatchingCategories(t *testing.T) {
 // name the category and the earlier rule's tax still scopes against it.
 func TestTaxCategoryGatesOnTheResolvedCategory(t *testing.T) {
 	e := engine(t,
-		rules.Rule{Match: `kent`, TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxCategory: `9 schoodic`},
-		rules.Rule{Match: `building`, Category: "Expenses:Real Estate:Materials:9 Schoodic"},
+		rules.Rule{Match: `kent`, TaxRate: "15%", TaxAccount: "Assets:HST ITC", TaxCategory: `9 birch street`},
+		rules.Rule{Match: `building`, Category: "Expenses:Real Estate:Materials:9 Birch Street"},
 	)
 
 	got := e.Apply(taxable("KENT BUILDING SUPPLIES", -11500))
@@ -293,7 +293,7 @@ func TestTaxCategoryGatesOnTheResolvedCategory(t *testing.T) {
 // that property's own tax account.
 func TestTaxAccountExpandsTaxCategoryCaptures(t *testing.T) {
 	e := engine(t, rules.Rule{
-		Match: `kent`, Category: "Expenses:Real Estate:Materials:9 Schoodic",
+		Match: `kent`, Category: "Expenses:Real Estate:Materials:9 Birch Street",
 		TaxRate: "15%", TaxCategory: `Materials:([^:]+)`, TaxAccount: "Expenses:Real Estate:HST:ITC:$1",
 	})
 
@@ -302,7 +302,7 @@ func TestTaxAccountExpandsTaxCategoryCaptures(t *testing.T) {
 	if len(got.Postings) != 2 {
 		t.Fatalf("want a split, got %+v", got.Postings)
 	}
-	if got.Postings[1].Account != "Expenses:Real Estate:HST:ITC:9 Schoodic" {
+	if got.Postings[1].Account != "Expenses:Real Estate:HST:ITC:9 Birch Street" {
 		t.Errorf("tax account = %q, want the property derived from the category", got.Postings[1].Account)
 	}
 }
@@ -415,19 +415,19 @@ func TestOverlaySkipsALegAlreadyOnTheTaxAccount(t *testing.T) {
 func TestOverlayScopesByTheAssertedCategory(t *testing.T) {
 	e := engine(t, rules.Rule{
 		Match: `kent`, TaxRate: "15%", TaxFrom: "2026-01-01",
-		TaxCategory: `Materials:(9 Schoodic)`, TaxAccount: "Expenses:Real Estate:HST:ITC:$1",
+		TaxCategory: `Materials:(9 Birch Street)`, TaxAccount: "Expenses:Real Estate:HST:ITC:$1",
 	})
 	line := datedTaxable("KENT BUILDING SUPPLIES", -11500, "2026-03-05")
 
 	claimed := e.OverlayTax(line, model.Entry{Postings: []model.Posting{
-		{Account: "Expenses:Real Estate:Materials:9 Schoodic", Amount: line.Amount.Negate()},
+		{Account: "Expenses:Real Estate:Materials:9 Birch Street", Amount: line.Amount.Negate()},
 	}})
-	if len(claimed.Postings) != 2 || claimed.Postings[1].Account != "Expenses:Real Estate:HST:ITC:9 Schoodic" {
+	if len(claimed.Postings) != 2 || claimed.Postings[1].Account != "Expenses:Real Estate:HST:ITC:9 Birch Street" {
 		t.Errorf("a category in scope should split to its derived account, got %+v", claimed.Postings)
 	}
 
 	gross := e.OverlayTax(line, model.Entry{Postings: []model.Posting{
-		{Account: "Expenses:Real Estate:Materials:22 Lisgar", Amount: line.Amount.Negate()},
+		{Account: "Expenses:Real Estate:Materials:22 Cedar Street", Amount: line.Amount.Negate()},
 	}})
 	if len(gross.Postings) != 1 {
 		t.Errorf("a category outside the scope must stay gross, got %+v", gross.Postings)
@@ -452,7 +452,7 @@ func TestOverlaySkipsAForeignOrPricedLeg(t *testing.T) {
 // The scope and the bound qualify a tax; without one they have nothing to qualify, so they are
 // refused at authoring like a rate without an account.
 func TestTaxCategoryWithoutATaxIsRejected(t *testing.T) {
-	if _, err := rules.New([]rules.Rule{{Match: `kent`, Category: "Expenses:Materials", TaxCategory: `9 schoodic`}}); err == nil {
+	if _, err := rules.New([]rules.Rule{{Match: `kent`, Category: "Expenses:Materials", TaxCategory: `9 birch street`}}); err == nil {
 		t.Fatal("expected an error for a tax category with no tax")
 	}
 	if _, err := rules.New([]rules.Rule{{Match: `kent`, Category: "Expenses:Materials", TaxFrom: "2026-01-01"}}); err == nil {
@@ -485,11 +485,11 @@ func TestAnUnreadableTaxFromDateIsRejected(t *testing.T) {
 // deposit categorized to a property can also name the lease it should be exported against.
 func TestARuleCarriesItsMetadataOntoTheEntry(t *testing.T) {
 	e := engine(t, rules.Rule{
-		Match: `hyungjin`, Category: "Income:Real Estate:Rent:22 Lisgar Street",
+		Match: `taylor`, Category: "Income:Real Estate:Rent:22 Cedar Street",
 		Metadata: map[string]string{"rentapp.lease": "31"},
 	})
 
-	got := e.Apply(tx("E-TRANSFER FROM HYUNGJIN SON"))
+	got := e.Apply(tx("E-TRANSFER FROM JAMIE TAYLOR"))
 
 	if got.Metadata["rentapp.lease"] != "31" {
 		t.Errorf("metadata = %v, want rentapp.lease=31 carried onto the entry", got.Metadata)
@@ -501,11 +501,11 @@ func TestARuleCarriesItsMetadataOntoTheEntry(t *testing.T) {
 // specific tenant rule even when a broader rule also matches.
 func TestMetadataIsFirstWinsPerKey(t *testing.T) {
 	e := engine(t,
-		rules.Rule{Match: `hyungjin`, Metadata: map[string]string{"rentapp.lease": "31"}},
+		rules.Rule{Match: `taylor`, Metadata: map[string]string{"rentapp.lease": "31"}},
 		rules.Rule{Match: `e-transfer`, Metadata: map[string]string{"rentapp.lease": "99", "channel": "etransfer"}},
 	)
 
-	got := e.Apply(tx("E-TRANSFER FROM HYUNGJIN SON"))
+	got := e.Apply(tx("E-TRANSFER FROM JAMIE TAYLOR"))
 
 	if got.Metadata["rentapp.lease"] != "31" {
 		t.Errorf("rentapp.lease = %q, want the specific rule's 31", got.Metadata["rentapp.lease"])

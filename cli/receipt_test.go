@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/model"
-	"bkpr.pro/bkpr/lib/store"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/store"
 )
 
 func on(day int) time.Time { return time.Date(2026, 3, day, 0, 0, 0, 0, time.UTC) }
@@ -45,7 +45,7 @@ func TestBuildInvoiceUsesAccountMetadataForTheLetterhead(t *testing.T) {
 		{Account: "Income:Rent:123 Main", Amount: model.Amount{Units: -160000, Scale: 2, Commodity: "CAD"}},
 	}}
 	meta := map[string]map[string]string{
-		"Assets:Bank:Chequing": {"name": "Excite Creative", "address": "123 Main St\nOttawa ON"},
+		"Assets:Bank:Chequing": {"name": "Northwind Studio", "address": "123 Main St\nOttawa ON"},
 	}
 
 	doc := buildInvoice(tx, entry, meta, "invoice")
@@ -53,7 +53,7 @@ func TestBuildInvoiceUsesAccountMetadataForTheLetterhead(t *testing.T) {
 	if doc.Title != "INVOICE" {
 		t.Errorf("title = %q", doc.Title)
 	}
-	if doc.Biller.Name != "Excite Creative" || len(doc.Biller.Address) != 2 {
+	if doc.Biller.Name != "Northwind Studio" || len(doc.Biller.Address) != 2 {
 		t.Errorf("biller = %+v", doc.Biller)
 	}
 	if doc.BillTo.Name != "J. Smith" {
@@ -189,14 +189,14 @@ func TestBuildInvoiceBillsInThePostingCurrency(t *testing.T) {
 func TestRenderInvoiceEmitsHTML(t *testing.T) {
 	doc := buildInvoice(cadTx("abc123", 160000), model.Entry{Payee: "J. Smith",
 		Postings: []model.Posting{{Account: "Income:Rent:123 Main", Amount: model.Amount{Units: -160000, Scale: 2, Commodity: "CAD"}}}},
-		map[string]map[string]string{"Assets:Bank:Chequing": {"name": "Excite Creative"}}, "invoice")
+		map[string]map[string]string{"Assets:Bank:Chequing": {"name": "Northwind Studio"}}, "invoice")
 
 	var buf bytes.Buffer
 	if err := renderInvoiceHTML(&buf, doc); err != nil {
 		t.Fatalf("renderInvoiceHTML: %v", err)
 	}
 	html := buf.String()
-	for _, want := range []string{"<!doctype html>", "INVOICE", "Excite Creative", "J. Smith", "1600.00 CAD", "PAID", "abc123"} {
+	for _, want := range []string{"<!doctype html>", "INVOICE", "Northwind Studio", "J. Smith", "1600.00 CAD", "PAID", "abc123"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("rendered HTML missing %q", want)
 		}
@@ -229,7 +229,7 @@ func TestRenderInvoiceSetsTheDocumentInMonospace(t *testing.T) {
 func TestRenderInvoiceTextCarriesTheFields(t *testing.T) {
 	doc := buildInvoice(cadTx("abc123", 160000), model.Entry{Payee: "J. Smith",
 		Postings: []model.Posting{{Account: "Income:Rent:123 Main", Amount: model.Amount{Units: -160000, Scale: 2, Commodity: "CAD"}}}},
-		map[string]map[string]string{"Assets:Bank:Chequing": {"name": "Excite Creative"}}, "invoice")
+		map[string]map[string]string{"Assets:Bank:Chequing": {"name": "Northwind Studio"}}, "invoice")
 
 	var buf bytes.Buffer
 	if err := renderInvoiceText(&buf, doc); err != nil {
@@ -239,7 +239,7 @@ func TestRenderInvoiceTextCarriesTheFields(t *testing.T) {
 	if strings.Contains(text, "<") {
 		t.Errorf("text output should carry no markup:\n%s", text)
 	}
-	for _, want := range []string{"INVOICE", "Excite Creative", "Invoice No: abc123", "PAID", "J. Smith", "1600.00 CAD", "Total"} {
+	for _, want := range []string{"INVOICE", "Northwind Studio", "Invoice No: abc123", "PAID", "J. Smith", "1600.00 CAD", "Total"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("text missing %q", want)
 		}
@@ -294,9 +294,9 @@ func TestBuildInvoiceFallsBackToTheFingerprintAsTheReference(t *testing.T) {
 // document would be headed by a raw account path.
 func TestPartyForNamesTheLetterheadFromTheAddressWhenThereIsNoName(t *testing.T) {
 	p := partyFor("Assets:Consulting:Chequing", "Assets:Consulting:Chequing", map[string]map[string]string{
-		"Assets:Consulting:Chequing": {"address": "Excite Creative\n123 Main St\nOttawa ON"},
+		"Assets:Consulting:Chequing": {"address": "Northwind Studio\n123 Main St\nOttawa ON"},
 	})
-	if p.Name != "Excite Creative" {
+	if p.Name != "Northwind Studio" {
 		t.Errorf("name = %q, want the address's first line", p.Name)
 	}
 	if len(p.Address) != 2 || p.Address[0] != "123 Main St" || p.Address[1] != "Ottawa ON" {
@@ -307,9 +307,9 @@ func TestPartyForNamesTheLetterheadFromTheAddressWhenThereIsNoName(t *testing.T)
 // A name in the metadata still wins, and the whole address stays the address.
 func TestPartyForPrefersTheNameMetadata(t *testing.T) {
 	p := partyFor("Assets:Bank:Chequing", "fallback", map[string]map[string]string{
-		"Assets:Bank:Chequing": {"name": "Excite Creative", "address": "123 Main St\nOttawa ON"},
+		"Assets:Bank:Chequing": {"name": "Northwind Studio", "address": "123 Main St\nOttawa ON"},
 	})
-	if p.Name != "Excite Creative" {
+	if p.Name != "Northwind Studio" {
 		t.Errorf("name = %q", p.Name)
 	}
 	if len(p.Address) != 2 || p.Address[0] != "123 Main St" {

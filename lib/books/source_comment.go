@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"bkpr.pro/bkpr/lib/eventlog"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
 )
 
 // ActionCommented records a free-text note on a transaction's own (elided, source) leg: the

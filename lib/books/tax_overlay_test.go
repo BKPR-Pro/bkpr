@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"bkpr.pro/bkpr/lib/books"
-	"bkpr.pro/bkpr/lib/model"
-	"bkpr.pro/bkpr/lib/rules"
+	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/model"
+	"github.com/BKPR-Pro/bkpr/lib/rules"
 )
 
 // overlayRule is a taxed vendor rule that has opted into the overlay: TaxFrom is set, so its tax
@@ -171,21 +171,21 @@ func TestTheOverlayScopesByTheAssertedCategory(t *testing.T) {
 	log := newLog()
 	scoped := rules.Rule{
 		Match: "kent", TaxRate: "15%", TaxFrom: "2026-01-01",
-		TaxCategory: `Materials:(9 Schoodic)`, TaxAccount: "Expenses:Real Estate:HST:ITC:$1",
+		TaxCategory: `Materials:(9 Birch Street)`, TaxAccount: "Expenses:Real Estate:HST:ITC:$1",
 	}
 	loaded(t, log, scoped)
 	importOne(t, log, dated("a", "2026-03-05", -11500, "KENT BUILDING SUPPLIES"))
 	importOne(t, log, dated("b", "2026-03-06", -11500, "KENT BUILDING SUPPLIES"))
 
-	if err := books.Categorize(log, "human", "", "a", "", "Kent", "", whole("Expenses:Real Estate:Materials:9 Schoodic", -11500)); err != nil {
+	if err := books.Categorize(log, "human", "", "a", "", "Kent", "", whole("Expenses:Real Estate:Materials:9 Birch Street", -11500)); err != nil {
 		t.Fatalf("Categorize a: %v", err)
 	}
-	if err := books.Categorize(log, "human", "", "b", "", "Kent", "", whole("Expenses:Real Estate:Materials:22 Lisgar", -11500)); err != nil {
+	if err := books.Categorize(log, "human", "", "b", "", "Kent", "", whole("Expenses:Real Estate:Materials:22 Cedar Street", -11500)); err != nil {
 		t.Fatalf("Categorize b: %v", err)
 	}
 
 	claimed := entryFor(t, log, "a")
-	if len(claimed.Postings) != 2 || claimed.Postings[1].Account != "Expenses:Real Estate:HST:ITC:9 Schoodic" {
+	if len(claimed.Postings) != 2 || claimed.Postings[1].Account != "Expenses:Real Estate:HST:ITC:9 Birch Street" {
 		t.Errorf("the claimable property should split to its derived account, got %+v", claimed.Postings)
 	}
 	if gross := entryFor(t, log, "b"); len(gross.Postings) != 1 {
