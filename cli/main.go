@@ -172,7 +172,7 @@ var usageSections = []usageSection{
 		{"import", "<file> -format csv|ledger|jsonl"},
 		{"import", "<connector> [-relogin] [-history <days> | -from <date> [-to <date>]]"},
 		{"import", "-all [-relogin] [-history <days> | -from <date> [-to <date>]]"},
-		{"categorize", "<fingerprint> (-category <account> [-tax-rate <pct> -tax-account <account>] | -post <account>=<amount> ...) [-payee <name>] [-invoice <n>] [-source <account>] [-why <reason>] [-actor <name>]"},
+		{"categorize", "<fingerprint> (-category <account> [-tax-rate <pct> -tax-account <account>] | -post <account>=<amount> ...) [-payee <name>] [-invoice <n|next>] [-source <account>] [-why <reason>] [-actor <name>]"},
 		{"categorize-ui", "[-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-out <file>]"},
 		{"categorize-ui apply", "<file.json> [-actor <name>] [-why <reason>]"},
 		{"comment", "<fingerprint> (-text <note> | -remove) [-account <a>] [-why <reason>] [-actor <name>]"},
@@ -183,11 +183,12 @@ var usageSections = []usageSection{
 		{"register", "[-account <re>] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-dups]"},
 	}},
 	{"INVOICES AND BILLS", []usageLine{
-		{"invoice raise", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-invoice <n>] [-description <text>] [-tax-rate <pct> -tax-account <account>] [-why <reason>] [-actor <name>]"},
+		{"invoice raise", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-invoice <n|next>] [-description <text>] [-tax-rate <pct> -tax-account <account>] [-why <reason>] [-actor <name>]"},
 		{"invoice settle", "<fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]"},
 		{"invoice void", "<fingerprint> [-why <reason>] [-actor <name>]"},
 		{"invoice list", ""},
 		{"invoice aging", "[-as-of <YYYY-MM-DD>]"},
+		{"invoice next", ""},
 		{"bill receive", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-invoice <n>] [-description <text>] [-tax-rate <pct> -tax-account <account>] [-why <reason>] [-actor <name>]"},
 		{"bill settle", "<fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]"},
 		{"bill void", "<fingerprint> [-why <reason>] [-actor <name>]"},
@@ -480,7 +481,10 @@ var reference = []docGroup{
       it disposed of with -sell and where the gain lands with -gain; the cost base, and so the
       gain, is folded from your purchases: -sell "Assets:Brokerage:AAPL=10 AAPL" -gain "Income:Capital Gains".
       -invoice records the invoice or bill number for the line, the ledger (code); it renders as
-      "(2073)" before the payee and reads back into its own field.
+      "(2073)" before the payee and reads back into its own field. -invoice next takes the number
+      after the highest the book has issued, so tagging a line with an invoice of your own does not
+      depend on remembering where the sequence got to; a number you were given -- a vendor's -- is
+      recorded exactly as you type it.
       -source routes this line's card/liability leg to a sub-account instead of the account it was
       imported on, e.g. -source "Liabilities:PC Mastercard:9 Schoodic"; the parent it rolls up to
       still reconciles to the one bank balance. It is the per-line form of a rules -source route.
@@ -604,7 +608,11 @@ var reference = []docGroup{
       be paid. The amount is a positive magnitude. -invoice records the invoice number; it renders
       as the ledger (code) -- "(2073)" before the party -- and is metadata, not part of the
       fingerprint, so numbering an invoice never changes its identity. Raising the same invoice
-      twice is a no-op, keyed by a fingerprint of its content, exactly as re-importing a statement is.
+      twice is a no-op, keyed by a fingerprint of its content, exactly as re-importing a statement is;
+      because the number is not in the fingerprint, a repeat raise keeps the number it was first
+      given and spends no new one. -invoice next issues the number after the highest the book holds,
+      so the sequence is read from the books rather than remembered -- and skipped numbers, the cost
+      of remembering, stop happening.
       -tax-rate and -tax-account (required together) say the amount already includes sales tax you
       collected: the receivable stays the whole sum owed, while the income side splits into the net
       and the tax, e.g. -amount 1150.00 -tax-rate 15% -tax-account Liabilities:HST books 1,000 of
@@ -621,7 +629,8 @@ var reference = []docGroup{
       a payable, defaulting to Liabilities:Payable. -invoice records the bill number (the vendor's
       invoice number), rendered as the ledger (code). -tax-rate and -tax-account split the tax you
       paid out of the expense, so it lands where it is claimed back from rather than inflating the
-      cost. Everything else matches invoice raise.
+      cost. There is no "next" here: the number on a bill was issued by the vendor, so it is only
+      ever copied off their document. Everything else matches invoice raise.
 `},
 		{[]string{"invoice", "bill"}, `  invoice settle <fingerprint> (-tx <fingerprint> | -reopen)
   bill settle    <fingerprint> (-tx <fingerprint> | -reopen)
@@ -653,6 +662,16 @@ var reference = []docGroup{
       each bucketed by how long — current, 31-60, 61-90, 90+ — with a subtotal per bucket. -as-of
       ages against a date other than today. Settled and voided accruals have already left the fold,
       so only what is genuinely outstanding appears.
+`},
+		{[]string{"invoice"}, `  invoice next
+      Print the number the next invoice would take, and nothing else, so it can be read by a person
+      writing a document by hand or by a script. It is one past the highest number the book has
+      issued -- across raised invoices and the lines categorize tagged, which are the one sequence --
+      counting only numbers that are entirely digits, since a vendor's own numbering is not ours to
+      continue. It never fills a gap: a missing number may already be printed on a document that was
+      withheld or voided, so reissuing it would put two invoices on one number. -invoice next on
+      invoice raise and categorize resolves through this, so the number is read from the books rather
+      than held in your head.
 `},
 	}},
 	{"POLICIES AND DOCUMENTS  (how a sale folds, and what a transaction prints as)", []docTopic{
@@ -1797,7 +1816,7 @@ func categorize(args []string) error {
 	fs := flag.NewFlagSet("categorize", flag.ExitOnError)
 	category := fs.String("category", "", "post the whole line to this one account")
 	payee := fs.String("payee", "", "the payee to record on the entry")
-	invoice := fs.String("invoice", "", "the invoice or bill number for this entry, the ledger (code)")
+	invoice := fs.String("invoice", "", "the invoice or bill number for this entry, the ledger (code); \"next\" takes the one after the highest the book has issued")
 	source := fs.String("source", "", "route this line's card/liability leg to a sub-account, e.g. \"Liabilities:PC Mastercard:9 Schoodic\"; the parent it rolls up to still reconciles to the one bank balance")
 	why := fs.String("why", "", "why this line is categorized so; recorded with the assertion")
 	gain := fs.String("gain", "", "on a sale, the account its capital gain or loss lands in, e.g. Income:Capital Gains")
@@ -1860,6 +1879,13 @@ func categorize(args []string) error {
 		return err
 	}
 
+	// "next" is resolved here, against the book the assertion is about to land in, so tagging a line
+	// with an invoice you are issuing takes the same number the document does.
+	number, err := invoiceNumber(s.Log, *invoice)
+	if err != nil {
+		return err
+	}
+
 	warnUnrootedSource(s.Log, *source)
 	// -post legs are the caller's own arithmetic, so they are recorded as spelled and no rule's tax
 	// overlay may restate them; a -category assertion, whose leg the tool derived, stays open to one.
@@ -1867,7 +1893,7 @@ func categorize(args []string) error {
 	if len(split) > 0 {
 		assert = books.CategorizePosts
 	}
-	if err := assert(s.Log, *actor, *why, txID, *invoice, *payee, *source, post); err != nil {
+	if err := assert(s.Log, *actor, *why, txID, number, *payee, *source, post); err != nil {
 		return err
 	}
 	// tx.ID rather than the argument: a quoted prefix echoes back as the whole fingerprint.
@@ -1992,13 +2018,13 @@ func match(args []string) error {
 	return nil
 }
 
-// invoiceCmd dispatches `invoice raise|settle|void|list`. An invoice is a first-class thing you do,
+// invoiceCmd dispatches `invoice raise|settle|void|list|aging|next`. An invoice is a first-class thing you do,
 // so it is its own namespace, the way rules and connectors are, rather than a subtype of a more
 // abstract verb.
 func invoiceCmd(args []string) error {
 	if len(args) == 0 {
 		usage()
-		return fmt.Errorf("invoice needs raise, settle, void, or list")
+		return fmt.Errorf("invoice needs raise, settle, void, list, aging, or next")
 	}
 	switch args[0] {
 	case "raise":
@@ -2011,10 +2037,45 @@ func invoiceCmd(args []string) error {
 		return invoiceList(args[1:])
 	case "aging":
 		return invoiceAging(args[1:])
+	case "next":
+		return invoiceNext(args[1:])
 	default:
 		usage()
 		return fmt.Errorf("unknown invoice subcommand %q", args[0])
 	}
+}
+
+// invoiceNumber resolves what was given for -invoice. The literal "next" is read out of the book at
+// the moment the command runs, so nobody has to hold the sequence in their head; anything else is
+// the caller's own number, kept verbatim. It is deliberately not offered on bill receive: that
+// number is the vendor's, and issuing one of ours there would both mislabel the bill and spend a
+// number of ours on it.
+func invoiceNumber(log *eventlog.Log, number string) (string, error) {
+	if number != "next" {
+		return number, nil
+	}
+	return books.NextInvoiceNumber(log)
+}
+
+// invoiceNext prints the number the next invoice would take, and nothing else, so the same command
+// answers a person and a script filling in a document by hand.
+func invoiceNext(args []string) error {
+	fs := flag.NewFlagSet("invoice next", flag.ExitOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	log, closeLog, err := openReader()
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	number, err := books.NextInvoiceNumber(log)
+	if err != nil {
+		return err
+	}
+	fmt.Println(number)
+	return nil
 }
 
 // invoiceRaise records an invoice: revenue earned and billed before its cash moves.
@@ -2026,7 +2087,7 @@ func invoiceRaise(args []string) error {
 	category := fs.String("category", "", "the Income account the revenue is recognized in")
 	account := fs.String("account", "", "where it parks until paid; defaults to Assets:Receivable")
 	date := fs.String("date", "", "when the revenue was earned (YYYY-MM-DD); defaults to today")
-	number := fs.String("invoice", "", "the invoice number, rendered as the ledger (code)")
+	number := fs.String("invoice", "", "the invoice number, rendered as the ledger (code); \"next\" takes the one after the highest the book has issued")
 	taxRate := fs.String("tax-rate", "", "the sales tax the amount already includes, e.g. 15%; needs -tax-account")
 	taxAccount := fs.String("tax-account", "", "where the collected tax is owed from until it is remitted")
 	description := fs.String("description", "", "what is being billed, e.g. \"Rent for Aug 1\"; labels the line on the document")
@@ -2061,8 +2122,16 @@ func invoiceRaise(args []string) error {
 	}
 	defer closeLog()
 
+	// The number is resolved against the book the invoice is about to be recorded in, so "next" reads
+	// the sequence as it stands now. It is not part of the fingerprint, so re-running the same raise
+	// still collapses to the one invoice and leaves the number it was first given alone.
+	num, err := invoiceNumber(log, *number)
+	if err != nil {
+		return err
+	}
+
 	inv, added, err := books.Raise(log, *actor, *why, books.Invoice{
-		Date: when, Party: *party, Amount: amt, Category: *category, Account: *account, Number: *number,
+		Date: when, Party: *party, Amount: amt, Category: *category, Account: *account, Number: num,
 		TaxRate: *taxRate, TaxAccount: *taxAccount, Description: *description,
 	})
 	if err != nil {
