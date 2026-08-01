@@ -37,6 +37,10 @@ type accrualData struct {
 	Number   string       `json:"number,omitempty"` // the invoice or bill number, rendered as the ledger (code)
 	Why      string       `json:"why,omitempty"`
 
+	// What is being billed, in the words the document should read. Omitted when unsaid, so the payload
+	// of every accrual already recorded is unchanged.
+	Description string `json:"description,omitempty"`
+
 	// The tax an accrual carries, in the same vocabulary a rule uses: the amount is tax-inclusive, so
 	// the rate divides it into the category's net and the tax account's share. Omitted when untaxed,
 	// so the payload of every accrual already recorded is unchanged.
@@ -61,6 +65,7 @@ type accrualLine struct {
 	parkedAmount  model.Amount // signed from the parked account's view: +magnitude for AR, -magnitude for AP
 	category      string       // the income (invoice) or expense (bill) account
 	invoice       string       // the invoice or bill number, rendered as the ledger (code)
+	description   string       // what is being billed; labels the category posting
 	settledBy     string       // the bank line that paid it, or "" while open
 	taxAccount    string       // where the tax lands, or "" when the accrual carries none
 	taxNum        int64        // the rate, as the numerator/denominator ParsePercent read (15% is 15, 100)
@@ -88,11 +93,17 @@ func (a accrualLine) entry() model.Entry {
 	// accrual carries tax, only the category's side splits, into the net and the tax, and the two sum
 	// back to the gross exactly (SplitInclusive gives the tax the remainder), so the line cannot be
 	// unbalanced by rounding.
+	// The description labels the category leg only: it says what was billed, which is what the income
+	// or expense line is. The tax leg is a share of that same thing, so repeating the words there would
+	// render a document whose two lines read alike -- exactly what the description exists to avoid.
 	full := a.parkedAmount.Negate()
-	postings := []model.Posting{{Account: a.category, Amount: full}}
+	postings := []model.Posting{{Account: a.category, Amount: full, Comment: a.description}}
 	if a.taxAccount != "" && a.taxDen != 0 {
 		net, tax := full.SplitInclusive(a.taxNum, a.taxDen)
-		postings = []model.Posting{{Account: a.category, Amount: net}, {Account: a.taxAccount, Amount: tax}}
+		postings = []model.Posting{
+			{Account: a.category, Amount: net, Comment: a.description},
+			{Account: a.taxAccount, Amount: tax},
+		}
 	}
 	return model.Entry{
 		Payee:    a.party,

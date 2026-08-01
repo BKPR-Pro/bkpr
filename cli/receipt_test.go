@@ -94,6 +94,65 @@ func TestBuildInvoiceLabelsItemsWithThePostingNote(t *testing.T) {
 	}
 }
 
+// An account's own name metadata is its durable display name on a document, so a line item reads as
+// that name rather than the account's leaf. A book naming its tax account HST gets HST on every
+// invoice thereafter without writing a note on each posting.
+func TestItemLabelPrefersTheAccountNameMetadataOverTheLeaf(t *testing.T) {
+	meta := map[string]map[string]string{
+		"Liabilities:Real Estate:HST:Rent:Unit A": {"name": "HST"},
+	}
+	p := model.Posting{Account: "Liabilities:Real Estate:HST:Rent:Unit A"}
+	if got := itemLabel(p, meta); got != "HST" {
+		t.Errorf("label = %q, want the account's name metadata", got)
+	}
+}
+
+// A note on the posting describes this line on this document, so it wins over the account's standing
+// name metadata.
+func TestItemLabelPrefersThePostingNoteOverTheAccountName(t *testing.T) {
+	meta := map[string]map[string]string{
+		"Income:Real Estate:Rent:Unit A": {"name": "Rent"},
+	}
+	p := model.Posting{Account: "Income:Real Estate:Rent:Unit A", Comment: "August rent"}
+	if got := itemLabel(p, meta); got != "August rent" {
+		t.Errorf("label = %q, want the posting note", got)
+	}
+}
+
+// With neither a note nor a name the leaf is still the label, so an unannotated book reads as it
+// always did.
+func TestItemLabelFallsBackToTheAccountLeaf(t *testing.T) {
+	p := model.Posting{Account: "Income:Real Estate:Rent:Unit A"}
+	if got := itemLabel(p, nil); got != "Unit A" {
+		t.Errorf("label = %q, want the account leaf", got)
+	}
+}
+
+// A taxed rent invoice folds into two postings whose accounts share a leaf; naming one of them gives
+// the document two distinct lines, so the invoice can be sent at all.
+func TestBuildInvoiceDistinguishesPostingsSharingALeaf(t *testing.T) {
+	tx := cadTx("abc123", 226000)
+	entry := model.Entry{Payee: "Commercial Tenant", Postings: []model.Posting{
+		{Account: "Income:Real Estate:Rent:Unit A", Amount: model.Amount{Units: -200000, Scale: 2, Commodity: "CAD"}},
+		{Account: "Liabilities:Real Estate:HST:Rent:Unit A", Amount: model.Amount{Units: -26000, Scale: 2, Commodity: "CAD"}},
+	}}
+	meta := map[string]map[string]string{
+		"Liabilities:Real Estate:HST:Rent:Unit A": {"name": "HST"},
+	}
+
+	doc := buildInvoice(tx, entry, meta, "invoice")
+
+	if len(doc.Items) != 2 {
+		t.Fatalf("items = %+v, want 2", doc.Items)
+	}
+	if doc.Items[0].Label != "Unit A" {
+		t.Errorf("rent label = %q, want the account leaf", doc.Items[0].Label)
+	}
+	if doc.Items[1].Label != "HST" {
+		t.Errorf("tax label = %q, want the account's name metadata", doc.Items[1].Label)
+	}
+}
+
 // Without metadata the biller falls back to the account path, so a document still renders.
 func TestBuildInvoiceFallsBackToTheAccountPath(t *testing.T) {
 	doc := buildInvoice(cadTx("x", 100), model.Entry{Payee: "Someone",

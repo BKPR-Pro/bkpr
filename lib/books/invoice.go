@@ -39,6 +39,11 @@ type Invoice struct {
 	Account  string       // the Assets:Receivable account it parks in until paid
 	Number   string       // the invoice number, rendered as the ledger (code); metadata, not part of the fingerprint
 
+	// What is being billed, in the words the document should read ("Rent for Aug 1"). It labels the
+	// income line. Like Number it is metadata describing the invoice, so it is not part of the
+	// fingerprint: re-describing an invoice does not make it another invoice.
+	Description string
+
 	// Sales tax collected on the customer's behalf, in the same words a rule uses. Amount is the
 	// tax-inclusive gross owed, so the rate divides it: the net is recognized in Category and the tax
 	// is parked in TaxAccount until it is remitted.
@@ -73,7 +78,8 @@ func Raise(log *eventlog.Log, actor, why string, inv Invoice) (Invoice, bool, er
 	data, err := json.Marshal(accrualData{
 		Date: inv.Date, Party: inv.Party, Amount: inv.Amount,
 		Category: inv.Category, Account: inv.Account, Number: inv.Number, Why: why,
-		TaxRate: inv.TaxRate, TaxAccount: inv.TaxAccount,
+		Description: inv.Description,
+		TaxRate:     inv.TaxRate, TaxAccount: inv.TaxAccount,
 	})
 	if err != nil {
 		return Invoice{}, false, err
@@ -152,7 +158,8 @@ func Invoices(log *eventlog.Log) ([]Invoice, error) {
 		out = append(out, Invoice{
 			ID: e.RecordID, Date: data.Date, Party: data.Party,
 			Amount: data.Amount, Category: data.Category, Account: data.Account, Number: data.Number,
-			TaxRate: data.TaxRate, TaxAccount: data.TaxAccount,
+			Description: data.Description,
+			TaxRate:     data.TaxRate, TaxAccount: data.TaxAccount,
 		})
 	}
 	return out, nil
@@ -200,7 +207,7 @@ func invoiceLines(log *eventlog.Log) ([]accrualLine, error) {
 		out = append(out, accrualLine{
 			kind: CollectionInvoice, id: inv.ID, date: inv.Date, party: inv.Party,
 			parkedAccount: inv.Account, parkedAmount: inv.Amount, category: inv.Category,
-			invoice: inv.Number, settledBy: settled[inv.ID],
+			invoice: inv.Number, description: inv.Description, settledBy: settled[inv.ID],
 			taxAccount: inv.TaxAccount, taxNum: num, taxDen: den,
 		})
 	}

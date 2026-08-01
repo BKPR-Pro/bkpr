@@ -183,12 +183,12 @@ var usageSections = []usageSection{
 		{"register", "[-account <re>] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-dups]"},
 	}},
 	{"INVOICES AND BILLS", []usageLine{
-		{"invoice raise", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-invoice <n>] [-tax-rate <pct> -tax-account <account>] [-why <reason>] [-actor <name>]"},
+		{"invoice raise", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-invoice <n>] [-description <text>] [-tax-rate <pct> -tax-account <account>] [-why <reason>] [-actor <name>]"},
 		{"invoice settle", "<fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]"},
 		{"invoice void", "<fingerprint> [-why <reason>] [-actor <name>]"},
 		{"invoice list", ""},
 		{"invoice aging", "[-as-of <YYYY-MM-DD>]"},
-		{"bill receive", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-invoice <n>] [-tax-rate <pct> -tax-account <account>] [-why <reason>] [-actor <name>]"},
+		{"bill receive", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-invoice <n>] [-description <text>] [-tax-rate <pct> -tax-account <account>] [-why <reason>] [-actor <name>]"},
 		{"bill settle", "<fingerprint> (-tx <fingerprint> | -reopen) [-actor <name>]"},
 		{"bill void", "<fingerprint> [-why <reason>] [-actor <name>]"},
 		{"bill list", ""},
@@ -597,7 +597,7 @@ var reference = []docGroup{
 	}},
 	{"INVOICES AND BILLS  (value recognized before its cash; only shown on -basis accrual)", []docTopic{
 		{[]string{"invoice"}, `  invoice raise -party <name> -amount <amt> -category <Income:...> [-account <a>] [-date <d>] [-currency <c>] [-invoice <n>]
-                [-tax-rate <pct> -tax-account <account>]
+                [-description <text>] [-tax-rate <pct> -tax-account <account>]
       Raise an invoice: revenue owed to you, earned and billed before the cash moves. It debits
       a receivable and credits income. -account names where it parks, defaulting to
       Assets:Receivable. -date is when the revenue was earned (default today), not when it will
@@ -609,9 +609,14 @@ var reference = []docGroup{
       collected: the receivable stays the whole sum owed, while the income side splits into the net
       and the tax, e.g. -amount 1150.00 -tax-rate 15% -tax-account Liabilities:HST books 1,000 of
       income and 150 of HST owed. Same words, and the same tax-inclusive split, as categorize.
+      -description says what is being billed, e.g. "Rent for Aug 1", and becomes the label of the
+      income line on the document receipt renders. It describes the invoice rather than identifying
+      it, so it stays out of the fingerprint: re-describing an invoice does not make it a new one.
+      The tax line is labelled by its own account -- give that account a name with
+      accounts set <account> -meta name=HST, and every document reads HST there.
 `},
 		{[]string{"bill"}, `  bill receive -party <name> -amount <amt> -category <Expenses:...> [-account <a>] [-date <d>] [-currency <c>] [-invoice <n>]
-               [-tax-rate <pct> -tax-account <account>]
+               [-description <text>] [-tax-rate <pct> -tax-account <account>]
       Receive a bill: money you owe, the mirror of an invoice. It debits an expense and credits
       a payable, defaulting to Liabilities:Payable. -invoice records the bill number (the vendor's
       invoice number), rendered as the ledger (code). -tax-rate and -tax-account split the tax you
@@ -711,6 +716,9 @@ var reference = []docGroup{
       its cash does. PAID is read rather than assumed: a line off a statement has cleared, and an
       accrual is stamped only once a settle links the bank line that paid it. Where the accrual
       carries an invoice number, that number heads the document instead of the fingerprint.
+      A line item reads as its posting's own note first, then the account's name metadata
+      (accounts set <account> -meta name=HST), then the account's last path segment -- so two legs
+      whose accounts end in the same segment, a rent and its tax on one unit, stay told apart.
       -format defaults to text at a terminal and json off one, the same structured fields a
       script or an agent filing the document elsewhere would otherwise have to parse from text.
 `},
@@ -2021,6 +2029,7 @@ func invoiceRaise(args []string) error {
 	number := fs.String("invoice", "", "the invoice number, rendered as the ledger (code)")
 	taxRate := fs.String("tax-rate", "", "the sales tax the amount already includes, e.g. 15%; needs -tax-account")
 	taxAccount := fs.String("tax-account", "", "where the collected tax is owed from until it is remitted")
+	description := fs.String("description", "", "what is being billed, e.g. \"Rent for Aug 1\"; labels the line on the document")
 	why := fs.String("why", "", "why this invoice was raised; recorded with it")
 	actor := fs.String("actor", "human", "who is raising it; the log records who decided")
 	if err := fs.Parse(args); err != nil {
@@ -2054,7 +2063,7 @@ func invoiceRaise(args []string) error {
 
 	inv, added, err := books.Raise(log, *actor, *why, books.Invoice{
 		Date: when, Party: *party, Amount: amt, Category: *category, Account: *account, Number: *number,
-		TaxRate: *taxRate, TaxAccount: *taxAccount,
+		TaxRate: *taxRate, TaxAccount: *taxAccount, Description: *description,
 	})
 	if err != nil {
 		return err
@@ -2196,6 +2205,7 @@ func billReceive(args []string) error {
 	number := fs.String("invoice", "", "the bill number (the vendor's invoice number), rendered as the ledger (code)")
 	taxRate := fs.String("tax-rate", "", "the sales tax the amount already includes, e.g. 15%; needs -tax-account")
 	taxAccount := fs.String("tax-account", "", "where the tax is claimed back through")
+	description := fs.String("description", "", "what is being billed, e.g. \"Dumpster rental\"; labels the line on the document")
 	why := fs.String("why", "", "why this bill was received; recorded with it")
 	actor := fs.String("actor", "human", "who is recording it; the log records who decided")
 	if err := fs.Parse(args); err != nil {
@@ -2229,7 +2239,7 @@ func billReceive(args []string) error {
 
 	b, added, err := books.ReceiveBill(log, *actor, *why, books.Bill{
 		Date: when, Party: *party, Amount: amt, Category: *category, Account: *account, Number: *number,
-		TaxRate: *taxRate, TaxAccount: *taxAccount,
+		TaxRate: *taxRate, TaxAccount: *taxAccount, Description: *description,
 	})
 	if err != nil {
 		return err

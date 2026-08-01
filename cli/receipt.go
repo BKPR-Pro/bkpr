@@ -74,7 +74,7 @@ func buildInvoice(tx model.Transaction, entry model.Entry, meta map[string]map[s
 	summable := true
 	for _, p := range entry.Postings {
 		charge := p.Amount.Negate()
-		doc.Items = append(doc.Items, invoiceItem{Label: itemLabel(p), Amount: charge.String()})
+		doc.Items = append(doc.Items, invoiceItem{Label: itemLabel(p, meta), Amount: charge.String()})
 		if total.Commodity == "" {
 			total = charge
 			continue
@@ -124,12 +124,16 @@ func partyFor(account, fallbackName string, meta map[string]map[string]string) p
 	return p
 }
 
-// itemLabel is what one line item reads as on the document: the note left on the posting when there
-// is one, since a person writes an item's description there, and otherwise the account's leaf. A
-// split can describe some legs and leave others to their account name.
-func itemLabel(p model.Posting) string {
+// itemLabel is what one line item reads as on the document, most specific first: the note left on the
+// posting, since a person writes this line's description there; then the account's own name metadata,
+// the durable display name a book gives that account; and otherwise the account's leaf. Naming the
+// account is what keeps two legs sharing a leaf (rent and its tax on the same unit) distinct.
+func itemLabel(p model.Posting, meta map[string]map[string]string) string {
 	if p.Comment != "" {
 		return p.Comment
+	}
+	if name := meta[p.Account]["name"]; name != "" {
+		return name
 	}
 	return leaf(p.Account)
 }

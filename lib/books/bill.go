@@ -36,6 +36,10 @@ type Bill struct {
 	Account  string       // the Liabilities:Payable account it parks in until paid
 	Number   string       // the bill number (the vendor's invoice number), rendered as the ledger (code)
 
+	// What is being billed, in the vendor's words. It labels the expense line. Like Number it is
+	// metadata describing the bill, so it is not part of the fingerprint.
+	Description string
+
 	// Sales tax the vendor charged, the mirror of an invoice's: Amount is the tax-inclusive gross owed,
 	// the net is recognized in Category, and the tax lands in TaxAccount, where it is recoverable.
 	TaxRate    string // e.g. "15%"
@@ -69,7 +73,8 @@ func ReceiveBill(log *eventlog.Log, actor, why string, bill Bill) (Bill, bool, e
 	data, err := json.Marshal(accrualData{
 		Date: bill.Date, Party: bill.Party, Amount: bill.Amount,
 		Category: bill.Category, Account: bill.Account, Number: bill.Number, Why: why,
-		TaxRate: bill.TaxRate, TaxAccount: bill.TaxAccount,
+		Description: bill.Description,
+		TaxRate:     bill.TaxRate, TaxAccount: bill.TaxAccount,
 	})
 	if err != nil {
 		return Bill{}, false, err
@@ -146,7 +151,8 @@ func Bills(log *eventlog.Log) ([]Bill, error) {
 		out = append(out, Bill{
 			ID: e.RecordID, Date: data.Date, Party: data.Party,
 			Amount: data.Amount, Category: data.Category, Account: data.Account, Number: data.Number,
-			TaxRate: data.TaxRate, TaxAccount: data.TaxAccount,
+			Description: data.Description,
+			TaxRate:     data.TaxRate, TaxAccount: data.TaxAccount,
 		})
 	}
 	return out, nil
@@ -194,7 +200,7 @@ func billLines(log *eventlog.Log) ([]accrualLine, error) {
 		out = append(out, accrualLine{
 			kind: CollectionBill, id: b.ID, date: b.Date, party: b.Party,
 			parkedAccount: b.Account, parkedAmount: b.Amount.Negate(), category: b.Category,
-			invoice: b.Number, settledBy: settled[b.ID],
+			invoice: b.Number, description: b.Description, settledBy: settled[b.ID],
 			taxAccount: b.TaxAccount, taxNum: num, taxDen: den,
 		})
 	}
