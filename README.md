@@ -1,5 +1,7 @@
 # bkpr
 
+![bkpr logo](docs/logo.svg)
+
 Turns bank and card statements into a set of books.
 
 The goal is Mint's touch with a real ledger's resolution: you set it up, it runs, and the only
