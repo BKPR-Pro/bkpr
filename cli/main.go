@@ -1078,11 +1078,7 @@ func importFrom(log *eventlog.Log, label string, src Source) error {
 // came through, and the ledger and CSV readers land lines exactly as a connector does. Never fatal --
 // a warning about the books is not a reason to fail an import that already succeeded.
 func reportTwins(log *eventlog.Log, result books.ImportResult) {
-	groups, err := twinsAmong(log, result.IDs)
-	if err != nil {
-		return
-	}
-	warnTwins(os.Stdout, groups)
+	reportTwinsForIDs(log, result.IDs)
 }
 
 // importConnector fetches a registered connector's lines and lands them through the same import
@@ -1903,6 +1899,10 @@ func categorize(args []string) error {
 	}
 	// tx.ID rather than the argument: a quoted prefix echoes back as the whole fingerprint.
 	fmt.Printf("categorized %s\n", tx.ID)
+	// A twin created weeks ago by a different door sits quietly in Uncategorized until someone
+	// categorizes it -- the same collision FR-17 catches at import time, just found later. Check the
+	// line just categorized against the whole book, same as an import checks the lines it just landed.
+	reportTwinsForIDs(s.Log, []string{tx.ID})
 	return nil
 }
 

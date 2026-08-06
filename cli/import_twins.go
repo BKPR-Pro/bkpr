@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/BKPR-Pro/bkpr/lib/books"
 	"github.com/BKPR-Pro/bkpr/lib/eventlog"
@@ -50,6 +51,18 @@ func twinsAmong(log *eventlog.Log, landed []string) ([]twinGroup, error) {
 		}
 	}
 	return out, nil
+}
+
+// reportTwinsForIDs runs twinsAmong for the given ids and prints what it finds, silent when it finds
+// nothing. Both the import path (checking the lines an import just landed) and the categorize path
+// (checking the one line just categorized) share this: a duplicate does not care whether it was
+// created by an import serving a line twice or by hand-categorizing an old twin nobody noticed.
+func reportTwinsForIDs(log *eventlog.Log, ids []string) {
+	groups, err := twinsAmong(log, ids)
+	if err != nil {
+		return
+	}
+	warnTwins(os.Stdout, groups)
 }
 
 // warnTwins prints what twinsAmong found, and nothing at all when it finds nothing -- a warning on
