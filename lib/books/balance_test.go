@@ -2,6 +2,7 @@ package books_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/BKPR-Pro/bkpr/lib/books"
 	"github.com/BKPR-Pro/bkpr/lib/eventlog"
@@ -99,6 +100,45 @@ func TestReconciledBalancesMatchesReconcileNotARawSum(t *testing.T) {
 	rawSum := cad(-10000 + -50000)
 	if got.String() == rawSum.String() {
 		t.Fatalf("balance should not be the raw lifetime sum %s", rawSum)
+	}
+}
+
+// ReconcileHistory checks every bank-asserted balance for an account against the books, in order, so a
+// gap can be bisected to the assertion that first introduced it -- not just the latest one.
+func TestReconcileHistoryFindsWhenADeltaFirstAppears(t *testing.T) {
+	log := newLog()
+	importOne(t, log, line("a", 1, 10000, "DEPOSIT")) // +100
+	books.AssertBalance(log, "rbc", "Assets:Bank:Chequing", on(1), cad(50000))
+	importOne(t, log, line("b", 10, -3000, "WITHDRAW")) // -30
+	books.AssertBalance(log, "rbc", "Assets:Bank:Chequing", on(10), cad(47000))
+	// A movement between day 10 and day 20 the books never captured: the bank jumps by 25.00 with
+	// nothing imported to explain it.
+	books.AssertBalance(log, "rbc", "Assets:Bank:Chequing", on(20), cad(49500))
+
+	hist, err := books.ReconcileHistory(log, "Assets:Bank:Chequing")
+	if err != nil {
+		t.Fatalf("ReconcileHistory: %v", err)
+	}
+	if len(hist) != 3 {
+		t.Fatalf("got %d rows, want 3 (one per assertion)", len(hist))
+	}
+	for i, want := range []struct {
+		asOf       time.Time
+		reconciled bool
+	}{
+		{on(1), true},
+		{on(10), true},
+		{on(20), false},
+	} {
+		if !hist[i].AsOf.Equal(want.asOf) {
+			t.Errorf("row %d: AsOf = %s, want %s", i, hist[i].AsOf, want.asOf)
+		}
+		if hist[i].Reconciled != want.reconciled {
+			t.Errorf("row %d (as of %s): reconciled = %v, want %v (delta %s)", i, hist[i].AsOf, hist[i].Reconciled, want.reconciled, hist[i].Delta)
+		}
+	}
+	if hist[2].Delta.String() != "25.00 CAD" {
+		t.Errorf("first divergent row delta = %s, want 25.00 CAD", hist[2].Delta)
 	}
 }
 

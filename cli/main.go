@@ -725,12 +725,17 @@ var reference = []docGroup{
       stored negative, so a hand-set anchor signs the same way a scraped one does. Without -as-of the
       balance is dated today. The first balance for an account anchors it; see reconcile.
 `},
-		{[]string{"reconcile"}, `  reconcile
+		{[]string{"reconcile"}, `  reconcile [-history <account>]
       Check the books against the bank, to the penny. Every import records the balance the bank
       showed for the account; reconcile folds the books to that date and reports the difference. The
       first balance for an account anchors it (deriving the opening balance the imports do not reach);
       every one after is a real check that no movement since was missed, duplicated, or mispaired. A
       nonzero delta is exactly that gap.
+
+      -history <account> reruns that same check at every bank-asserted balance on record for one
+      account, in date order, instead of just the latest -- so a delta that only shows up in the
+      current check can be bisected to the specific assertion (the specific import) that first
+      introduced it.
 `},
 		{[]string{"receipt"}, `  receipt -tx <fingerprint> [-as invoice|receipt] [-format text|html|json] [-out <file>]
       Render one transaction as a printable document: the account's letterhead, the payee as the
@@ -2818,11 +2823,21 @@ func reconciledCell(r books.Reconciliation) string {
 // reconcileCmd shows every account with a scraped balance against the books: what the bank last said
 // it held, what the books fold to on that date, and the difference. It writes nothing; it is a fold.
 func reconcileCmd(args []string) error {
+	fs := flag.NewFlagSet("reconcile", flag.ExitOnError)
+	history := fs.String("history", "", "show every bank-asserted balance on record for one account, in date order, instead of just the latest -- so a delta can be bisected to the assertion that first introduced it")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
 	log, closeLog, err := openReader()
 	if err != nil {
 		return err
 	}
 	defer closeLog()
+
+	if *history != "" {
+		return reconcileHistoryCmd(log, *history)
+	}
 
 	recs, err := books.Reconcile(log)
 	if err != nil {
@@ -2879,6 +2894,45 @@ func reconcileCmd(args []string) error {
 		fmt.Println("\nall accounts reconcile to the penny")
 	} else if allReconciled {
 		fmt.Println("\nevery account reconciles to the penny as of the date shown")
+	}
+	return nil
+}
+
+// reconcileHistoryCmd shows every bank-asserted balance on record for one account, in date order, each
+// checked against the books the same way reconcile's single current-moment row is: what the bank said,
+// what the books fold to as of that same date, and the difference. It lets a delta that only shows up
+// in the latest check be bisected to the specific assertion -- the specific import -- that first
+// introduced it, without a fresh manual statement or reading the log directly.
+func reconcileHistoryCmd(log *eventlog.Log, account string) error {
+	hist, err := books.ReconcileHistory(log, account)
+	if err != nil {
+		return err
+	}
+	if len(hist) == 0 {
+		fmt.Printf("no bank balances recorded for %s yet; import a bank connector to record one\n", account)
+		return nil
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "AS OF\tBANK\tBOOKS\tDELTA")
+	firstBad := ""
+	for _, r := range hist {
+		status := r.Delta.String()
+		if r.Reconciled {
+			status = "0 (reconciled)"
+		} else if firstBad == "" {
+			firstBad = r.AsOf.Format("2006-01-02")
+		}
+		if r.Anchored {
+			status = "0 (by construction)"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.AsOf.Format("2006-01-02"), r.Bank, r.Books, status)
+	}
+	w.Flush()
+	if firstBad == "" {
+		fmt.Printf("\n%s reconciles to the penny at every bank-asserted balance on record\n", account)
+	} else {
+		fmt.Printf("\n%s first shows a delta as of %s; that assertion's import is where to start looking\n", account, firstBad)
 	}
 	return nil
 }

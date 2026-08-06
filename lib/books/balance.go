@@ -184,32 +184,84 @@ func Reconcile(log *eventlog.Log) ([]Reconciliation, error) {
 		if len(list) == 0 {
 			continue
 		}
-		first, latest := list[0], list[len(list)-1]
-		commodity := latest.Amount.Commodity
+		r, ok := reconcileAt(txs, entries, account, list, len(list)-1, booksThrough)
+		if !ok {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
 
-		// offset is the opening balance the imports do not reach: the first bank figure, less what the
-		// books fold to on that date.
-		firstBooks := accountBalanceAsOf(txs, entries, account, first.Date, commodity)
-		offset, err := first.Amount.Add(firstBooks.Negate())
-		if err != nil {
-			continue // the anchor is in another commodity; nothing to reconcile against
+// reconcileAt checks the books against one bank-asserted balance for an account: list[at], anchored by
+// list[0] the same way Reconcile anchors its single current-moment check. It is the one place that
+// fold/compare logic lives; Reconcile calls it for the latest assertion and ReconcileHistory calls it
+// for every assertion in turn, so a gap can be bisected to the date it first appeared.
+func reconcileAt(txs []model.Transaction, entries []model.Entry, account string, list []balanceAssertion, at int, booksThrough time.Time) (Reconciliation, bool) {
+	first, latest := list[0], list[at]
+	commodity := latest.Amount.Commodity
+
+	// offset is the opening balance the imports do not reach: the first bank figure, less what the
+	// books fold to on that date.
+	firstBooks := accountBalanceAsOf(txs, entries, account, first.Date, commodity)
+	offset, err := first.Amount.Add(firstBooks.Negate())
+	if err != nil {
+		return Reconciliation{}, false // the anchor is in another commodity; nothing to reconcile against
+	}
+	latestBooks := accountBalanceAsOf(txs, entries, account, latest.Date, commodity)
+	books, err := offset.Add(latestBooks)
+	if err != nil {
+		return Reconciliation{}, false
+	}
+	delta, err := latest.Amount.Add(books.Negate())
+	if err != nil {
+		return Reconciliation{}, false
+	}
+	return Reconciliation{
+		Account: account, AsOf: latest.Date, Since: first.Date,
+		Anchored: at == 0,
+		Bank:     latest.Amount, Books: books, Delta: delta,
+		Reconciled: delta.IsZero(),
+		Stale:      latest.Date.Before(booksThrough.AddDate(0, 0, -staleAfterDays)),
+	}, true
+}
+
+// ReconcileHistory is Reconcile narrowed to one account and widened across time: instead of the single
+// current-moment check, it reruns the same fold/compare at every bank-asserted balance on record for
+// the account, in date order. Every import records its own bank-asserted balance, so a delta that only
+// shows up in the latest check can be bisected here to the specific assertion that first introduced it,
+// without a fresh manual statement or reading the log directly.
+func ReconcileHistory(log *eventlog.Log, account string) ([]Reconciliation, error) {
+	txs, entries, err := Ledger(log)
+	if err != nil {
+		return nil, err
+	}
+	asserts, err := balanceAssertions(log)
+	if err != nil {
+		return nil, err
+	}
+	list := asserts[account]
+	if len(list) == 0 {
+		return nil, nil
+	}
+
+	var booksThrough time.Time
+	for _, tx := range txs {
+		if tx.Date.After(booksThrough) {
+			booksThrough = tx.Date
 		}
-		latestBooks := accountBalanceAsOf(txs, entries, account, latest.Date, commodity)
-		books, err := offset.Add(latestBooks)
-		if err != nil {
+	}
+	if list[len(list)-1].Date.After(booksThrough) {
+		booksThrough = list[len(list)-1].Date
+	}
+
+	out := make([]Reconciliation, 0, len(list))
+	for i := range list {
+		r, ok := reconcileAt(txs, entries, account, list, i, booksThrough)
+		if !ok {
 			continue
 		}
-		delta, err := latest.Amount.Add(books.Negate())
-		if err != nil {
-			continue
-		}
-		out = append(out, Reconciliation{
-			Account: account, AsOf: latest.Date, Since: first.Date,
-			Anchored: len(list) == 1,
-			Bank:     latest.Amount, Books: books, Delta: delta,
-			Reconciled: delta.IsZero(),
-			Stale:      latest.Date.Before(booksThrough.AddDate(0, 0, -staleAfterDays)),
-		})
+		out = append(out, r)
 	}
 	return out, nil
 }
