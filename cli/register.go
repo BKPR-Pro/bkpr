@@ -235,13 +235,16 @@ type twinRow struct {
 	Door    string
 	Account string
 	PostsTo string
+	Date    time.Time
 }
 
-// twinGroup is one date+amount collision that crossed doors: the lines that might be a single
-// real-world transaction entered more than once.
+// twinGroup is one collision that might be a single real-world transaction entered more than once.
+// Kind names which check found it: "twin" for the exact date+amount match, "near" for a same-payee,
+// same-amount match a few days apart -- a weekend-shifted repost the exact match cannot see.
 type twinGroup struct {
 	Date   time.Time
 	Amount model.Amount
+	Kind   string
 	Rows   []twinRow
 }
 
@@ -289,7 +292,7 @@ func twinGroups(txs []model.Transaction, entries []model.Entry, doors, settlemen
 		if !suspect {
 			continue
 		}
-		g := twinGroup{Date: txs[idxs[0]].Date, Amount: txs[idxs[0]].Amount}
+		g := twinGroup{Date: txs[idxs[0]].Date, Amount: txs[idxs[0]].Amount, Kind: "twin"}
 		for _, i := range idxs {
 			g.Rows = append(g.Rows, twinRow{
 				ID: txs[i].ID, Payee: payeeOf(txs[i], entries[i]), Door: doors[txs[i].ID],
@@ -298,7 +301,144 @@ func twinGroups(txs []model.Transaction, entries []model.Entry, doors, settlemen
 		}
 		groups = append(groups, g)
 	}
+	groups = append(groups, nearDateGroups(txs, entries, doors, settlements)...)
 	return groups
+}
+
+// nearDateTolerance is how many days apart a repost can land and still be caught: a bank posting a
+// payment on a Friday and reposting it the following Monday is the same payment, two days apart, not
+// a coincidence.
+const nearDateTolerance = 3
+
+// nearDateMaxOccurrences caps how many times one payee+amount pair may appear anywhere in the book
+// before a near-date match involving it is dropped as a recurring bill rather than a repost. A regular
+// coffee run, a monthly bank fee, an LOC draw redrawn every few months -- all of these land on the
+// same payee and the same round or repeated amount over and over, and a few of those sightings will
+// always fall inside the tolerance window by the ordinary chance of a calendar. A one-time repost, by
+// contrast, leaves exactly two sightings of that payee+amount in the whole book: this one and its
+// duplicate, nowhere else. Three or more sightings is the book's own evidence that the pairing recurs
+// on purpose.
+const nearDateMaxOccurrences = 2
+
+// nearDateGroups finds the twin the exact date+amount match cannot see: the same payee and the same
+// amount, posted a few days apart rather than the same day -- a weekend-shifted repost of one payment.
+// Amount alone is never enough (Dallas's four same-day, same-amount Costco return credits are real,
+// separate charges), so a near-date match additionally requires the payee and the raw memo to both read
+// the same, and drops any pairing the book shows recurring more than nearDateMaxOccurrences times
+// overall (a regular coffee run, a monthly fee -- not a repost). Two lines already linked by a
+// settlement are a recorded flow, not a coincidence, and are left alone here exactly as the exact-date
+// check leaves them alone.
+func nearDateGroups(txs []model.Transaction, entries []model.Entry, doors, settlements map[string]string) []twinGroup {
+	occurrences := map[string]int{}
+	for i, tx := range txs {
+		occurrences[amountKey(tx.Amount)+"|"+payeeOf(tx, entries[i])]++
+	}
+
+	var order []string
+	byAmount := map[string][]int{}
+	for i, tx := range txs {
+		key := amountKey(tx.Amount)
+		if _, ok := byAmount[key]; !ok {
+			order = append(order, key)
+		}
+		byAmount[key] = append(byAmount[key], i)
+	}
+
+	var groups []twinGroup
+	for _, key := range order {
+		idxs := byAmount[key]
+		if len(idxs) < 2 {
+			continue
+		}
+		parent := make(map[int]int, len(idxs))
+		for _, i := range idxs {
+			parent[i] = i
+		}
+		var find func(int) int
+		find = func(i int) int {
+			for parent[i] != i {
+				parent[i] = parent[parent[i]]
+				i = parent[i]
+			}
+			return i
+		}
+		union := func(a, b int) {
+			ra, rb := find(a), find(b)
+			if ra != rb {
+				parent[ra] = rb
+			}
+		}
+		for a := 0; a < len(idxs); a++ {
+			for b := a + 1; b < len(idxs); b++ {
+				i, j := idxs[a], idxs[b]
+				if nearDateMatch(txs[i], entries[i], txs[j], entries[j], settlements) {
+					union(i, j)
+				}
+			}
+		}
+
+		byRoot := map[int][]int{}
+		var rootOrder []int
+		for _, i := range idxs {
+			r := find(i)
+			if _, ok := byRoot[r]; !ok {
+				rootOrder = append(rootOrder, r)
+			}
+			byRoot[r] = append(byRoot[r], i)
+		}
+		for _, r := range rootOrder {
+			members := byRoot[r]
+			if len(members) < 2 {
+				continue
+			}
+			if occurrences[key+"|"+payeeOf(txs[members[0]], entries[members[0]])] > nearDateMaxOccurrences {
+				continue
+			}
+			g := twinGroup{Date: txs[members[0]].Date, Amount: txs[members[0]].Amount, Kind: "near"}
+			for _, i := range members {
+				if i != members[0] && txs[i].Date.Before(g.Date) {
+					g.Date = txs[i].Date
+				}
+			}
+			for _, i := range members {
+				g.Rows = append(g.Rows, twinRow{
+					ID: txs[i].ID, Payee: payeeOf(txs[i], entries[i]), Door: doors[txs[i].ID],
+					Account: entries[i].SourceAccount(txs[i]), PostsTo: accounts(entries[i]),
+					Date: txs[i].Date,
+				})
+			}
+			groups = append(groups, g)
+		}
+	}
+	return groups
+}
+
+// nearDateMatch judges one candidate pair for the near-date check: the same payee and the same raw
+// memo, dated more than zero and no more than nearDateTolerance days apart -- the exact match already
+// owns same-day -- and not a pair the books have already explained as a settlement.
+//
+// Payee alone is not enough: a rule that names two differently-worded bank lines the same payee --
+// "ANGLOPHONE SOUTH SCHOOL DISTRICT (ASD-S)" and "Anglophone South SD" are both named the one payee --
+// turns an ordinary recurring bill (tuition, a subscription) into a false twin the moment two
+// installments happen to land a few days apart. Requiring the raw description to match too keeps
+// those recurring bills out while still catching a straight repost, which carries the same memo
+// verbatim under its new date.
+func nearDateMatch(txI model.Transaction, eI model.Entry, txJ model.Transaction, eJ model.Entry, settlements map[string]string) bool {
+	if settlements[txI.ID] == txJ.ID || settlements[txJ.ID] == txI.ID {
+		return false
+	}
+	days := txI.Date.Sub(txJ.Date).Hours() / 24
+	if days < 0 {
+		days = -days
+	}
+	if days <= 0 || days > nearDateTolerance {
+		return false
+	}
+	pi, pj := payeeOf(txI, eI), payeeOf(txJ, eJ)
+	if pi == "" || pi != pj {
+		return false
+	}
+	return txI.Description == txJ.Description
 }
 
 // unsettled drops, from one collision's lines, each settled accrual whose paying line is also in the
@@ -351,9 +491,18 @@ func renderTwins(out io.Writer, groups []twinGroup) error {
 		if i > 0 {
 			fmt.Fprintln(out)
 		}
-		fmt.Fprintf(out, "%s  %s\n", g.Date.Format("2006-01-02"), g.Amount)
+		if g.Kind == "near" {
+			fmt.Fprintf(out, "NEAR-DATE DUPLICATE -- same payee, same amount, dates within %d days: %s\n",
+				nearDateTolerance, g.Amount)
+		} else {
+			fmt.Fprintf(out, "%s  %s\n", g.Date.Format("2006-01-02"), g.Amount)
+		}
 		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 		for _, r := range g.Rows {
+			if g.Kind == "near" {
+				fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\t%s\n", r.Date.Format("2006-01-02"), r.ID, r.Door, r.Account, r.Payee, r.PostsTo)
+				continue
+			}
 			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\n", r.ID, r.Door, r.Account, r.Payee, r.PostsTo)
 		}
 		if err := w.Flush(); err != nil {

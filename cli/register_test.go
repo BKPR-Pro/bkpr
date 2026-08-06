@@ -228,3 +228,81 @@ func TestTwinGroupsLeaveARepeatedChargeAlone(t *testing.T) {
 		t.Errorf("got %d groups, want none: one door, one memo, two real charges", len(groups))
 	}
 }
+
+// A weekend-shifted repost is the same payment landing under two dates, not two dates apart on the
+// calendar: the same payee and amount, dated two days apart, through the same or different doors. The
+// exact-date grouping cannot see this -- the dates differ -- so it needs its own, louder category.
+func TestTwinGroupsCatchANearDateRepost(t *testing.T) {
+	tx1, e1 := regLine("aaa", 25, "Assets:Bank:Chequing", cad2(-120000), "Acme Contracting")
+	tx2, e2 := regLine("bbb", 27, "Assets:Bank:Chequing", cad2(-120000), "Acme Contracting")
+	doors := map[string]string{"aaa": "connector:rbc-chequing", "bbb": "connector:rbc-chequing"}
+
+	groups := twinGroups([]model.Transaction{tx1, tx2}, []model.Entry{e1, e2}, doors, nil)
+	if len(groups) != 1 {
+		t.Fatalf("got %d groups, want the near-date repost flagged", len(groups))
+	}
+	g := groups[0]
+	if g.Kind != "near" {
+		t.Errorf("kind = %q, want %q for a near-date match", g.Kind, "near")
+	}
+	if len(g.Rows) != 2 || g.Rows[0].ID != "aaa" || g.Rows[1].ID != "bbb" {
+		t.Errorf("group rows = %+v, want both sightings", g.Rows)
+	}
+}
+
+// A same-amount coincidence a couple of days apart, but a different payee, is not a duplicate signal
+// and must not be flagged -- matching on amount and near date alone, without a payee match, is exactly
+// the false positive this category must not create.
+func TestTwinGroupsLeaveANearDateCoincidenceAlone(t *testing.T) {
+	tx1, e1 := regLine("aaa", 25, "Assets:Bank:Chequing", cad2(-120000), "Acme Contracting")
+	tx2, e2 := regLine("bbb", 27, "Assets:Bank:Chequing", cad2(-120000), "City Utilities")
+	doors := map[string]string{"aaa": "connector:rbc-chequing", "bbb": "connector:rbc-chequing"}
+
+	if groups := twinGroups([]model.Transaction{tx1, tx2}, []model.Entry{e1, e2}, doors, nil); len(groups) != 0 {
+		t.Errorf("got %d groups, want none: same amount, different payee, is a coincidence", len(groups))
+	}
+}
+
+// A rule can name two differently-worded bank lines the same payee -- a normalized "Anglophone South
+// School District" standing for both "ANGLOPHONE SOUTH SCHOOL DISTRICT (ASD-S)" and "Anglophone South
+// SD" -- which must not turn two real, separately-billed installments into a false near-date twin.
+// Requiring the raw memo to match too is what tells a repost (verbatim memo, new date) apart from an
+// ordinary recurring bill (same normalized payee, different memo each time).
+func TestTwinGroupsLeaveARecurringBillWithADriftingMemoAlone(t *testing.T) {
+	tx1, e1 := regLine("aaa", 13, "Liabilities:PC Mastercard", cad2(-9000), "Anglophone South School District")
+	tx1.Description = "ANGLOPHONE SOUTH SCHOOL DISTRICT (ASD-S)"
+	tx2, e2 := regLine("bbb", 14, "Liabilities:PC Mastercard", cad2(-9000), "Anglophone South School District")
+	tx2.Description = "Anglophone South SD"
+	doors := map[string]string{"aaa": "connector:pcf-mastercard", "bbb": "connector:pcf-mastercard"}
+
+	if groups := twinGroups([]model.Transaction{tx1, tx2}, []model.Entry{e1, e2}, doors, nil); len(groups) != 0 {
+		t.Errorf("got %d groups, want none: same normalized payee but a different memo is a recurring bill, not a repost", len(groups))
+	}
+}
+
+// A payee+amount pairing that recurs three or more times anywhere in the book is a regular coffee run
+// or a monthly fee, not a repost -- the book's own history says so, even when one of those sightings
+// happens to land inside the tolerance window by the ordinary chance of a calendar.
+func TestTwinGroupsLeaveARecurringPairAlone(t *testing.T) {
+	tx1, e1 := regLine("aaa", 4, "Liabilities:PC Mastercard", cad2(-675), "The Border Cafe")
+	tx2, e2 := regLine("bbb", 6, "Liabilities:PC Mastercard", cad2(-675), "The Border Cafe")
+	tx3, e3 := regLine("ccc", 20, "Liabilities:PC Mastercard", cad2(-675), "The Border Cafe")
+	doors := map[string]string{"aaa": "connector:pcf", "bbb": "connector:pcf", "ccc": "connector:pcf"}
+
+	groups := twinGroups([]model.Transaction{tx1, tx2, tx3}, []model.Entry{e1, e2, e3}, doors, nil)
+	if len(groups) != 0 {
+		t.Errorf("got %d groups, want none: three sightings of the same coffee is a habit, not a duplicate", len(groups))
+	}
+}
+
+// Past the tolerance window, a same-payee same-amount pair is a recurring bill, not a repost, and must
+// not be flagged.
+func TestTwinGroupsLeaveAFarApartRecurrenceAlone(t *testing.T) {
+	tx1, e1 := regLine("aaa", 1, "Assets:Bank:Chequing", cad2(-120000), "Acme Contracting")
+	tx2, e2 := regLine("bbb", 20, "Assets:Bank:Chequing", cad2(-120000), "Acme Contracting")
+	doors := map[string]string{"aaa": "connector:rbc-chequing", "bbb": "connector:rbc-chequing"}
+
+	if groups := twinGroups([]model.Transaction{tx1, tx2}, []model.Entry{e1, e2}, doors, nil); len(groups) != 0 {
+		t.Errorf("got %d groups, want none: 19 days apart is a recurrence, not a repost", len(groups))
+	}
+}

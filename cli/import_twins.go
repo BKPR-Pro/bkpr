@@ -73,14 +73,32 @@ func warnTwins(w io.Writer, groups []twinGroup) {
 	if len(groups) == 0 {
 		return
 	}
-	lines := 0
+	twinLines, nearLines := 0, 0
 	for _, g := range groups {
-		lines += len(g.Rows) - 1
+		if g.Kind == "near" {
+			nearLines += len(g.Rows) - 1
+		} else {
+			twinLines += len(g.Rows) - 1
+		}
 	}
-	noun, verb := "lines", "match"
-	if lines == 1 {
-		noun, verb = "line", "matches"
+	// A near-date, same-payee, same-amount match is a stronger duplicate signal than a same-day
+	// collision -- a bank reposting a payment a day or two later looks nothing like a coincidence --
+	// so it is reported first and louder.
+	if nearLines > 0 {
+		noun, verb := "lines", "match"
+		if nearLines == 1 {
+			noun, verb = "line", "matches"
+		}
+		fmt.Fprintf(w, "WARNING: %d imported %s likely a duplicate: %s a line already in the book on "+
+			"payee and amount, dated within %d days;\nreview with bkpr register -dups before treating "+
+			"this import as clean\n", nearLines, noun, verb, nearDateTolerance)
 	}
-	fmt.Fprintf(w, "warning: %d imported %s %s a line already in the book on date and amount;\n"+
-		"review with bkpr register -dups before treating this import as clean\n", lines, noun, verb)
+	if twinLines > 0 {
+		noun, verb := "lines", "match"
+		if twinLines == 1 {
+			noun, verb = "line", "matches"
+		}
+		fmt.Fprintf(w, "warning: %d imported %s %s a line already in the book on date and amount;\n"+
+			"review with bkpr register -dups before treating this import as clean\n", twinLines, noun, verb)
+	}
 }
