@@ -97,6 +97,21 @@ func TestVoidRecordsTheActor(t *testing.T) {
 	}
 }
 
+func TestUnvoidRecordsTheActor(t *testing.T) {
+	bookHere(t)
+	seedTx(t, "tx1")
+
+	if err := voidCmd([]string{"tx1", "-actor", "human"}); err != nil {
+		t.Fatalf("void: %v", err)
+	}
+	if err := unvoidCmd([]string{"tx1", "-actor", "model:claude"}); err != nil {
+		t.Fatalf("unvoid: %v", err)
+	}
+	if got := actorOf(t, "transaction", "unvoided"); got != "model:claude" {
+		t.Errorf("actor = %q, want model:claude", got)
+	}
+}
+
 func TestRulesSetRecordsTheActor(t *testing.T) {
 	bookHere(t)
 

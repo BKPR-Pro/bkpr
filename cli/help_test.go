@@ -58,7 +58,7 @@ func TestUsageStylesEveryCommandUnderASection(t *testing.T) {
 		t.Fatal("a color palette should paint the usage screen with ANSI styling")
 	}
 	for _, name := range []string{
-		"init", "reset", "connectors register", "rules set", "import", "categorize", "void",
+		"init", "reset", "connectors register", "rules set", "import", "categorize", "void", "unvoid",
 		"match", "export", "books", "register", "invoice raise", "bill receive", "policy set",
 		"accounts set", "balance set", "reconcile", "receipt", "report", "help", "docs", "version",
 	} {
@@ -135,7 +135,7 @@ func TestPaletteForHonorsNoColor(t *testing.T) {
 // Every command in the usage block answers to help, so nobody scrolls docs to find a flag.
 func TestHelpTopicKnowsEveryCommand(t *testing.T) {
 	for _, name := range []string{
-		"init", "connectors", "rules", "import", "categorize", "void",
+		"init", "connectors", "rules", "import", "categorize", "void", "unvoid",
 		"match", "export", "books", "register", "invoice", "bill",
 	} {
 		var buf bytes.Buffer

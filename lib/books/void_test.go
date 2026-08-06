@@ -95,3 +95,100 @@ func TestVoidingALineThatWasNeverImportedIsRefused(t *testing.T) {
 		t.Fatal("voided a fingerprint that was never imported")
 	}
 }
+
+// unvoid is the inverse of void: a later fact that supersedes the void and restores the line to
+// the books, so a mistaken void has a correction path other than re-importing under a new
+// fingerprint.
+func TestUnvoidingRestoresTheLineToTheBooks(t *testing.T) {
+	log := newLog()
+	importOne(t, log, line("a", 1, -6240, "SHELL GAS"))
+	importOne(t, log, line("b", 2, -8420, "ACME HARDWARE"))
+
+	if err := books.VoidTransaction(log, "human", "wrong assumption", "a"); err != nil {
+		t.Fatalf("VoidTransaction: %v", err)
+	}
+	if txs, _ := books.Transactions(log); len(txs) != 1 {
+		t.Fatalf("got %v, want only b while voided", txs)
+	}
+
+	if err := books.UnvoidTransaction(log, "human", "the other line was the real duplicate", "a"); err != nil {
+		t.Fatalf("UnvoidTransaction: %v", err)
+	}
+
+	txs, err := books.Transactions(log)
+	if err != nil {
+		t.Fatalf("Transactions: %v", err)
+	}
+	if len(txs) != 2 {
+		t.Fatalf("got %v, want both lines restored", txs)
+	}
+}
+
+// Both the void and the unvoid stay in the log; nothing is deleted, and the reason for the
+// reversal is recorded the same way the reason for the void was.
+func TestUnvoidKeepsAllThreeFactsInTheLog(t *testing.T) {
+	log := newLog()
+	importOne(t, log, line("a", 1, -6240, "SHELL GAS"))
+	books.VoidTransaction(log, "human", "wrong file", "a")
+	if err := books.UnvoidTransaction(log, "human", "changed my mind", "a"); err != nil {
+		t.Fatalf("UnvoidTransaction: %v", err)
+	}
+
+	events, _ := log.All()
+	var imported, voided, unvoided bool
+	for _, e := range events {
+		if e.RecordID != "a" {
+			continue
+		}
+		switch e.Action {
+		case books.ActionImported:
+			imported = true
+		case books.ActionVoided:
+			voided = true
+		case books.ActionUnvoided:
+			unvoided = true
+			if !strings.Contains(string(e.Data), "changed my mind") {
+				t.Errorf("the reason was not recorded: %s", e.Data)
+			}
+		}
+	}
+	if !imported || !voided || !unvoided {
+		t.Fatalf("log should hold all three facts: imported=%v voided=%v unvoided=%v", imported, voided, unvoided)
+	}
+}
+
+// A fingerprint that was never voided cannot be unvoided; it would otherwise silently succeed
+// against nothing.
+func TestUnvoidingALineThatWasNeverVoidedIsRefused(t *testing.T) {
+	log := newLog()
+	importOne(t, log, line("a", 1, -6240, "SHELL GAS"))
+
+	if err := books.UnvoidTransaction(log, "human", "", "a"); err == nil {
+		t.Fatal("unvoided a line that was never voided")
+	}
+}
+
+// A fingerprint that was never imported at all is refused the same way void refuses it.
+func TestUnvoidingALineThatWasNeverImportedIsRefused(t *testing.T) {
+	log := newLog()
+	importOne(t, log, line("a", 1, -6240, "SHELL GAS"))
+
+	if err := books.UnvoidTransaction(log, "human", "", "ghost"); err == nil {
+		t.Fatal("unvoided a fingerprint that was never imported")
+	}
+}
+
+// After an unvoid the line is fully restored: it can be categorized again, the way any other
+// imported line can.
+func TestCategorizeSucceedsAfterVoidThenUnvoid(t *testing.T) {
+	log := newLog()
+	importOne(t, log, line("a", 1, -6240, "SHELL GAS"))
+	books.VoidTransaction(log, "human", "wrong assumption", "a")
+	if err := books.UnvoidTransaction(log, "human", "restored", "a"); err != nil {
+		t.Fatalf("UnvoidTransaction: %v", err)
+	}
+
+	if err := books.Categorize(log, "human", "", "a", "", "Shell", "", whole("Expenses:Fuel", -6240)); err != nil {
+		t.Fatalf("Categorize after unvoid: %v", err)
+	}
+}

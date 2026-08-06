@@ -55,6 +55,8 @@ func main() {
 		err = categorize(os.Args[2:])
 	case "void":
 		err = voidCmd(os.Args[2:])
+	case "unvoid":
+		err = unvoidCmd(os.Args[2:])
 	case "comment":
 		err = commentCmd(os.Args[2:])
 	case "match":
@@ -177,6 +179,7 @@ var usageSections = []usageSection{
 		{"categorize-ui apply", "<file.json> [-actor <name>] [-why <reason>]"},
 		{"comment", "<fingerprint> (-text <note> | -remove) [-account <a>] [-why <reason>] [-actor <name>]"},
 		{"void", "<fingerprint> [-why <reason>] [-actor <name>]"},
+		{"unvoid", "<fingerprint> [-why <reason>] [-actor <name>]"},
 		{"match", "<fingerprint> (-with <fingerprint> | -break) [-actor <name>]"},
 		{"export", "<connector> [-confirm]"},
 		{"books", "[-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re> ...] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-sort amount [-desc]] [-value <c> [-rate <C=n> ...]] [-stdout]"},
@@ -520,7 +523,12 @@ var reference = []docGroup{
 `},
 		{[]string{"void"}, `  void <fingerprint> [-why <reason>] [-actor <name>]
       Annul a bad imported line. The imported fact stays in the log; a later fact supersedes
-      it. Voiding an invoice is the same verb on a different noun: invoice void.
+      it. Voiding an invoice is the same verb on a different noun: invoice void. A void made
+      by mistake is reversed with unvoid.
+`},
+		{[]string{"unvoid"}, `  unvoid <fingerprint> [-why <reason>] [-actor <name>]
+      Reverse a void made by mistake. Restores the line to the books and to categorizing, as
+      though it had never been voided. Refused if the fingerprint is not currently voided.
 `},
 		{[]string{"match"}, `  match <fingerprint> (-with <fingerprint> | -break) [-actor <name>]
       Override the automatic transfer fold. On its own the fold pairs the two sightings of one
@@ -1990,6 +1998,32 @@ func voidCmd(args []string) error {
 		return err
 	}
 	fmt.Printf("voided %s\n", txID)
+	return nil
+}
+
+// unvoidCmd reverses a mistaken void, the way to undo a bad void.
+func unvoidCmd(args []string) error {
+	txID, rest, err := firstArg(args, "the transaction fingerprint to unvoid")
+	if err != nil {
+		return err
+	}
+	fs := flag.NewFlagSet("unvoid", flag.ExitOnError)
+	why := fs.String("why", "", "why the void is being reversed; recorded with the unvoid")
+	actor := fs.String("actor", "human", "who is unvoiding; the log records who decided")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+
+	s, err := store.Open(".")
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	if err := books.UnvoidTransaction(s.Log, *actor, *why, txID); err != nil {
+		return err
+	}
+	fmt.Printf("unvoided %s\n", txID)
 	return nil
 }
 
