@@ -252,6 +252,57 @@ func Balances(log *eventlog.Log) (map[string]map[string]model.Amount, error) {
 	return out, nil
 }
 
+// ReconciledBalances is what accounts due/list show: the same figure Reconcile's Books column
+// computes for every account carrying a balance assertion -- the anchor offset (the first assertion,
+// less what the books folded to on its date) plus the raw balance -- rather than an unanchored raw
+// sum. A backfill that lands history no assertion covers drifts the raw sum off the true balance;
+// the offset is derived fresh from the current log on every call, so it stays correct regardless. An
+// account with no assertion has no anchor to offset by, so its raw balance stands as-is.
+func ReconciledBalances(log *eventlog.Log) (map[string]map[string]model.Amount, error) {
+	txs, entries, err := Ledger(log)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := Balances(log)
+	if err != nil {
+		return nil, err
+	}
+	asserts, err := balanceAssertions(log)
+	if err != nil {
+		return nil, err
+	}
+
+	out := map[string]map[string]model.Amount{}
+	for account, per := range raw {
+		list := asserts[account]
+		if len(list) == 0 {
+			out[account] = per
+			continue
+		}
+		first := list[0]
+		commodity := first.Amount.Commodity
+		firstBooks := accountBalanceAsOf(txs, entries, account, first.Date, commodity)
+		offset, err := first.Amount.Add(firstBooks.Negate())
+		if err != nil {
+			out[account] = per
+			continue
+		}
+		adjusted := map[string]model.Amount{}
+		for c, amt := range per {
+			adjusted[c] = amt
+		}
+		current, ok := adjusted[commodity]
+		if !ok {
+			current = model.Amount{Commodity: commodity}
+		}
+		if next, err := offset.Add(current); err == nil {
+			adjusted[commodity] = next
+		}
+		out[account] = adjusted
+	}
+	return out, nil
+}
+
 // accountBalanceAsOf folds the kept ledger into one account's balance on a date, in one commodity: the
 // source amounts of its own lines plus the postings other entries make into it (a transfer booked from
 // the far side lands here as a posting), counting only what is dated on or before asOf. It rolls the

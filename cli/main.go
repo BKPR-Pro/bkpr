@@ -2659,7 +2659,7 @@ func accountList(args []string) error {
 	if err != nil {
 		return err
 	}
-	balances, err := books.Balances(log)
+	balances, err := books.ReconciledBalances(log)
 	if err != nil {
 		return err
 	}

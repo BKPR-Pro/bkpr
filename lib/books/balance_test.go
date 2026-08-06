@@ -74,6 +74,34 @@ func TestAMissedMovementShowsAsTheDelta(t *testing.T) {
 	}
 }
 
+// The figure accounts due/list show must be the same one reconcile computes -- an anchor offset plus
+// what has moved since -- not a raw lifetime sum. A backfill importing history the anchor never
+// covered drifts the raw sum off the true balance while the anchored figure stays correct throughout.
+func TestReconciledBalancesMatchesReconcileNotARawSum(t *testing.T) {
+	log := newLog()
+	importOne(t, log, lineIn("a", "Liabilities:PC Mastercard", 5, -10000, "CHARGE")) // -100, opening balance not in the ledger
+	if err := books.AssertBalance(log, "human", "Liabilities:PC Mastercard", on(5), cad(-320000)); err != nil {
+		t.Fatalf("AssertBalance: %v", err)
+	}
+	// A later backfill lands history the anchor never covered.
+	importOne(t, log, lineIn("b", "Liabilities:PC Mastercard", 1, -50000, "BACKFILLED CHARGE"))
+
+	want := reconcileOne(t, log, "Liabilities:PC Mastercard").Books
+
+	balances, err := books.ReconciledBalances(log)
+	if err != nil {
+		t.Fatalf("ReconciledBalances: %v", err)
+	}
+	got := balances["Liabilities:PC Mastercard"]["CAD"]
+	if got.String() != want.String() {
+		t.Errorf("balance = %s, want %s (reconcile's Books figure)", got, want)
+	}
+	rawSum := cad(-10000 + -50000)
+	if got.String() == rawSum.String() {
+		t.Fatalf("balance should not be the raw lifetime sum %s", rawSum)
+	}
+}
+
 // A transfer booked from the far side lands in the counter account as a posting, so that account's
 // reconciled balance still reflects the money -- even though its own sighting was suppressed.
 func TestReconcileCountsATransferBookedFromTheOtherSide(t *testing.T) {

@@ -27,7 +27,7 @@ type DueAccount struct {
 // that owes money but has never had -meta due/minimum set still appears, with blank columns, as a nudge
 // to fill them in.
 func DueAccounts(log *eventlog.Log) ([]DueAccount, error) {
-	balances, err := Balances(log)
+	balances, err := ReconciledBalances(log)
 	if err != nil {
 		return nil, err
 	}
