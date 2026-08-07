@@ -3,10 +3,20 @@ name: release
 # Cutting a release is pushing a tag. The tag names the version; this workflow
 # cross-compiles bkpr for every supported OS/arch and attaches the binaries to the
 # GitHub Release so another machine can run bkpr without a Go toolchain.
+#
+# workflow_dispatch is a manual fallback for the rare case a tag push doesn't
+# reach Actions (GitHub occasionally drops the event for a push that carries a
+# tag; ci.yml's own push trigger can miss the same push, so it isn't a bug in
+# this file) - re-run for the tag by name instead of hand-building a release.
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and publish a release for (e.g. v0.2.1)"
+        required: true
 
 permissions:
   contents: write # create the release and upload the binaries
@@ -16,6 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
 
       - uses: actions/setup-go@v5
         with:
@@ -23,7 +35,7 @@ jobs:
 
       - name: Build the binaries
         env:
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ inputs.tag || github.ref_name }}
         run: |
           mkdir -p dist
           # One static, dependency-free binary per target. The tag is stamped in
@@ -46,7 +58,15 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.tag || github.ref_name }}
         run: |
-          gh release create "${{ github.ref_name }}" dist/* \
-            --title "${{ github.ref_name }}" \
-            --generate-notes
+          # Idempotent: a manual re-run (the workflow_dispatch fallback above)
+          # can target a tag someone already published by hand, so upload to
+          # the existing release instead of failing on "already exists".
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" dist/* --clobber
+          else
+            gh release create "$VERSION" dist/* \
+              --title "$VERSION" \
+              --generate-notes
+          fi
