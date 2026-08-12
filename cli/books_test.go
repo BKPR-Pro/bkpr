@@ -145,7 +145,7 @@ func TestReportListsFingerprints(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := report(&buf, txs, entries, sum); err != nil {
+	if err := report(&buf, txs, entries, sum, false); err != nil {
 		t.Fatalf("report: %v", err)
 	}
 	out := buf.String()
@@ -243,7 +243,7 @@ func TestEveryFormatCarriesTheSameSummary(t *testing.T) {
 	}
 
 	var table, asJSON, asLedger bytes.Buffer
-	if err := report(&table, txs, entries, sum); err != nil {
+	if err := report(&table, txs, entries, sum, false); err != nil {
 		t.Fatalf("report: %v", err)
 	}
 	if err := writeJSON(&asJSON, txs, entries, sum); err != nil {
@@ -350,7 +350,7 @@ func TestBooksValuesEachLineIntoTheTarget(t *testing.T) {
 		t.Fatalf("summarize: %v", err)
 	}
 	var buf bytes.Buffer
-	if err := report(&buf, txs, entries, sum); err != nil {
+	if err := report(&buf, txs, entries, sum, false); err != nil {
 		t.Fatalf("report: %v", err)
 	}
 	if out := buf.String(); !strings.Contains(out, "12157.12 CAD") || strings.Contains(out, "9000.00 USD") {

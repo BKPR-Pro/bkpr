@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/BKPR-Pro/bkpr/lib/adapters/ledger"
@@ -38,6 +37,7 @@ func renderBooks(args []string) error {
 	fs := flag.NewFlagSet("books", flag.ExitOnError)
 	var accounts accountsFlag
 	format := fs.String("format", defaultFormat(os.Stdout, "table", "json"), "output format: table, json, or ledger (default: table at a terminal, json off one)")
+	color := fs.String("color", "auto", "colorize the table: auto (a terminal only), always, or never")
 	basis := fs.String("basis", "cash", "accounting basis: cash or accrual")
 	since := fs.String("since", "", "on -basis accrual, book only invoices/bills dated on or after this (YYYY-MM-DD)")
 	fs.Var(&accounts, "account", "show only lines posting to an account matching this pattern; repeatable, any match keeps the line")
@@ -124,7 +124,8 @@ func renderBooks(args []string) error {
 
 	switch *format {
 	case "table":
-		if err := report(os.Stdout, txs, entries, sum); err != nil {
+		colorize := colorMode(*color, isTerminal(os.Stdout), noColorSet())
+		if err := report(os.Stdout, txs, entries, sum, colorize); err != nil {
 			return err
 		}
 		if *value != "" {
@@ -371,16 +372,21 @@ func postsToAny(e model.Entry, res []*regexp.Regexp) bool {
 
 // report renders the books for a person: the fingerprint first, because it is the handle every
 // correction takes, then the line and where it posted, then the health line every format shares.
-func report(out io.Writer, txs []model.Transaction, entries []model.Entry, sum bookSummary) error {
-	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "FINGERPRINT\tDATE\tPAYEE\tAMOUNT\tPOSTS TO")
+func report(out io.Writer, txs []model.Transaction, entries []model.Entry, sum bookSummary, colorize bool) error {
+	p := tablePalette{on: colorize}
+
+	g := grid{header: []cell{
+		{"FINGERPRINT", ansiBold}, {"DATE", ansiBold}, {"PAYEE", ansiBold},
+		{"AMOUNT", ansiBold}, {"POSTS TO", ansiBold},
+	}}
 	for i, tx := range txs {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			tx.ID, tx.Date.Format("2006-01-02"), entries[i].Payee, tx.Amount, accounts(entries[i]))
+		acct := accounts(entries[i])
+		g.rows = append(g.rows, []cell{
+			{tx.ID, ansiGray}, {tx.Date.Format("2006-01-02"), ansiGray}, {entries[i].Payee, ""},
+			{tx.Amount.String(), amountColor(tx.Amount)}, {acct, postsColor(acct)},
+		})
 	}
-	if err := w.Flush(); err != nil {
-		return err
-	}
+	g.write(out, p)
 
 	// Every line posts, so the only thing left to say is where the rules ran out, and how to see
 	// only those lines.
@@ -394,12 +400,17 @@ func report(out io.Writer, txs []model.Transaction, entries []model.Entry, sum b
 		return nil
 	}
 	fmt.Fprintln(out)
-	t := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(t, "INCOME\tEXPENSES\tNET\tUNCATEGORIZED")
+	h := grid{header: []cell{
+		{"INCOME", ansiBold}, {"EXPENSES", ansiBold}, {"NET", ansiBold}, {"UNCATEGORIZED", ansiBold},
+	}}
 	for _, row := range sum.Totals {
-		fmt.Fprintf(t, "%s\t%s\t%s\t%s\n", row.Income, row.Expenses, row.Net, row.Uncategorized)
+		h.rows = append(h.rows, []cell{
+			{row.Income.String(), ansiGreen}, {row.Expenses.String(), ansiRed},
+			{row.Net.String(), amountColor(row.Net)}, {row.Uncategorized.String(), ansiYellow},
+		})
 	}
-	return t.Flush()
+	h.write(out, p)
+	return nil
 }
 
 // bookLine is one line of the books, machine-readable: the fingerprint a correction is keyed by,
