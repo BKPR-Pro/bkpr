@@ -4,6 +4,8 @@
 
 Turns bank and card statements into a set of books.
 
+![bkpr importing a statement and folding it into categorized books](docs/demo.gif)
+
 The goal is Mint's touch with a real ledger's resolution: you set it up, it runs, and the only
 recurring work is re-categorizing a couple of things every once in a while. It is driven entirely
 through commands, so it does not matter whether a person or an agent operates it: `books -format
