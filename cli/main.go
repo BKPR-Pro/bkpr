@@ -2877,6 +2877,7 @@ func reconciledCell(r books.Reconciliation) string {
 func reconcileCmd(args []string) error {
 	fs := flag.NewFlagSet("reconcile", flag.ExitOnError)
 	history := fs.String("history", "", "show every bank-asserted balance on record for one account, in date order, instead of just the latest -- so a delta can be bisected to the assertion that first introduced it")
+	color := fs.String("color", "auto", "colorize the delta and verdict: auto (a terminal only), always, or never")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -2900,14 +2901,25 @@ func reconcileCmd(args []string) error {
 		return nil
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ACCOUNT\tCHECKED\tBANK\tBOOKS\tDELTA")
+	colorize := colorMode(*color, isTerminal(os.Stdout), noColorSet())
+	writeReconcile(os.Stdout, recs, colorize)
+	return nil
+}
+
+// writeReconcile renders the reconciliation table and its verdict: the delta is green when an account
+// agrees with the bank (or is anchored) and red when it does not, and the all-clear line is green.
+// Splitting it from reconcileCmd keeps the coloring testable against a buffer.
+func writeReconcile(out io.Writer, recs []books.Reconciliation, colorize bool) {
+	p := tablePalette{on: colorize}
+	g := grid{header: []cell{
+		{"ACCOUNT", ansiBold}, {"CHECKED", ansiBold}, {"BANK", ansiBold}, {"BOOKS", ansiBold}, {"DELTA", ansiBold},
+	}}
 	allReconciled := true
 	var stale, anchored []string
 	for _, r := range recs {
-		status := r.Delta.String()
+		status, code := r.Delta.String(), ansiRed
 		if r.Reconciled {
-			status = "0 (reconciled)"
+			status, code = "0 (reconciled)", ansiGreen
 		} else {
 			allReconciled = false
 		}
@@ -2920,34 +2932,35 @@ func reconcileCmd(args []string) error {
 		// account measured only once has not been checked at all.
 		window := r.Since.Format("2006-01-02") + " → " + r.AsOf.Format("2006-01-02")
 		if r.Anchored {
-			window = "anchored " + r.AsOf.Format("2006-01-02")
-			status = "0 (by construction)"
+			window, status, code = "anchored "+r.AsOf.Format("2006-01-02"), "0 (by construction)", ansiGreen
 			anchored = append(anchored, r.Account)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.Account, window, r.Bank, r.Books, status)
+		g.rows = append(g.rows, []cell{
+			{r.Account, ""}, {window, ansiGray}, {r.Bank.String(), ""}, {r.Books.String(), ""}, {status, code},
+		})
 	}
-	w.Flush()
+	g.write(out, p)
+
 	if len(anchored) > 0 {
-		fmt.Printf("\n%d account(s) carry a single bank figure, which derived their opening balance: they agree by\nconstruction and nothing has tested them yet.\n", len(anchored))
+		fmt.Fprintf(out, "\n%d account(s) carry a single bank figure, which derived their opening balance: they agree by\nconstruction and nothing has tested them yet.\n", len(anchored))
 		for _, a := range anchored {
-			fmt.Println("  " + a)
+			fmt.Fprintln(out, "  "+a)
 		}
 	}
 	// A stale anchor is not a mismatch, so it must not read as one -- but it must not be swallowed by an
 	// unqualified all-clear either: the account agreed with the bank on its AS OF date and has not been
 	// measured since, which is a different claim from the one the other rows are making.
 	if len(stale) > 0 {
-		fmt.Printf("\n%d account(s) last measured against the bank before the rest of the books; nothing has checked them since:\n", len(stale))
+		fmt.Fprintf(out, "\n%d account(s) last measured against the bank before the rest of the books; nothing has checked them since:\n", len(stale))
 		for _, a := range stale {
-			fmt.Println("  " + a)
+			fmt.Fprintln(out, "  "+a)
 		}
 	}
 	if allReconciled && len(stale) == 0 {
-		fmt.Println("\nall accounts reconcile to the penny")
+		fmt.Fprintln(out, "\n"+p.paint(ansiGreen, "all accounts reconcile to the penny"))
 	} else if allReconciled {
-		fmt.Println("\nevery account reconciles to the penny as of the date shown")
+		fmt.Fprintln(out, "\n"+p.paint(ansiGreen, "every account reconciles to the penny as of the date shown"))
 	}
-	return nil
 }
 
 // reconcileHistoryCmd shows every bank-asserted balance on record for one account, in date order, each
