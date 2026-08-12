@@ -1,0 +1,13 @@
+<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="bkpr-pro org logo: balance scale">
+  <!-- Concept: a simple balance scale - beam, two equal pans, post and base.
+       General "balanced books / trustworthy professional" mark, not tied to
+       a CLI, so it works as an org avatar for a family of tools beyond bkpr. -->
+  <rect x="8" y="8" width="240" height="240" rx="48" fill="#14161c"/>
+  <rect x="119" y="70" width="18" height="76" rx="6" fill="#f2f0e6"/>
+  <rect x="90" y="170" width="76" height="16" rx="8" fill="#f2f0e6"/>
+  <rect x="60" y="70" width="136" height="16" rx="8" fill="#f2f0e6"/>
+  <rect x="68" y="86" width="12" height="30" fill="#f2f0e6"/>
+  <rect x="176" y="86" width="12" height="30" fill="#f2f0e6"/>
+  <circle cx="74" cy="134" r="22" fill="#f2f0e6"/>
+  <circle cx="182" cy="134" r="22" fill="#f2f0e6"/>
+</svg>

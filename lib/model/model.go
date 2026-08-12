@@ -1,0 +1,209 @@
+// Package model holds the normalized shapes the core understands. Connectors translate the
+// outside world into these; nothing inside the core knows about CSV columns, bank APIs, or
+// any particular accounting app.
+package model
+
+import (
+	"fmt"
+	"strings"
+	"time"
+)
+
+// Uncategorized is where an account path stops when the rules run out of knowledge. As a leaf it
+// says the kind is known but the detail is not (Expenses:Real Estate:Materials:Uncategorized). As
+// the whole account it says not even the kind is known (Uncategorized).
+//
+// It is not a guess and not a warning. It is the truth about what the rules can tell, so every
+// total above it stays honest, and `ledger bal Uncategorized` finds all of them at once. The fix
+// is usually a better rule, which reclassifies the whole history at once, rather than a
+// correction on each line.
+const Uncategorized = "Uncategorized"
+
+// Transaction is one normalized bank or card line. Every Source connector produces these,
+// whatever its transport. ID is a stable fingerprint of the line and is the idempotency root:
+// re-importing the same statement produces the same IDs, so nothing is ever recorded twice.
+type Transaction struct {
+	ID          string            // stable fingerprint of this line
+	Account     string            // ledger account the statement belongs to, e.g. Assets:Bank:Chequing
+	Date        time.Time         // when the line posted
+	Amount      Amount            // signed; negative is money out. Carries its own commodity.
+	Description string            // the raw memo the bank gave us
+	Raw         map[string]string // the original columns, kept for auditing
+
+	// Comment is a free-text note on the source (elided) leg: the posting against this line's own
+	// account, which the books infer rather than spell out. It is commentary, not data, and takes no
+	// part in balancing or the fingerprint, so it never changes a line's identity. The ledger adapters
+	// render it after the account on the elided line and read it back, so a note left on the account a
+	// movement came from survives a round trip. Empty on an ordinary line.
+	Comment string `json:"comment,omitempty"`
+}
+
+// Posting is one side of an entry: an account, and a signed amount.
+//
+// Cost is the optional total price of the posting in the statement's commodity, the ledger "@@"
+// form. It is present only when the amount is in a different commodity than the line: buying 10
+// AAPL with USD cash records `10 AAPL` with a Cost of the dollars it took. It is a total, never a
+// per-unit price, so the basis stays an exact quantity of cash with no rounding. Nil for the
+// ordinary same-commodity posting.
+type Posting struct {
+	Account string  `json:"account"`
+	Amount  Amount  `json:"amount"`
+	Cost    *Amount `json:"cost,omitempty"`
+
+	// Comment is a free-text note on this one leg, carried alongside the account and amount. It is
+	// commentary, never data: nothing in the core reads it, it takes no part in balancing, and it is
+	// empty on an ordinary posting. The ledger adapters render it inline after the amount and read it
+	// back, so a reason left on a split survives a round trip.
+	Comment string `json:"comment,omitempty"`
+}
+
+// value is what the posting contributes toward balancing the line, in the statement's commodity. A
+// plain posting contributes its own amount. A priced posting contributes its total cost, signed to
+// follow the quantity: shares acquired add the cash they cost, shares disposed subtract the cash
+// they raised. The cost is carried as a magnitude, and the quantity's sign is what decides it.
+func (p Posting) value() Amount {
+	if p.Cost == nil {
+		return p.Amount
+	}
+	c := *p.Cost
+	if c.Units < 0 {
+		c = c.Negate()
+	}
+	if p.Amount.Units < 0 {
+		return c.Negate()
+	}
+	return c
+}
+
+// Entry is what one Transaction becomes in the books.
+//
+// Postings are the categorized side only. The posting against the transaction's own account is
+// elided and inferred by the ledger, exactly as ledger-cli does, which is why an entry cannot be
+// unbalanced: the categorized postings must account for the whole line. A split is simply more
+// than one of them, and it is the shape a real correction usually takes, because one charge can
+// serve two properties.
+type Entry struct {
+	Payee    string
+	Postings []Posting
+
+	// Invoice is the number of the invoice or bill this entry is billed under: your own number on
+	// income you raised, or the vendor's on a bill you paid. It is the ledger transaction code -- the
+	// "(2073)" in a header -- lifted out of the payee so it is a fact of its own rather than text buried
+	// in a name. It is metadata: nothing in the core reads it, it takes no part in balancing, and it is
+	// not part of the line's fingerprint, so numbering an entry never changes its identity. Empty when
+	// the entry carries no number.
+	Invoice string
+
+	// Pending marks an entry the bank has not cleared yet: an accrued invoice or bill whose cash has
+	// not arrived. It renders the ledger flag -- pending "!", cleared "*" -- and it is a render
+	// projection, not stored state: the fold sets it from settlement (an open accrual is pending, a
+	// settled one cleared), so it is never asserted and never carried through the categorization event.
+	// A line off a bank statement has cleared the bank, so the zero value is cleared and every Source
+	// leaves it so. It takes no part in balancing or the fingerprint. False on a cleared entry.
+	Pending bool
+
+	// Metadata is an opaque bag carried from the rule that categorized the line. The core neither
+	// reads nor validates it; a connector reads its own namespaced keys (e.g. rentapp.lease) to
+	// learn where to export. Empty when no rule supplied any.
+	Metadata map[string]string
+
+	// Source, when set, is where this entry's elided leg lands instead of the transaction's own
+	// registered account: the sub-account a rule or a categorization routed the source (card,
+	// liability) leg to. A physical card imported on one registered account can then be split by
+	// purpose -- each charge's card leg routed to its purpose child -- while the postings still carry
+	// only the categorized side. It changes where the leg is booked, never how much: the postings
+	// still account for the whole line, so Balances is unaffected. Empty on an ordinary entry, whose
+	// leg stays on the transaction's account. See SourceAccount.
+	Source string
+
+	// Gain names the account that absorbs a sale's capital gain or loss, e.g. Income:Capital Gains.
+	// It is set only on a disposal: the shares leaving are valued at their cost base, and whatever
+	// is left over between that base and the proceeds is the realized gain. The base, and so the
+	// gain, is computed by folding the account's history, never stored, so a corrected purchase
+	// price reclassifies the gain on the next regeneration. Empty on an ordinary entry.
+	Gain string
+
+	// BlockComments are standalone note lines that sit inside the entry without belonging to any one
+	// posting -- the worksheet a person keeps beside a line. They are commentary, not data: nothing in
+	// the core reads them and they take no part in balancing. The ledger adapters render each as its
+	// own note line under the header and read them back in order, so a block of notes survives a round
+	// trip. Empty on an ordinary entry.
+	BlockComments []string
+}
+
+// SourceAccount is the account this entry's elided leg lands on: the routed Source when a rule or a
+// categorization moved it to a sub-account, otherwise the transaction's own registered account. It
+// is the one place that decides where the inferred source leg is booked, so the balance sheet, the
+// per-account balance, and the ledger render all agree on it.
+func (e Entry) SourceAccount(tx Transaction) string {
+	if e.Source != "" {
+		return e.Source
+	}
+	return tx.Account
+}
+
+// Balances reports whether the postings account for the whole statement line. The statement's sign
+// is from the source account's point of view, so the categorized side takes the opposite one. Each
+// posting is summed at its value in the line's commodity: a same-commodity posting is its amount,
+// and a posting in another commodity resolves through its price. A cross-commodity posting with no
+// price, or a price in a third commodity, cannot be summed and so never balances.
+func (e Entry) Balances(tx Transaction) bool {
+	short, err := e.Shortfall(tx)
+	return err == nil && short.IsZero()
+}
+
+// Shortfall reports what one more posting would need to contribute for the entry to account for the
+// whole line: the line's negation, less what the postings already cover. It is zero when the entry
+// balances, and on a sale it is exactly the amount the capital-gains posting takes, the difference
+// between the proceeds and the cost base the shares left at. The error is the mixed-commodity one:
+// a posting that cannot be summed against the line, because it carries no price or a foreign one.
+//
+// Balancing is per commodity, as a ledger's is. Each posting's value is added to the running sum for
+// its own commodity: a same-commodity or priced posting lands in the line's commodity, an unpriced
+// foreign posting in its own. The line's commodity must reach the line's negation; every other
+// commodity must cancel to zero among its own postings. A foreign commodity left with a remainder
+// had no price to resolve it, so the entry does not balance — but one whose postings cancel (a
+// property unit moved between accounts) asks nothing of the line and needs none.
+func (e Entry) Shortfall(tx Transaction) (Amount, error) {
+	line := Amount{Commodity: tx.Amount.Commodity}
+	others := map[string]Amount{} // unpriced foreign commodities, each summed against itself
+	var order []string            // map order is random; report a stray commodity stably
+	for _, p := range e.Postings {
+		v := p.value()
+		if v.Commodity == tx.Amount.Commodity {
+			next, err := line.Add(v)
+			if err != nil {
+				return Amount{}, err
+			}
+			line = next
+			continue
+		}
+		prev, seen := others[v.Commodity]
+		if !seen {
+			others[v.Commodity] = v
+			order = append(order, v.Commodity)
+			continue
+		}
+		next, err := prev.Add(v)
+		if err != nil {
+			return Amount{}, err
+		}
+		others[v.Commodity] = next
+	}
+	for _, c := range order {
+		if !others[c].IsZero() {
+			return Amount{}, fmt.Errorf("posting in %s has no price to balance against %s", c, tx.Amount.Commodity)
+		}
+	}
+	return tx.Amount.Negate().Add(line.Negate())
+}
+
+// Uncategorized reports whether any posting stops short of a full account path.
+func (e Entry) Uncategorized() bool {
+	for _, p := range e.Postings {
+		if p.Account == Uncategorized || strings.HasSuffix(p.Account, ":"+Uncategorized) {
+			return true
+		}
+	}
+	return false
+}

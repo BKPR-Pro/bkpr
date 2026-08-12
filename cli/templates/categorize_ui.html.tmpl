@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>bkpr categorize-ui</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --row-hover: #f8fafc;
+    --changed: #fef9c3;
+    --changed-border: #eab308;
+    --accent: #2563eb;
+    --accent-fg: #ffffff;
+    --neg: #b91c1c;
+    --pos: #15803d;
+    --chip-bg: #f1f5f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --fg: #e8e9eb;
+      --muted: #9aa1ab;
+      --border: #2a2d33;
+      --row-hover: #1c1f24;
+      --changed: #3a3110;
+      --changed-border: #ca9a08;
+      --accent: #4f8ff7;
+      --accent-fg: #0a0a0a;
+      --neg: #f87171;
+      --pos: #4ade80;
+      --chip-bg: #1f2329;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 14px;
+  }
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+  }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; white-space: nowrap; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .spacer { flex: 1; }
+  input[type="search"] {
+    background: var(--chip-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: var(--fg);
+    font-size: 13px;
+    width: 220px;
+  }
+  select {
+    background: var(--chip-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: var(--fg);
+    font-size: 13px;
+  }
+  button {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border: none;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.secondary {
+    background: var(--chip-bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+  }
+  button:disabled { opacity: .4; cursor: default; }
+  #changedCount {
+    font-variant-numeric: tabular-nums;
+    background: var(--changed-border);
+    color: #1a1a1a;
+    border-radius: 999px;
+    padding: 2px 9px;
+    font-size: 12px;
+    font-weight: 700;
+    display: none;
+  }
+  main { padding: 0 20px 60px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  thead th {
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--muted);
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 57px;
+    background: var(--bg);
+  }
+  tbody tr { border-bottom: 1px solid var(--border); }
+  tbody tr:hover { background: var(--row-hover); }
+  tbody tr.changed { background: var(--changed); }
+  td { padding: 7px 10px; vertical-align: middle; }
+  td.date { white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
+  td.payee { max-width: 180px; }
+  td.payee .desc { display: block; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+  td.amount { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.amount.neg { color: var(--neg); }
+  td.amount.pos { color: var(--pos); }
+  td.account { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  td.category { position: relative; }
+  td.category .row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  td.category input {
+    flex: 1;
+    min-width: 420px;
+    background: var(--chip-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    color: var(--fg);
+    font-size: 13px;
+  }
+  td.category input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  tr.changed td.category input { border-color: var(--changed-border); }
+  .rowReset {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    display: none;
+  }
+  tr.changed .rowReset { display: inline-block; }
+  .badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--changed-border);
+    color: #1a1a1a;
+    margin-left: 6px;
+  }
+  footer { color: var(--muted); font-size: 12px; padding: 10px 20px 40px; }
+  #empty { text-align: center; padding: 40px; color: var(--muted); display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>bkpr categorize-ui</h1>
+  <span class="sub" id="rangeLabel"></span>
+  <span id="changedCount">0 changed</span>
+  <div class="spacer"></div>
+  <input type="search" id="search" placeholder="Search payee, description, category...">
+  <select id="monthFilter"><option value="">All months</option></select>
+  <select id="changedFilter">
+    <option value="">All rows</option>
+    <option value="changed">Changed only</option>
+  </select>
+  <button class="secondary" id="resetBtn">Reset all</button>
+  <button id="exportBtn">Export changes</button>
+</header>
+
+<main>
+  <table id="txTable">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Payee</th>
+        <th style="min-width:440px">Category</th>
+        <th style="text-align:right">Amount</th>
+        <th>Source account</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div id="empty">No transactions match.</div>
+</main>
+
+<footer id="footer"></footer>
+
+<datalist id="categoryList"></datalist>
+
+<script>
+const DATA = {{.DataJSON}};
+
+const txns = DATA.txns.map(t => ({ ...t, origCategory: t.category }));
+const categories = DATA.categories;
+
+const tbody = document.getElementById('tbody');
+const emptyEl = document.getElementById('empty');
+const searchEl = document.getElementById('search');
+const monthFilterEl = document.getElementById('monthFilter');
+const changedFilterEl = document.getElementById('changedFilter');
+const changedCountEl = document.getElementById('changedCount');
+const rangeLabelEl = document.getElementById('rangeLabel');
+const footerEl = document.getElementById('footer');
+const categoryListEl = document.getElementById('categoryList');
+
+categories.forEach(function(c) {
+  const opt = document.createElement('option');
+  opt.value = c;
+  categoryListEl.appendChild(opt);
+});
+
+const months = Array.from(new Set(txns.map(function(t) { return t.date.slice(0, 7); }))).sort().reverse();
+months.forEach(function(m) {
+  const opt = document.createElement('option');
+  opt.value = m;
+  const d = new Date(m + '-02');
+  opt.textContent = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  monthFilterEl.appendChild(opt);
+});
+
+if (txns.length) {
+  rangeLabelEl.textContent = '{{.From}} → {{.To}} · ' + txns.length + ' transactions';
+} else {
+  rangeLabelEl.textContent = '{{.From}} → {{.To}} · no transactions';
+}
+
+function fmtAmount(a) {
+  const m = a.match(/^(-?[\d.,]+)\s*(\w+)$/);
+  if (!m) return a;
+  const num = parseFloat(m[1].replace(/,/g, ''));
+  const sign = num < 0 ? '-' : '';
+  return sign + '$' + Math.abs(num).toFixed(2) + ' ' + m[2];
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function cssEscape(s) {
+  return s.replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+}
+
+function render() {
+  const q = searchEl.value.trim().toLowerCase();
+  const month = monthFilterEl.value;
+  const changedOnly = changedFilterEl.value === 'changed';
+
+  tbody.innerHTML = '';
+  let shown = 0;
+
+  for (const t of txns) {
+    if (month && t.date.slice(0, 7) !== month) continue;
+    const isChanged = t.category !== t.origCategory;
+    if (changedOnly && !isChanged) continue;
+    if (q) {
+      const hay = (t.payee + ' ' + t.desc + ' ' + t.category + ' ' + t.account).toLowerCase();
+      if (hay.indexOf(q) === -1) continue;
+    }
+
+    shown++;
+    const tr = document.createElement('tr');
+    tr.dataset.fp = t.fp;
+    if (isChanged) tr.classList.add('changed');
+
+    const amountNum = parseFloat(t.amount);
+    const amtClass = amountNum < 0 ? 'neg' : 'pos';
+
+    tr.innerHTML =
+      '<td class="date">' + t.date + '</td>' +
+      '<td class="payee">' + escapeHtml(t.payee) + (t.desc && t.desc !== t.payee ? '<span class="desc">' + escapeHtml(t.desc) + '</span>' : '') + '</td>' +
+      '<td class="category">' +
+        '<div class="row">' +
+          '<input type="text" list="categoryList" value="' + escapeHtml(t.category) + '" data-fp="' + t.fp + '">' +
+          '<button type="button" class="rowReset" data-fp="' + t.fp + '" title="Reset to ' + escapeHtml(t.origCategory) + '">reset</button>' +
+        '</div>' +
+        (isChanged ? '<span class="badge">CHANGED</span>' : '') +
+      '</td>' +
+      '<td class="amount ' + amtClass + '">' + fmtAmount(t.amount) + '</td>' +
+      '<td class="account">' + escapeHtml(t.account) + '</td>';
+    tbody.appendChild(tr);
+  }
+
+  emptyEl.style.display = shown ? 'none' : 'block';
+  updateChangedCount();
+}
+
+function updateChangedCount() {
+  const n = txns.filter(function(t) { return t.category !== t.origCategory; }).length;
+  changedCountEl.textContent = n + ' changed';
+  changedCountEl.style.display = n ? 'inline-block' : 'none';
+  document.getElementById('exportBtn').disabled = n === 0;
+  document.getElementById('resetBtn').disabled = n === 0;
+  footerEl.textContent = n
+    ? n + ' category change' + (n === 1 ? '' : 's') + ' pending. Export downloads a JSON file of fingerprint → new category for the changed rows only; feed it to `bkpr categorize-ui apply <file>`.'
+    : 'No changes yet. Edit a category cell (autocomplete from existing categories), or use the per-row reset button to undo one, then export.';
+}
+
+tbody.addEventListener('change', function(e) {
+  const input = e.target.closest('input[data-fp]');
+  if (!input) return;
+  const t = txns.find(function(x) { return x.fp === input.dataset.fp; });
+  if (!t) return;
+  t.category = input.value.trim();
+  render();
+  requestAnimationFrame(function() {
+    const el = tbody.querySelector('input[data-fp="' + cssEscape(input.dataset.fp) + '"]');
+    if (el) el.focus();
+  });
+});
+
+tbody.addEventListener('click', function(e) {
+  const btn = e.target.closest('.rowReset');
+  if (!btn) return;
+  const t = txns.find(function(x) { return x.fp === btn.dataset.fp; });
+  if (!t) return;
+  t.category = t.origCategory;
+  render();
+});
+
+searchEl.addEventListener('input', render);
+monthFilterEl.addEventListener('change', render);
+changedFilterEl.addEventListener('change', render);
+
+document.getElementById('resetBtn').addEventListener('click', function() {
+  if (!confirm('Discard all category changes?')) return;
+  txns.forEach(function(t) { t.category = t.origCategory; });
+  render();
+});
+
+document.getElementById('exportBtn').addEventListener('click', function() {
+  const changes = txns
+    .filter(function(t) { return t.category !== t.origCategory; })
+    .map(function(t) {
+      return {
+        fingerprint: t.fp,
+        date: t.date,
+        payee: t.payee,
+        amount: t.amount,
+        account: t.account,
+        old_category: t.origCategory,
+        new_category: t.category,
+      };
+    });
+  if (!changes.length) return;
+  const blob = new Blob([JSON.stringify(changes, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'category-changes-{{.From}}-to-{{.To}}.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+render();
+</script>
+</body>
+</html>

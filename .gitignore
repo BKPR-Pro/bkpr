@@ -1,0 +1,14 @@
+# Build output
+bin/
+
+# Local config and secrets
+*.local.json
+.env
+
+# The event log. Yours, not the repo's.
+*.db
+*.db-wal
+*.db-shm
+
+# Other sessions worktrees, nested here; never ours to commit
+.claude/

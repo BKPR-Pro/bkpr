@@ -1,0 +1,4 @@
+# Config for the pre-commit hook and CI markdownlint runs (markdownlint-cli
+# 0.43.0). The docs here are prose-first: lines wrap at the editor, not at a
+# column, so the line-length rule is off.
+MD013: false
