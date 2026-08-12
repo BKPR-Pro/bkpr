@@ -1,7 +1,5 @@
 # bkpr
 
-![bkpr logo](docs/logo.svg)
-
 Turns bank and card statements into a set of books.
 
 ![bkpr importing a statement and folding it into categorized books](docs/demo.gif)
