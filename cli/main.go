@@ -183,7 +183,7 @@ var usageSections = []usageSection{
 		{"match", "<fingerprint> (-with <fingerprint> | -break) [-actor <name>]"},
 		{"export", "<connector> [-confirm]"},
 		{"books", "[-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re> ...] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-sort amount [-desc]] [-value <c> [-rate <C=n> ...]] [-stdout]"},
-		{"register", "[-account <re>] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-dups]"},
+		{"register", "[-account <re>] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-dups] [-format text|pdf] [-out <file>]"},
 	}},
 	{"INVOICES AND BILLS", []usageLine{
 		{"invoice raise", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-invoice <n|next>] [-description <text>] [-tax-rate <pct> -tax-account <account>] [-why <reason>] [-actor <name>]"},
@@ -203,11 +203,11 @@ var usageSections = []usageSection{
 		{"policy list", ""},
 		{"accounts set", "<account> -meta <k=v> ... [-actor <name>]"},
 		{"accounts list", "[-sort amount [-desc]]"},
-		{"accounts due", "[-format table|json]"},
+		{"accounts due", "[-format table|json|pdf] [-out <file>]"},
 		{"balance set", "<account> <amount> [-as-of <YYYY-MM-DD>] [-actor <name>]"},
 		{"balance rm", "<account> [-actor <name>]"},
 		{"reconcile", ""},
-		{"receipt", "-tx <fingerprint> [-as invoice|receipt] [-format text|html|json] [-out <file>]"},
+		{"receipt", "-tx <fingerprint> [-as invoice|receipt] [-format text|html|json|pdf] [-out <file>]"},
 		{"report", "[-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
 		{"report income", "[-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
 		{"report balance", "[-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
@@ -588,7 +588,7 @@ var reference = []docGroup{
       with neither is left in its own currency and named in a warning. Valuing restates a reading,
       not the artifact, so -value cannot render -format ledger, which stays each line's own commodity.
 `},
-		{[]string{"register"}, `  register [-account <re>] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-dups]
+		{[]string{"register"}, `  register [-account <re>] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-dups] [-format text|pdf] [-out <file>]
       Read the books the way the bank prints a statement: every line in date order -- payee,
       amount, the account it moved, and the door it entered through (the connector or file that
       imported it, which no other view shows). It reads through the same lens books does: -basis
@@ -610,6 +610,8 @@ var reference = []docGroup{
       shared date and amount, then every line with its fingerprint, door, account, and
       categorization; the report only ever suggests, and a twin that is real is voided on one
       side by hand.
+      -format defaults to text; pdf is binary and always needs -out <file>. -out with text writes
+      to a file instead of the terminal, the same as report and receipt.
 `},
 	}},
 	{"INVOICES AND BILLS  (value recognized before its cash; only shown on -basis accrual)", []docTopic{
@@ -706,7 +708,7 @@ var reference = []docGroup{
       account is yours once a statement imports against it or a connector posts to it. Listed by name
       by default; -sort amount orders by balance instead (-desc for largest first). An account holding
       more than one commodity sorts by the sum of its balances.
-  accounts due [-format table|json]
+  accounts due [-format table|json|pdf] [-out <file>]
       Every Liabilities: account family with a nonzero net balance -- credit cards, lines of credit --
       alongside the due date and minimum payment recorded on it (accounts set <account> -meta
       due=<YYYY-MM-DD> minimum=<amount>). A family is the bare account plus every purpose-split
@@ -714,7 +716,7 @@ var reference = []docGroup{
       parent, so a split that leaves one bucket looking positive does not hide what the card overall
       owes. A family owing money with neither key set still appears, with blank columns, as a nudge
       to fill them in. Sorted soonest-due first; a family with no due date sorts last. -format
-      defaults to table at a terminal and json off one.
+      defaults to table at a terminal and json off one; pdf is binary and always needs -out <file>.
 `},
 		{[]string{"balance"}, `  balance rm <account> [-actor <name>]
       Stop reconciling an account: it is finished, so leave it out of the report. Nothing is
@@ -745,7 +747,7 @@ var reference = []docGroup{
       current check can be bisected to the specific assertion (the specific import) that first
       introduced it.
 `},
-		{[]string{"receipt"}, `  receipt -tx <fingerprint> [-as invoice|receipt] [-format text|html|json] [-out <file>]
+		{[]string{"receipt"}, `  receipt -tx <fingerprint> [-as invoice|receipt] [-format text|html|json|pdf] [-out <file>]
       Render one transaction as a printable document: the account's letterhead, the payee as the
       bill-to, the postings as line items. It bills in the currency that was billed, so a USD
       contract paid in CAD reads as the USD owed. -tx takes a bank line's fingerprint or a raised
@@ -758,6 +760,7 @@ var reference = []docGroup{
       whose accounts end in the same segment, a rent and its tax on one unit, stay told apart.
       -format defaults to text at a terminal and json off one, the same structured fields a
       script or an agent filing the document elsewhere would otherwise have to parse from text.
+      pdf is binary, so it always needs -out <file>: there is no printing a PDF to a terminal.
 `},
 		{[]string{"report"}, `  report [-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
       Fold the books into the company's full picture: an income statement over the period and a
@@ -2745,12 +2748,16 @@ func accountList(args []string) error {
 // accounts need a payment soon and how much" without eyeballing balances and the bank site by hand.
 func accountDue(args []string) error {
 	fs := flag.NewFlagSet("accounts due", flag.ExitOnError)
-	format := fs.String("format", defaultFormat(os.Stdout, "table", "json"), "table or json (default: table at a terminal, json off one)")
+	format := fs.String("format", defaultFormat(os.Stdout, "table", "json"), "table, json, or pdf (default: table at a terminal, json off one)")
+	out := fs.String("out", "", "write to this file instead of stdout (required for -format pdf)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *format != "table" && *format != "json" {
-		return fmt.Errorf("accounts due -format takes table or json")
+	if *format != "table" && *format != "json" && *format != "pdf" {
+		return fmt.Errorf("accounts due -format takes table, json, or pdf")
+	}
+	if *format == "pdf" && *out == "" {
+		return fmt.Errorf("-format pdf is binary and needs -out <file>: where should it be written?")
 	}
 
 	log, closeLog, err := openReader()
@@ -2764,8 +2771,11 @@ func accountDue(args []string) error {
 		return err
 	}
 
-	if *format == "json" {
+	switch *format {
+	case "json":
 		return renderDueJSON(rows)
+	case "pdf":
+		return writeOut(*out, func(w io.Writer) error { return renderDuePDF(w, rows) })
 	}
 	return printDue(rows)
 }
@@ -2819,6 +2829,31 @@ func renderDueJSON(rows []books.DueAccount) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
+}
+
+// renderDuePDF prints the same table printDue does, as a real PDF: one row per owing liability
+// account, a dash standing in for a due date or minimum nobody has set yet.
+func renderDuePDF(w io.Writer, rows []books.DueAccount) error {
+	r := newPdfReport()
+	r.Title("ACCOUNTS DUE")
+	if len(rows) == 0 {
+		r.Line("no liability accounts owing")
+		return r.Output(w)
+	}
+
+	body := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		due, min := row.Due, row.Minimum
+		if due == "" {
+			due = "-"
+		}
+		if min == "" {
+			min = "-"
+		}
+		body = append(body, []string{row.Account, balanceCell(row.Balance), due, min})
+	}
+	r.Table([]string{"Account", "Balance", "Due", "Minimum"}, body, 2.5, 1, 1, 1)
+	return r.Output(w)
 }
 
 // balanceCell renders an account's holdings, one amount per commodity (a USD fee beside CAD rent do
