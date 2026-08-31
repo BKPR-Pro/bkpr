@@ -2852,7 +2852,7 @@ func renderDuePDF(w io.Writer, rows []books.DueAccount) error {
 		}
 		body = append(body, []string{row.Account, balanceCell(row.Balance), due, min})
 	}
-	r.Table([]string{"Account", "Balance", "Due", "Minimum"}, body)
+	r.Table([]string{"Account", "Balance", "Due", "Minimum"}, body, 2.5, 1, 1, 1)
 	return r.Output(w)
 }
 
