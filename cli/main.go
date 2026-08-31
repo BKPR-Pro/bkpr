@@ -183,7 +183,7 @@ var usageSections = []usageSection{
 		{"match", "<fingerprint> (-with <fingerprint> | -break) [-actor <name>]"},
 		{"export", "<connector> [-confirm]"},
 		{"books", "[-format table|json|ledger] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-account <re> ...] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-sort amount [-desc]] [-value <c> [-rate <C=n> ...]] [-stdout]"},
-		{"register", "[-account <re>] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-dups]"},
+		{"register", "[-account <re>] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-dups] [-format text|pdf] [-out <file>]"},
 	}},
 	{"INVOICES AND BILLS", []usageLine{
 		{"invoice raise", "-party <name> -amount <amt> -category <account> [-account <a>] [-date <YYYY-MM-DD>] [-currency <c>] [-invoice <n|next>] [-description <text>] [-tax-rate <pct> -tax-account <account>] [-why <reason>] [-actor <name>]"},
@@ -588,7 +588,7 @@ var reference = []docGroup{
       with neither is left in its own currency and named in a warning. Valuing restates a reading,
       not the artifact, so -value cannot render -format ledger, which stays each line's own commodity.
 `},
-		{[]string{"register"}, `  register [-account <re>] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-dups]
+		{[]string{"register"}, `  register [-account <re>] [-basis cash|accrual] [-since <YYYY-MM-DD>] [-from <YYYY-MM-DD>] [-to <YYYY-MM-DD>] [-dups] [-format text|pdf] [-out <file>]
       Read the books the way the bank prints a statement: every line in date order -- payee,
       amount, the account it moved, and the door it entered through (the connector or file that
       imported it, which no other view shows). It reads through the same lens books does: -basis
@@ -610,6 +610,8 @@ var reference = []docGroup{
       shared date and amount, then every line with its fingerprint, door, account, and
       categorization; the report only ever suggests, and a twin that is real is voided on one
       side by hand.
+      -format defaults to text; pdf is binary and always needs -out <file>. -out with text writes
+      to a file instead of the terminal, the same as report and receipt.
 `},
 	}},
 	{"INVOICES AND BILLS  (value recognized before its cash; only shown on -basis accrual)", []docTopic{

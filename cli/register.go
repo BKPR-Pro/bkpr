@@ -28,11 +28,19 @@ func registerCmd(args []string) error {
 	from := fs.String("from", "", "show only lines dated on or after this (YYYY-MM-DD)")
 	to := fs.String("to", "", "show only lines dated on or before this (YYYY-MM-DD)")
 	dups := fs.Bool("dups", false, "report candidate twins: lines sharing a date and amount that entered through different doors")
+	format := fs.String("format", "text", "text or pdf")
+	out := fs.String("out", "", "write to this file instead of stdout (required for -format pdf)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *basis != string(books.CashBasis) && *basis != string(books.AccrualBasis) {
 		return fmt.Errorf("unknown basis %q: want cash or accrual", *basis)
+	}
+	if *format != "text" && *format != "pdf" {
+		return fmt.Errorf("-format must be text or pdf")
+	}
+	if *format == "pdf" && *out == "" {
+		return fmt.Errorf("-format pdf is binary and needs -out <file>: where should it be written?")
 	}
 	var effective time.Time
 	if *since != "" {
@@ -91,7 +99,11 @@ func registerCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	return renderRegister(os.Stdout, rows, re != nil)
+	render := renderRegister
+	if *format == "pdf" {
+		render = renderRegisterPDF
+	}
+	return writeOut(*out, func(w io.Writer) error { return render(w, rows, re != nil) })
 }
 
 // registerRow is one statement line as the register prints it: the movement, the account it moved,
@@ -226,6 +238,34 @@ func renderRegister(out io.Writer, rows []registerRow, balanced bool) error {
 	}
 	_, err := fmt.Fprintf(out, "\n%d lines\n", len(rows))
 	return err
+}
+
+// renderRegisterPDF prints the same statement renderRegister does, as a real PDF: a title, the same
+// header row, and one row per line, with the balance column only when the register is filtered to
+// one account.
+func renderRegisterPDF(w io.Writer, rows []registerRow, balanced bool) error {
+	r := newPdfReport()
+	r.Title("REGISTER")
+
+	headers := []string{"Date", "Fingerprint", "Payee", "Amount", "Account", "Door"}
+	if balanced {
+		headers = []string{"Date", "Fingerprint", "Payee", "Amount", "Balance", "Account", "Door"}
+	}
+	body := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		if balanced {
+			body = append(body, []string{
+				row.Date.Format("2006-01-02"), row.ID, row.Payee, row.Amount.String(), row.Balance.String(), row.Account, row.Door,
+			})
+			continue
+		}
+		body = append(body, []string{
+			row.Date.Format("2006-01-02"), row.ID, row.Payee, row.Amount.String(), row.Account, row.Door,
+		})
+	}
+	r.Table(headers, body)
+	r.Line(fmt.Sprintf("%d lines", len(rows)))
+	return r.Output(w)
 }
 
 // twinRow is one side of a candidate twin: enough to judge whether the two lines are one purchase.
