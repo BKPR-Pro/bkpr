@@ -238,21 +238,24 @@ func renderInvoiceText(w io.Writer, doc invoiceDoc) error {
 
 // invoiceCmd renders one transaction as a printable invoice or receipt, found by its fingerprint.
 // -format picks text or html for a person, or json (the default off a terminal) for a script or an
-// agent; -out writes to a file.
+// agent; pdf is binary and always needs -out. -out writes to a file.
 func receiptCmd(args []string) error {
 	fs := flag.NewFlagSet("invoice", flag.ExitOnError)
 	txID := fs.String("tx", "", "the transaction fingerprint to render")
 	as := fs.String("as", "receipt", "the document title: invoice or receipt")
-	format := fs.String("format", defaultFormat(os.Stdout, "text", "json"), "text, html, or json (default: text at a terminal, json off one)")
-	out := fs.String("out", "", "write to this file instead of stdout")
+	format := fs.String("format", defaultFormat(os.Stdout, "text", "json"), "text, html, json, or pdf (default: text at a terminal, json off one)")
+	out := fs.String("out", "", "write to this file instead of stdout (required for -format pdf)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *txID == "" {
 		return fmt.Errorf("-tx is required: which transaction should the document render?")
 	}
-	if *format != "text" && *format != "html" && *format != "json" {
-		return fmt.Errorf("-format must be text, html, or json")
+	if *format != "text" && *format != "html" && *format != "json" && *format != "pdf" {
+		return fmt.Errorf("-format must be text, html, json, or pdf")
+	}
+	if *format == "pdf" && *out == "" {
+		return fmt.Errorf("-format pdf is binary and needs -out <file>: where should it be written?")
 	}
 
 	s, err := store.OpenReader(".")
@@ -283,6 +286,8 @@ func receiptCmd(args []string) error {
 			render = renderInvoiceHTML
 		case "json":
 			render = renderInvoiceJSON
+		case "pdf":
+			render = renderInvoicePDF
 		}
 		return writeOut(*out, func(w io.Writer) error { return render(w, doc) })
 	}
@@ -294,6 +299,40 @@ func receiptCmd(args []string) error {
 // printed, so both forms find it. A bank line matches only itself.
 func matchesTx(id, want string) bool {
 	return id == want || id == "invoice:"+want || id == "bill:"+want
+}
+
+// renderInvoicePDF lays out the same document the text and HTML renderers show -- letterhead,
+// reference and date, PAID, bill-to, line items, total -- as a real PDF, for a person who wants a
+// file to attach or print without opening a browser.
+func renderInvoicePDF(w io.Writer, doc invoiceDoc) error {
+	r := newPdfReport()
+	r.Title(doc.Title)
+	r.Line(doc.Biller.Name)
+	for _, line := range doc.Biller.Address {
+		r.Line(line)
+	}
+	if doc.Reference != "" {
+		r.Line(fmt.Sprintf("%s No: %s", doc.Kind, doc.Reference))
+	}
+	r.Line(fmt.Sprintf("Date: %s", doc.Date))
+	if doc.Paid {
+		r.Line("PAID")
+	}
+	r.Line("")
+	r.Line("Bill To: " + doc.BillTo.Name)
+	for _, line := range doc.BillTo.Address {
+		r.Line(line)
+	}
+	r.Line("")
+
+	rows := make([][]string, 0, len(doc.Items)+1)
+	for _, it := range doc.Items {
+		rows = append(rows, []string{it.Label, it.Amount})
+	}
+	rows = append(rows, []string{"Total", doc.Total})
+	r.Table([]string{"Item", "Amount"}, rows)
+
+	return r.Output(w)
 }
 
 // renderInvoiceJSON is the document's machine-readable form: the same fields the template renders,

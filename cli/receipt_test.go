@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -359,5 +360,61 @@ func TestReceiptDefaultsToJSONWhenStdoutIsNotATerminal(t *testing.T) {
 	}
 	if parsed.Title == "" {
 		t.Errorf("parsed = %+v, want a title", parsed)
+	}
+}
+
+// The PDF form is a real PDF, not stdlib-renderable text or HTML, so it is the one document format
+// that must be written to a file rather than a terminal.
+func TestRenderInvoicePDFStartsWithThePDFSignature(t *testing.T) {
+	doc := buildInvoice(cadTx("abc123", 160000), model.Entry{Payee: "J. Smith",
+		Postings: []model.Posting{{Account: "Income:Rent:123 Main", Amount: model.Amount{Units: -160000, Scale: 2, Commodity: "CAD"}}}},
+		map[string]map[string]string{"Assets:Bank:Chequing": {"name": "Northwind Studio"}}, "invoice")
+
+	var buf bytes.Buffer
+	if err := renderInvoicePDF(&buf, doc); err != nil {
+		t.Fatalf("renderInvoicePDF: %v", err)
+	}
+	if !bytes.HasPrefix(buf.Bytes(), []byte("%PDF-")) {
+		t.Errorf("renderInvoicePDF did not emit a PDF: %q", buf.Bytes()[:20])
+	}
+}
+
+// PDF is binary, so it cannot go to a terminal the way text, HTML, and JSON can; -format pdf without
+// -out must be refused with a clear error rather than dumping binary at stdout.
+func TestReceiptRequiresOutWhenFormatIsPDF(t *testing.T) {
+	bookHere(t)
+	seedTx(t, "tx1")
+	if err := categorize([]string{"tx1", "-category", "Income:Rent"}); err != nil {
+		t.Fatalf("categorize: %v", err)
+	}
+
+	err := receiptCmd([]string{"-tx", "tx1", "-format", "pdf"})
+	if err == nil {
+		t.Fatal("receiptCmd should refuse -format pdf without -out")
+	}
+	if !strings.Contains(err.Error(), "-out") {
+		t.Errorf("error = %q, want it to mention -out", err.Error())
+	}
+}
+
+// With -out set, -format pdf writes a real PDF file.
+func TestReceiptWritesAPDFFileWhenFormatIsPDFWithOut(t *testing.T) {
+	bookHere(t)
+	seedTx(t, "tx1")
+	if err := categorize([]string{"tx1", "-category", "Income:Rent"}); err != nil {
+		t.Fatalf("categorize: %v", err)
+	}
+
+	dir := t.TempDir()
+	out := dir + "/invoice.pdf"
+	if err := receiptCmd([]string{"-tx", "tx1", "-format", "pdf", "-out", out}); err != nil {
+		t.Fatalf("receiptCmd: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !bytes.HasPrefix(data, []byte("%PDF-")) {
+		t.Errorf("written file is not a PDF: %q", data[:20])
 	}
 }

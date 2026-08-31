@@ -207,7 +207,7 @@ var usageSections = []usageSection{
 		{"balance set", "<account> <amount> [-as-of <YYYY-MM-DD>] [-actor <name>]"},
 		{"balance rm", "<account> [-actor <name>]"},
 		{"reconcile", ""},
-		{"receipt", "-tx <fingerprint> [-as invoice|receipt] [-format text|html|json] [-out <file>]"},
+		{"receipt", "-tx <fingerprint> [-as invoice|receipt] [-format text|html|json|pdf] [-out <file>]"},
 		{"report", "[-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
 		{"report income", "[-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
 		{"report balance", "[-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]"},
@@ -745,7 +745,7 @@ var reference = []docGroup{
       current check can be bisected to the specific assertion (the specific import) that first
       introduced it.
 `},
-		{[]string{"receipt"}, `  receipt -tx <fingerprint> [-as invoice|receipt] [-format text|html|json] [-out <file>]
+		{[]string{"receipt"}, `  receipt -tx <fingerprint> [-as invoice|receipt] [-format text|html|json|pdf] [-out <file>]
       Render one transaction as a printable document: the account's letterhead, the payee as the
       bill-to, the postings as line items. It bills in the currency that was billed, so a USD
       contract paid in CAD reads as the USD owed. -tx takes a bank line's fingerprint or a raised
@@ -758,6 +758,7 @@ var reference = []docGroup{
       whose accounts end in the same segment, a rent and its tax on one unit, stay told apart.
       -format defaults to text at a terminal and json off one, the same structured fields a
       script or an agent filing the document elsewhere would otherwise have to parse from text.
+      pdf is binary, so it always needs -out <file>: there is no printing a PDF to a terminal.
 `},
 		{[]string{"report"}, `  report [-basis cash|accrual] [-format text|html|json] [-account <text>] [-from <D>] [-to <D>] [-out <file>]
       Fold the books into the company's full picture: an income statement over the period and a
