@@ -330,7 +330,7 @@ func renderInvoicePDF(w io.Writer, doc invoiceDoc) error {
 		rows = append(rows, []string{it.Label, it.Amount})
 	}
 	rows = append(rows, []string{"Total", doc.Total})
-	r.Table([]string{"Item", "Amount"}, rows)
+	r.Table([]string{"Item", "Amount"}, rows, 3, 1)
 
 	return r.Output(w)
 }

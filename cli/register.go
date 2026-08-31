@@ -247,9 +247,15 @@ func renderRegisterPDF(w io.Writer, rows []registerRow, balanced bool) error {
 	r := newPdfReport()
 	r.Title("REGISTER")
 
+	// Weights are roughly each column's typical rendered width in mm at the table's font size --
+	// a fixed-format date and a fingerprint hash barely vary, an account path or a "statement:file"
+	// door reliably run long, so they get a bigger share of the printable width up front rather
+	// than relying on fitCell to truncate them on every row.
 	headers := []string{"Date", "Fingerprint", "Payee", "Amount", "Account", "Door"}
+	weights := []float64{19, 32, 24, 22, 40, 39}
 	if balanced {
 		headers = []string{"Date", "Fingerprint", "Payee", "Amount", "Balance", "Account", "Door"}
+		weights = []float64{19, 32, 24, 22, 22, 40, 39}
 	}
 	body := make([][]string, 0, len(rows))
 	for _, row := range rows {
@@ -263,7 +269,7 @@ func renderRegisterPDF(w io.Writer, rows []registerRow, balanced bool) error {
 			row.Date.Format("2006-01-02"), row.ID, row.Payee, row.Amount.String(), row.Account, row.Door,
 		})
 	}
-	r.Table(headers, body)
+	r.Table(headers, body, weights...)
 	r.Line(fmt.Sprintf("%d lines", len(rows)))
 	return r.Output(w)
 }
