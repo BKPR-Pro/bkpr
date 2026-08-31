@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"os"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/BKPR-Pro/bkpr/lib/model"
@@ -304,5 +307,66 @@ func TestTwinGroupsLeaveAFarApartRecurrenceAlone(t *testing.T) {
 
 	if groups := twinGroups([]model.Transaction{tx1, tx2}, []model.Entry{e1, e2}, doors, nil); len(groups) != 0 {
 		t.Errorf("got %d groups, want none: 19 days apart is a recurrence, not a repost", len(groups))
+	}
+}
+
+// The PDF form of the register is a real PDF, carrying the same rows the text form's tabwriter
+// prints.
+func TestRenderRegisterPDFStartsWithThePDFSignature(t *testing.T) {
+	tx1, e1 := regLine("aaa", 1, "Assets:Bank:Chequing", cad2(-6240), "Shell", post("Expenses:Fuel", cad2(6240)))
+	doors := map[string]string{"aaa": "connector:acme"}
+	rows, err := buildRegister([]model.Transaction{tx1}, []model.Entry{e1}, doors, nil)
+	if err != nil {
+		t.Fatalf("buildRegister: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := renderRegisterPDF(&buf, rows, false); err != nil {
+		t.Fatalf("renderRegisterPDF: %v", err)
+	}
+	if !bytes.HasPrefix(buf.Bytes(), []byte("%PDF-")) {
+		t.Errorf("renderRegisterPDF did not emit a PDF: %q", buf.Bytes()[:20])
+	}
+}
+
+// PDF is binary, so -format pdf without -out is refused with a clear error, exactly as receipt
+// refuses it.
+func TestRegisterRequiresOutWhenFormatIsPDF(t *testing.T) {
+	bookHere(t)
+	seedTx(t, "tx1")
+
+	err := registerCmd([]string{"-format", "pdf"})
+	if err == nil {
+		t.Fatal("registerCmd should refuse -format pdf without -out")
+	}
+	if !strings.Contains(err.Error(), "-out") {
+		t.Errorf("error = %q, want it to mention -out", err.Error())
+	}
+}
+
+// With -out set, -format pdf writes a real PDF file.
+func TestRegisterWritesAPDFFileWhenFormatIsPDFWithOut(t *testing.T) {
+	bookHere(t)
+	seedTx(t, "tx1")
+
+	dir := t.TempDir()
+	out := dir + "/register.pdf"
+	if err := registerCmd([]string{"-format", "pdf", "-out", out}); err != nil {
+		t.Fatalf("registerCmd: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !bytes.HasPrefix(data, []byte("%PDF-")) {
+		t.Errorf("written file is not a PDF: %q", data[:20])
+	}
+}
+
+// An unknown -format is refused, the same way every other format flag in this tool is.
+func TestRegisterRejectsAnUnknownFormat(t *testing.T) {
+	bookHere(t)
+	if err := registerCmd([]string{"-format", "csv"}); err == nil {
+		t.Error("registerCmd should refuse an unknown -format")
 	}
 }
