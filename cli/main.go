@@ -203,7 +203,7 @@ var usageSections = []usageSection{
 		{"policy list", ""},
 		{"accounts set", "<account> -meta <k=v> ... [-actor <name>]"},
 		{"accounts list", "[-sort amount [-desc]]"},
-		{"accounts due", "[-format table|json]"},
+		{"accounts due", "[-format table|json|pdf] [-out <file>]"},
 		{"balance set", "<account> <amount> [-as-of <YYYY-MM-DD>] [-actor <name>]"},
 		{"balance rm", "<account> [-actor <name>]"},
 		{"reconcile", ""},
@@ -708,7 +708,7 @@ var reference = []docGroup{
       account is yours once a statement imports against it or a connector posts to it. Listed by name
       by default; -sort amount orders by balance instead (-desc for largest first). An account holding
       more than one commodity sorts by the sum of its balances.
-  accounts due [-format table|json]
+  accounts due [-format table|json|pdf] [-out <file>]
       Every Liabilities: account family with a nonzero net balance -- credit cards, lines of credit --
       alongside the due date and minimum payment recorded on it (accounts set <account> -meta
       due=<YYYY-MM-DD> minimum=<amount>). A family is the bare account plus every purpose-split
@@ -716,7 +716,7 @@ var reference = []docGroup{
       parent, so a split that leaves one bucket looking positive does not hide what the card overall
       owes. A family owing money with neither key set still appears, with blank columns, as a nudge
       to fill them in. Sorted soonest-due first; a family with no due date sorts last. -format
-      defaults to table at a terminal and json off one.
+      defaults to table at a terminal and json off one; pdf is binary and always needs -out <file>.
 `},
 		{[]string{"balance"}, `  balance rm <account> [-actor <name>]
       Stop reconciling an account: it is finished, so leave it out of the report. Nothing is
@@ -2748,12 +2748,16 @@ func accountList(args []string) error {
 // accounts need a payment soon and how much" without eyeballing balances and the bank site by hand.
 func accountDue(args []string) error {
 	fs := flag.NewFlagSet("accounts due", flag.ExitOnError)
-	format := fs.String("format", defaultFormat(os.Stdout, "table", "json"), "table or json (default: table at a terminal, json off one)")
+	format := fs.String("format", defaultFormat(os.Stdout, "table", "json"), "table, json, or pdf (default: table at a terminal, json off one)")
+	out := fs.String("out", "", "write to this file instead of stdout (required for -format pdf)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *format != "table" && *format != "json" {
-		return fmt.Errorf("accounts due -format takes table or json")
+	if *format != "table" && *format != "json" && *format != "pdf" {
+		return fmt.Errorf("accounts due -format takes table, json, or pdf")
+	}
+	if *format == "pdf" && *out == "" {
+		return fmt.Errorf("-format pdf is binary and needs -out <file>: where should it be written?")
 	}
 
 	log, closeLog, err := openReader()
@@ -2767,8 +2771,11 @@ func accountDue(args []string) error {
 		return err
 	}
 
-	if *format == "json" {
+	switch *format {
+	case "json":
 		return renderDueJSON(rows)
+	case "pdf":
+		return writeOut(*out, func(w io.Writer) error { return renderDuePDF(w, rows) })
 	}
 	return printDue(rows)
 }
@@ -2822,6 +2829,31 @@ func renderDueJSON(rows []books.DueAccount) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
+}
+
+// renderDuePDF prints the same table printDue does, as a real PDF: one row per owing liability
+// account, a dash standing in for a due date or minimum nobody has set yet.
+func renderDuePDF(w io.Writer, rows []books.DueAccount) error {
+	r := newPdfReport()
+	r.Title("ACCOUNTS DUE")
+	if len(rows) == 0 {
+		r.Line("no liability accounts owing")
+		return r.Output(w)
+	}
+
+	body := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		due, min := row.Due, row.Minimum
+		if due == "" {
+			due = "-"
+		}
+		if min == "" {
+			min = "-"
+		}
+		body = append(body, []string{row.Account, balanceCell(row.Balance), due, min})
+	}
+	r.Table([]string{"Account", "Balance", "Due", "Minimum"}, body)
+	return r.Output(w)
 }
 
 // balanceCell renders an account's holdings, one amount per commodity (a USD fee beside CAD rent do
