@@ -32,6 +32,12 @@ func signedInSimplii(body string) string {
 // top page has no signed-in landmark until the iframe posts back after a filled submit, at which point
 // the account picker + transactions appear -- so the test passes only if the cross-frame fill and
 // submit actually happened, then the reader runs.
+//
+// Success also sets a real cookie (via fetch from the iframe), not just the postMessage/DOM-injection
+// that reveals the account view in this same page load: a live Simplii session is cookie-backed and
+// survives navigation, and beforeNavigate does navigate (to force a known starting point before the
+// account path runs) -- a fixture whose "signed in" is only ever in-memory JS state would make that
+// navigation look like it signed the browser back out, which isn't how the real site behaves.
 func TestSimpliiSignsInAcrossFramesThenReads(t *testing.T) {
 	requireBrowserTests(t)
 	const cardHTML = `<!doctype html><html><body>
@@ -42,13 +48,16 @@ func TestSimpliiSignsInAcrossFramesThenReads(t *testing.T) {
 	    document.querySelector('[data-test-id="primary-button"]').addEventListener('click', function () {
 	      if (document.querySelector('[data-test-id="card-number-input"]').value &&
 	          document.querySelector('[data-test-id="password-input"]').value) {
-	        window.parent.postMessage('signed-in', '*')
+	        fetch('/mark-signed-in', { credentials: 'include' }).then(function () {
+	          window.parent.postMessage('signed-in', '*')
+	        })
 	      }
 	    })
 	  </script>
 	</body></html>`
 
-	// The signed-in view the top page reveals once the iframe reports a successful sign-in.
+	// The signed-in view: shown by the top page once the iframe reports success (via postMessage, for
+	// this same page load), and served directly on any later request that carries the session cookie.
 	const account = `<select aria-label="Select an account. This page will refresh upon selection."><option>Personal Line of Credit</option></select>
 	  <div class="tombstone"><div class="row"><div class="box-small balance"><span>Balance:</span><em>−$49,671.86</em></div></div></div>
 	  <section class="transaction-list row"><table><tbody>
@@ -68,13 +77,21 @@ func TestSimpliiSignsInAcrossFramesThenReads(t *testing.T) {
 	    })
 	  </script>
 	</body></html>`
+	signedInHTML := `<!doctype html><html><body class="ember-application"><div id="content">` + account + `</div></body></html>`
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if r.URL.Path == "/card" {
+		switch r.URL.Path {
+		case "/card":
 			_, _ = w.Write([]byte(cardHTML))
-		} else {
-			_, _ = w.Write([]byte(topHTML))
+		case "/mark-signed-in":
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "1", Path: "/"})
+		default:
+			if _, err := r.Cookie("session"); err == nil {
+				_, _ = w.Write([]byte(signedInHTML))
+			} else {
+				_, _ = w.Write([]byte(topHTML))
+			}
 		}
 	}))
 	defer srv.Close()
@@ -174,6 +191,63 @@ func TestSimpliiReadsALineOfCredit(t *testing.T) {
 	// Balance is the owing magnitude; the CLI negates it for the liability.
 	if !res.HasBalance || res.Balance.String() != "49671.86 CAD" {
 		t.Errorf("balance = %s (has=%v), want 49671.86 CAD", res.Balance, res.HasBalance)
+	}
+}
+
+// simplii-chequing and simplii-loc share one login and run back to back in the same persistent
+// profile; the site's hash router resumes whatever account page a prior run left it on instead of
+// resetting when the script re-visits the bare origin. This serves two routes -- the origin path,
+// standing in for "wherever the shared session was left" and carrying none of the chequing account's
+// own markup, and the accounts-overview path beforeNavigate forces a visit to -- and checks the
+// script still reaches the chequing statement via its account path instead of failing to find "No Fee
+// Chequing Account" on the wrong page.
+func TestSimpliiResetsToAccountsOverviewBeforeNavigatingAccountPath(t *testing.T) {
+	requireBrowserTests(t)
+
+	strandedOnLOC := signedInSimplii(`<p>Line of Credit detail page -- no chequing link here.</p>`)
+	accountsOverview := signedInSimplii(`
+	  <a href="#/accounts/chequing/1">No Fee Chequing Account</a>
+	  <div class="tombstone"><div class="row tombstone-regular">
+	    <div class="box-small"><span>Balance:</span><em>$1,000.00</em></div>
+	  </div></div>
+	  <section class="transaction-list row"><table><tbody>
+	    <tr class="transaction-row">
+	      <td class="date">Jul 10, 2026</td>
+	      <td class="transactions"><span class="transactionDescription"> TRANSFER IN  </span></td>
+	      <td class="debit"><span class="hidden-text">Not applicable</span></td>
+	      <td class="credit"><span>$1,000.00</span></td>
+	      <td class="balance"><span>$1,000.00</span></td>
+	    </tr>
+	  </tbody></table></section>`)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ebm-resources/public/simplii/online-banking/accounts/client/index.html", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(accountsOverview))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(strandedOnLOC))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	out, err := execBankScript(Bank{
+		Institution: "simplii", LoginURL: srv.URL, DefaultCurrency: "CAD",
+		Account:     "Assets:Personal:Simplii Chequing",
+		AccountPath: []string{"No Fee Chequing Account"},
+	}, nil)
+	skipIfNoBrowser(t, err)
+	if err != nil {
+		t.Fatalf("reading chequing starting from a page without its account-path link: %v", err)
+	}
+
+	res, err := parseBankOutput(out, "test-connector", "Assets:Personal:Simplii Chequing", "CAD")
+	if err != nil {
+		t.Fatalf("parsing simplii.js output %q: %v", out, err)
+	}
+	if len(res.Transactions) != 1 || res.Transactions[0].Amount.String() != "1000.00 CAD" {
+		t.Fatalf("got %+v, want the one row from the accounts-overview fixture -- beforeNavigate did not reach it", res.Transactions)
 	}
 }
 
