@@ -340,3 +340,44 @@ func TestPCFinancialReadsOnlyThePostedSection(t *testing.T) {
 			len(res.Transactions), out)
 	}
 }
+
+// Since the 2026 redesign a fresh sign-in lands on the dashboard, not the card, and the dashboard has
+// no table -- only the top nav's "Transactions" link reaches it. The fixture serves the table only at
+// /en/my/transactions, so the test passes only if the connector clicks through before reading.
+func TestPCFinancialClicksThroughToTransactionsFromTheDashboard(t *testing.T) {
+	requireBrowserTests(t)
+	dashboard := pcfSignedIn(`<authenticated-header><nav><ul>
+	  <li><a class="menu-item" href="/en/my/dashboard">Dashboard</a></li>
+	  <li><a class="menu-item" href="/en/my/transactions">Transactions</a></li>
+	</ul></nav></authenticated-header><h1>Welcome back</h1>`)
+	card := pcfSignedIn(pcfBalanceAndTable(pcfRow("DIGITALOCEAN.COM", "Sep 1, 2026", "$23.62", "positive")))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.URL.Path == "/en/my/transactions" {
+			_, _ = w.Write([]byte(card))
+			return
+		}
+		_, _ = w.Write([]byte(dashboard))
+	}))
+	defer srv.Close()
+
+	out, err := execBankScript(Bank{
+		Institution: "pcfinancial", LoginURL: srv.URL + "/en/my/dashboard", DefaultCurrency: "CAD",
+		Account: "Liabilities:Personal:PC Mastercard",
+	}, nil)
+	skipIfNoBrowser(t, err)
+	if err != nil {
+		t.Fatalf("reading the card from a dashboard landing: %v", err)
+	}
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:Personal:PC Mastercard", "CAD")
+	if err != nil {
+		t.Fatalf("parsing pcfinancial.js output %q: %v", out, err)
+	}
+	if len(res.Transactions) != 1 || res.Transactions[0].Amount.String() != "-23.62 CAD" {
+		t.Fatalf("transactions = %+v, want the one card row: %q", res.Transactions, out)
+	}
+	if !res.HasBalance || res.Balance.String() != "9999.99 CAD" {
+		t.Errorf("balance = %s (has=%v), want 9999.99 CAD", res.Balance, res.HasBalance)
+	}
+}
