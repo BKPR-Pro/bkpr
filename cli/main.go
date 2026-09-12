@@ -442,10 +442,12 @@ var reference = []docGroup{
       expired it opens a browser for you to sign in again (your password and 2FA are entered
       there and never stored -- only the resulting session is kept). With no terminal present
       it does not open a browser, it fails with a message to sign in from one. -relogin signs
-      in fresh, ignoring any saved session. By default it reads the account's short recent
-      window; -history <days> reads that many days back (a relative window, good for a routine
-      pull), and -from/-to read an explicit range for backfilling a known period (-to defaults
-      to today, and -from overrides -history). Dates are written as 2026-02-01 or "Feb 1, 2026".
+      in fresh, ignoring any saved session. By default it reads from a few days before the
+      account's last recorded bank balance to today, so the gap between two runs is always
+      covered (a first import reads the site's short recent window); it prints the window it
+      reads. -history <days> reads that many days back (a relative window), and -from/-to read
+      an explicit range for backfilling a known period (-to defaults to today, and -from
+      overrides -history). Dates are written as 2026-02-01 or "Feb 1, 2026".
       Imports dedupe by fingerprint, so a wider window never duplicates. The account's balance is
       read at the same time and recorded, so reconcile can check the books against the bank. A
       transfer between two of your accounts, seen in both, is paired automatically and booked
@@ -1111,6 +1113,9 @@ func importConnector(log *eventlog.Log, c books.Connector, o fetchOpts) error {
 	if err != nil {
 		return err
 	}
+	var note string
+	o, note = importWindow(log, c, o, time.Now())
+	fmt.Println(note)
 	label := "connector:" + c.Name
 	var got fetchResult
 	err = importFrom(log, label, func() ([]model.Transaction, error) {

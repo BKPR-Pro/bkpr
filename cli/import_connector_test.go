@@ -106,3 +106,45 @@ func TestFetcherForUnknownKind(t *testing.T) {
 		t.Fatal("an unknown connector kind should have no importer")
 	}
 }
+
+// With no -history/-from, the default window starts at the account's last bank-balance check less a
+// few days' overlap, so lines dated between two runs are never skipped. An explicit window, or a
+// first-ever import, is left alone.
+func TestImportWindowReachesBackToTheLastBalanceCheck(t *testing.T) {
+	log := eventlog.New(eventlog.NewMemory())
+	c := books.Connector{Name: "chq", Account: "Assets:Chequing"}
+	now := time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC)
+
+	// First-ever import: nothing recorded, the default stays.
+	o, note := importWindow(log, c, fetchOpts{}, now)
+	if o.from != "" || o.to != "" {
+		t.Fatalf("a first import should keep the default window, got from=%q to=%q", o.from, o.to)
+	}
+	if note != "reading the site's default window" {
+		t.Errorf("note = %q", note)
+	}
+
+	books.AssertBalance(log, "t", c.Account, time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC), model.Amount{Units: 1, Scale: 2, Commodity: "CAD"})
+	o, note = importWindow(log, c, fetchOpts{}, now)
+	if o.from != "Aug 17, 2026" || o.to != "Sep 12, 2026" {
+		t.Errorf("window = %q..%q, want Aug 17, 2026..Sep 12, 2026", o.from, o.to)
+	}
+	if note != "reading from 2026-08-17 to 2026-09-12 (last bank balance 2026-08-20)" {
+		t.Errorf("note = %q", note)
+	}
+
+	// A recent check still sets the window: the site's short default is not trusted to span it.
+	books.AssertBalance(log, "t", c.Account, now.AddDate(0, 0, -5), model.Amount{Units: 1, Scale: 2, Commodity: "CAD"})
+	if o, _ = importWindow(log, c, fetchOpts{}, now); o.from != "Sep 4, 2026" {
+		t.Errorf("a check 5 days ago should read from 8 days ago; got from=%q", o.from)
+	}
+
+	// Explicit flags are untouched.
+	books.AssertBalance(log, "t", c.Account, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), model.Amount{Units: 1, Scale: 2, Commodity: "CAD"})
+	if o, _ = importWindow(log, c, fetchOpts{history: 10}, now); o.from != "" || o.history != 10 {
+		t.Errorf("-history should be kept as is, got %+v", o)
+	}
+	if o, _ = importWindow(log, c, fetchOpts{from: "Feb 1, 2026", to: "Mar 1, 2026"}, now); o.from != "Feb 1, 2026" || o.to != "Mar 1, 2026" {
+		t.Errorf("-from/-to should be kept as is, got %+v", o)
+	}
+}

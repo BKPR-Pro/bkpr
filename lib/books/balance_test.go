@@ -157,3 +157,25 @@ func TestReconcileCountsATransferBookedFromTheOtherSide(t *testing.T) {
 		t.Errorf("savings books = %s, want 500.00 CAD from the transfer posting", r.Books)
 	}
 }
+
+// LastBalanceAsserted is the newest date the bank was asked about an account: what an import's default
+// window reaches back to. An account never measured, or retired since, reports nothing.
+func TestLastBalanceAssertedIsTheNewestDate(t *testing.T) {
+	log := newLog()
+	acct := "Assets:Chequing"
+	if _, ok, _ := books.LastBalanceAsserted(log, acct); ok {
+		t.Fatal("an unmeasured account should have no last balance")
+	}
+	d1 := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	d2 := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	books.AssertBalance(log, "t", acct, d1, cad(100))
+	books.AssertBalance(log, "t", acct, d2, cad(50)) // recorded later, dated earlier
+	got, ok, err := books.LastBalanceAsserted(log, acct)
+	if err != nil || !ok || !got.Equal(d1) {
+		t.Fatalf("last = %v ok=%v err=%v, want %v", got, ok, err, d1)
+	}
+	books.RetireBalance(log, "t", acct)
+	if _, ok, _ := books.LastBalanceAsserted(log, acct); ok {
+		t.Fatal("a retired account should have no last balance")
+	}
+}

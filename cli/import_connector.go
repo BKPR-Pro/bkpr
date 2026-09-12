@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/BKPR-Pro/bkpr/lib/adapters/source"
 	"github.com/BKPR-Pro/bkpr/lib/books"
+	"github.com/BKPR-Pro/bkpr/lib/eventlog"
 	"github.com/BKPR-Pro/bkpr/lib/model"
 )
 
@@ -42,6 +44,36 @@ func historyDays(c books.Connector, o fetchOpts) int {
 		return o.history
 	}
 	return c.HistoryDays
+}
+
+// windowOverlapDays is how far past the last bank check a default window reaches, so a line the bank
+// posted late is still seen.
+const (
+	windowOverlapDays  = 3
+	windowNoteLayout   = "2006-01-02"
+	windowFilterLayout = "Jan 2, 2006"
+)
+
+// importWindow settles the window a default import reads. An explicit -history or -from is kept as
+// given. Otherwise the window runs from the account's last recorded bank balance, less an overlap, to
+// today: the site's own short window is not known here and has proven shorter than the gap between two
+// runs, and reconcile cannot catch skipped lines that net to zero. A first-ever import has no last
+// check and keeps the site's default. The note is what the import prints so a person can see coverage.
+func importWindow(log *eventlog.Log, c books.Connector, o fetchOpts, now time.Time) (fetchOpts, string) {
+	if o.from != "" {
+		return o, fmt.Sprintf("reading from %s to %s", o.from, o.to)
+	}
+	if days := historyDays(c, o); days > 0 {
+		return o, fmt.Sprintf("reading the last %d days", days)
+	}
+	last, ok, err := books.LastBalanceAsserted(log, c.Account)
+	if err != nil || !ok {
+		return o, "reading the site's default window"
+	}
+	start := last.AddDate(0, 0, -windowOverlapDays)
+	o.from, o.to = start.Format(windowFilterLayout), now.Format(windowFilterLayout)
+	return o, fmt.Sprintf("reading from %s to %s (last bank balance %s)",
+		start.Format(windowNoteLayout), now.Format(windowNoteLayout), last.Format(windowNoteLayout))
 }
 
 // reconcileBalance turns a bank-shown balance into the books' sign. A bank shows every balance

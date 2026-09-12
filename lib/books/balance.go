@@ -102,6 +102,21 @@ func balanceAssertions(log *eventlog.Log) (map[string][]balanceAssertion, error)
 	return out, nil
 }
 
+// LastBalanceAsserted is the newest date the bank stated an account's balance: how far back an
+// import's default window must reach so no line since is skipped. False when the account has never
+// been measured, or was retired since.
+func LastBalanceAsserted(log *eventlog.Log, account string) (time.Time, bool, error) {
+	all, err := balanceAssertions(log)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	list := all[account]
+	if len(list) == 0 {
+		return time.Time{}, false, nil
+	}
+	return list[len(list)-1].Date, true, nil
+}
+
 // Reconciliation is one account's standing against the bank: what the bank last said it held, what the
 // books fold to as of that date, and the difference. Reconciled is true when they agree to the penny.
 //
