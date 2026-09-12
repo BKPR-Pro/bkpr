@@ -44,7 +44,7 @@ func TestPCFinancialSignsInAcrossTheThreatMetrixFrame(t *testing.T) {
 	</body></html>`
 
 	// The top page hosts the ThreatMetrix login iframe; a successful sign-in reveals the authenticated
-	// app shell (<app-auth-header>), the landmark signIn waits for.
+	// app shell (<authenticated-header>, the 2026 redesign's element), the landmark signIn waits for.
 	const topHTML = `<!doctype html><html><body>
 	  <iframe id="tmx_tags_iframe" src="/login" style="width:400px;height:300px;border:0"></iframe>
 	  <div id="app"></div>
@@ -52,7 +52,7 @@ func TestPCFinancialSignsInAcrossTheThreatMetrixFrame(t *testing.T) {
 	    window.addEventListener('message', function (e) {
 	      if (e.data === 'signed-in') {
 	        var f = document.getElementById('tmx_tags_iframe'); if (f) f.remove()
-	        document.getElementById('app').innerHTML = '<app-auth-header><header><nav>Accounts</nav></header></app-auth-header>'
+	        document.getElementById('app').innerHTML = '<authenticated-header><header><nav>Accounts</nav></header></authenticated-header>'
 	      }
 	    })
 	  </script>
