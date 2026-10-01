@@ -379,6 +379,70 @@ func TestRenderInvoicePDFStartsWithThePDFSignature(t *testing.T) {
 	}
 }
 
+// The PDF follows the HTML document of record: a right-aligned bold title and letterhead, the
+// reference and date on the left, "Bill To:" on its own line above the party, items as label left and
+// amount right with no header row, a bold Total, and no page footer on its single page.
+func TestRenderInvoicePDFFollowsTheHTMLLayout(t *testing.T) {
+	doc := invoiceDoc{
+		Title: "INVOICE", Kind: "Invoice", Reference: "2093", Date: "August 31, 2026", Paid: true,
+		Biller: party{Name: "Northwind Studio", Address: []string{"123 Main St", "\u200e", "HST 1234"}},
+		BillTo: party{Name: "DNSimple", Address: []string{"Suite 5"}},
+		Items:  []invoiceItem{{Label: "Consulting", Amount: "1600.00 CAD"}},
+		Total:  "1600.00 CAD",
+	}
+	var buf bytes.Buffer
+	if err := renderInvoicePDF(&buf, doc); err != nil {
+		t.Fatalf("renderInvoicePDF: %v", err)
+	}
+	content, shown := pdfContent(t, buf.Bytes())
+
+	for _, bad := range []string{"\xe2\x80\x8e", "Page 1 of", "(Item)", "(Amount)", "Bill To: DNSimple"} {
+		if strings.Contains(content, bad) {
+			t.Errorf("content should not carry %q", bad)
+		}
+	}
+
+	at := map[string]pdfShown{}
+	for _, s := range shown {
+		if _, seen := at[s.text]; !seen { // the first drawing: "1600.00 CAD" is an item before it is the total
+			at[s.text] = s
+		}
+	}
+	for _, want := range []string{"INVOICE", "Northwind Studio", "123 Main St", "HST 1234", "Invoice No: 2093",
+		"Date: August 31, 2026", "PAID", "Bill To:", "DNSimple", "Suite 5", "Consulting", "1600.00 CAD", "Total"} {
+		if _, ok := at[want]; !ok {
+			t.Errorf("the PDF does not draw %q; it draws %+v", want, shown)
+		}
+	}
+
+	const midPage = 595.28 / 2 // A4 width in points
+	for _, right := range []string{"INVOICE", "Northwind Studio", "123 Main St", "HST 1234", "PAID", "1600.00 CAD"} {
+		if at[right].x < midPage {
+			t.Errorf("%q is drawn at x=%.0f, want it right-aligned", right, at[right].x)
+		}
+	}
+	for _, left := range []string{"Invoice No: 2093", "Date: August 31, 2026", "Bill To:", "DNSimple", "Consulting", "Total"} {
+		if at[left].x > 72 {
+			t.Errorf("%q is drawn at x=%.0f, want it at the left margin", left, at[left].x)
+		}
+	}
+
+	regular := at["Consulting"].font
+	for _, bold := range []string{"INVOICE", "Northwind Studio", "PAID", "Bill To:", "Total"} {
+		if at[bold].font == regular {
+			t.Errorf("%q is drawn in the regular font, want bold", bold)
+		}
+	}
+	for _, plain := range []string{"123 Main St", "Date: August 31, 2026", "DNSimple", "1600.00 CAD"} {
+		if at[plain].font != regular {
+			t.Errorf("%q is drawn bold, want the regular font", plain)
+		}
+	}
+	if last := shown[len(shown)-1]; last.text != "1600.00 CAD" || last.font == regular {
+		t.Errorf("the last thing drawn is %+v, want the bold total", last)
+	}
+}
+
 // PDF is binary, so it cannot go to a terminal the way text, HTML, and JSON can; -format pdf without
 // -out must be refused with a clear error rather than dumping binary at stdout.
 func TestReceiptRequiresOutWhenFormatIsPDF(t *testing.T) {

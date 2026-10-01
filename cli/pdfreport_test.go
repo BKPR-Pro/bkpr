@@ -2,6 +2,11 @@ package main
 
 import (
 	"bytes"
+	"compress/zlib"
+	"io"
+	"regexp"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -130,5 +135,76 @@ func TestPdfReportTitleLineAndTableCombine(t *testing.T) {
 	}
 	if buf.Len() < 512 {
 		t.Errorf("expected a substantial PDF body, got %d bytes", buf.Len())
+	}
+}
+
+// pdfShown is one string a PDF draws: its text, the font it was drawn in, and its x position in points.
+type pdfShown struct {
+	text, font string
+	x          float64
+}
+
+var pdfOp = regexp.MustCompile(`/(F\w+) [\d.]+ Tf|([\d.]+) [\d.]+ Td \(((?:\\.|[^\\)])*)\)Tj`)
+
+// pdfContent inflates every stream in a PDF and returns the raw content plus each drawn string in
+// order, so a test reads what the page shows instead of trusting the byte count.
+func pdfContent(t *testing.T, data []byte) (string, []pdfShown) {
+	t.Helper()
+	var content bytes.Buffer
+	for _, part := range bytes.Split(data, []byte("stream\n"))[1:] {
+		zr, err := zlib.NewReader(bytes.NewReader(part))
+		if err != nil {
+			continue
+		}
+		io.Copy(&content, zr) // the trailing "endstream" fails the checksum read; the content is already out
+	}
+	var shown []pdfShown
+	font := ""
+	for _, m := range pdfOp.FindAllStringSubmatch(content.String(), -1) {
+		if m[1] != "" {
+			font = m[1]
+			continue
+		}
+		x, _ := strconv.ParseFloat(m[2], 64)
+		shown = append(shown, pdfShown{text: m[3], font: font, x: x})
+	}
+	return content.String(), shown
+}
+
+// The core fonts are WinAnsi, not UTF-8: an invisible mark (a U+200E spacer line in an address) must
+// draw nothing, a WinAnsi character must draw as its one byte, and neither may leak raw UTF-8 bytes.
+func TestPdfReportEncodesTextAsWinAnsiAndDropsInvisibleRunes(t *testing.T) {
+	r := newPdfReport()
+	r.Line("‎")
+	r.Line("Café ‎€5")
+	r.Table([]string{"Né"}, [][]string{{"Zoë"}})
+
+	var buf bytes.Buffer
+	if err := r.Output(&buf); err != nil {
+		t.Fatalf("Output: %v", err)
+	}
+	content, _ := pdfContent(t, buf.Bytes())
+	for _, raw := range []string{"\xe2\x80\x8e", "\xc3\xa9", "\xc3\xab", "\xe2\x82\xac"} {
+		if strings.Contains(content, raw) {
+			t.Errorf("content carries raw UTF-8 bytes %q", raw)
+		}
+	}
+	for _, want := range []string{"(Caf\xe9 \x805)Tj", "(N\xe9)Tj", "(Zo\xeb)Tj"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("content lacks %q", want)
+		}
+	}
+}
+
+// A report still numbers its pages, one page or many: only a document that asks to go without does.
+func TestPdfReportNumbersItsPages(t *testing.T) {
+	r := newPdfReport()
+	r.Line("one line")
+	var buf bytes.Buffer
+	if err := r.Output(&buf); err != nil {
+		t.Fatalf("Output: %v", err)
+	}
+	if content, _ := pdfContent(t, buf.Bytes()); !strings.Contains(content, "(Page 1 of 1)Tj") {
+		t.Errorf("a report lost its page footer:\n%s", content)
 	}
 }

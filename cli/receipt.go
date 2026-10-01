@@ -301,37 +301,41 @@ func matchesTx(id, want string) bool {
 	return id == want || id == "invoice:"+want || id == "bill:"+want
 }
 
-// renderInvoicePDF lays out the same document the text and HTML renderers show -- letterhead,
-// reference and date, PAID, bill-to, line items, total -- as a real PDF, for a person who wants a
-// file to attach or print without opening a browser.
+// renderInvoicePDF lays the document out the way the HTML one reads -- the title and letterhead
+// right-aligned, the reference and date, PAID beside the bill-to, line items with the amount at the
+// right, a rule, the total -- as a real PDF, for a person who wants a file to attach or print without
+// opening a browser.
 func renderInvoicePDF(w io.Writer, doc invoiceDoc) error {
 	r := newPdfReport()
-	r.Title(doc.Title)
-	r.Line(doc.Biller.Name)
+	r.bare = true
+	r.Row("", doc.Title, "B")
+	r.Line("")
+	r.Row("", doc.Biller.Name, "B")
 	for _, line := range doc.Biller.Address {
-		r.Line(line)
+		r.Row("", line, "")
 	}
+	r.Line("")
 	if doc.Reference != "" {
 		r.Line(fmt.Sprintf("%s No: %s", doc.Kind, doc.Reference))
 	}
 	r.Line(fmt.Sprintf("Date: %s", doc.Date))
-	if doc.Paid {
-		r.Line("PAID")
-	}
 	r.Line("")
-	r.Line("Bill To: " + doc.BillTo.Name)
+	paid := ""
+	if doc.Paid {
+		paid = "PAID"
+	}
+	r.Row("Bill To:", paid, "B")
+	r.Line(doc.BillTo.Name)
 	for _, line := range doc.BillTo.Address {
 		r.Line(line)
 	}
 	r.Line("")
-
-	rows := make([][]string, 0, len(doc.Items)+1)
+	r.Line("")
 	for _, it := range doc.Items {
-		rows = append(rows, []string{it.Label, it.Amount})
+		r.Row(it.Label, it.Amount, "")
 	}
-	rows = append(rows, []string{"Total", doc.Total})
-	r.Table([]string{"Item", "Amount"}, rows, 3, 1)
-
+	r.Rule()
+	r.Row("Total", doc.Total, "B")
 	return r.Output(w)
 }
 
