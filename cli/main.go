@@ -1109,13 +1109,15 @@ func importConnector(log *eventlog.Log, c books.Connector, o fetchOpts) error {
 	defer sp.finish()
 	o.progress = sp.set
 
+	// Settle the window before the fetch is built: the fetch copies o, so a window set after it was
+	// built would be printed but never sent to the bank.
+	var note string
+	o, note = importWindow(log, c, o, time.Now())
+	fmt.Println(note)
 	fetch, err := fetcherFor(c.Kind, o)
 	if err != nil {
 		return err
 	}
-	var note string
-	o, note = importWindow(log, c, o, time.Now())
-	fmt.Println(note)
 	label := "connector:" + c.Name
 	var got fetchResult
 	err = importFrom(log, label, func() ([]model.Transaction, error) {

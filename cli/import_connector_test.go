@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BKPR-Pro/bkpr/lib/adapters/source"
 	"github.com/BKPR-Pro/bkpr/lib/books"
 	"github.com/BKPR-Pro/bkpr/lib/eventlog"
 	"github.com/BKPR-Pro/bkpr/lib/model"
@@ -146,5 +147,26 @@ func TestImportWindowReachesBackToTheLastBalanceCheck(t *testing.T) {
 	}
 	if o, _ = importWindow(log, c, fetchOpts{from: "Feb 1, 2026", to: "Mar 1, 2026"}, now); o.from != "Feb 1, 2026" || o.to != "Mar 1, 2026" {
 		t.Errorf("-from/-to should be kept as is, got %+v", o)
+	}
+}
+
+// The default window must reach the bank script, not only the printed note. importConnector once built
+// the fetch before settling the window, so the script read the site's short default while the note
+// claimed the window from the last balance check; a month's lines went missing twice that way.
+func TestImportConnectorSendsTheDefaultWindowToTheBank(t *testing.T) {
+	log := eventlog.New(eventlog.NewMemory())
+	c := books.Connector{Name: "chq", Kind: "rbc", Account: "Assets:Chequing"}
+	books.AssertBalance(log, "t", c.Account, time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC), model.Amount{Units: 1, Scale: 2, Commodity: "CAD"})
+
+	var sent source.Bank
+	orig := readBank
+	readBank = func(b source.Bank) (source.BankResult, error) { sent = b; return source.BankResult{}, nil }
+	defer func() { readBank = orig }()
+
+	if err := importConnector(log, c, fetchOpts{}); err != nil {
+		t.Fatalf("importConnector: %v", err)
+	}
+	if sent.HistoryFrom != "Sep 9, 2026" || sent.HistoryTo == "" {
+		t.Errorf("the bank got from=%q to=%q; want from=\"Sep 9, 2026\" and a to date", sent.HistoryFrom, sent.HistoryTo)
 	}
 }

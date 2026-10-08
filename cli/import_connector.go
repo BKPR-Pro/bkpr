@@ -98,7 +98,7 @@ func fetcherFor(kind string, o fetchOpts) (connectorFetch, error) {
 	switch {
 	case source.SupportsBank(kind):
 		return func(c books.Connector) (fetchResult, error) {
-			res, err := source.ReadBank(source.Bank{
+			res, err := readBank(source.Bank{
 				Name:            c.Name,
 				Institution:     c.Kind,
 				Account:         c.Account,
@@ -127,3 +127,6 @@ func fetcherFor(kind string, o fetchOpts) (connectorFetch, error) {
 		return nil, fmt.Errorf("import: no importer for connector kind %q yet", kind)
 	}
 }
+
+// readBank is the bank reader a fetch calls; a test swaps it to see what the fetch sends.
+var readBank = source.ReadBank
