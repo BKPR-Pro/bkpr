@@ -3,6 +3,7 @@ package source
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -47,7 +48,8 @@ func TestPCFinancialSignsInAcrossTheThreatMetrixFrame(t *testing.T) {
 	</body></html>`
 
 	// The top page hosts the ThreatMetrix login iframe; a successful sign-in reveals the authenticated
-	// app shell (<authenticated-header>, the 2026 redesign's element), the landmark signIn waits for.
+	// app shell (<authenticated-header>, the 2026 redesign's element, the landmark signIn waits for) and
+	// an empty card table.
 	const topHTML = `<!doctype html><html><body>
 	  <iframe id="tmx_tags_iframe" src="/login" style="width:400px;height:300px;border:0"></iframe>
 	  <div id="app"></div>
@@ -55,7 +57,8 @@ func TestPCFinancialSignsInAcrossTheThreatMetrixFrame(t *testing.T) {
 	    window.addEventListener('message', function (e) {
 	      if (e.data === 'signed-in') {
 	        var f = document.getElementById('tmx_tags_iframe'); if (f) f.remove()
-	        document.getElementById('app').innerHTML = '<authenticated-header><header><nav>Accounts</nav></header></authenticated-header>'
+	        document.getElementById('app').innerHTML = '<authenticated-header><header><nav>Accounts</nav></header></authenticated-header>' +
+	          '<sortable-table><table><tbody></tbody></table></sortable-table>'
 	      }
 	    })
 	  </script>
@@ -405,5 +408,20 @@ func TestPCFinancialSubmitsSignInPastAnOverlay(t *testing.T) {
 	}
 	if len(res.Transactions) != 1 || res.Transactions[0].Amount.String() != "-23.62 CAD" {
 		t.Fatalf("transactions = %+v, want the one card row behind the sign-in", res.Transactions)
+	}
+}
+
+// Akamai answers a browser it distrusts with an "Access Denied" page instead of the card. That page has
+// no sign-in form and no transactions table, so a reader that takes "no rows" at face value reports
+// "0 entries read" and the run looks clean. The script must fail and name the page it landed on.
+func TestPCFinancialFailsOnABlockedPage(t *testing.T) {
+	requireBrowserTests(t)
+	_, err := execBankScript(Bank{
+		Institution: "pcfinancial", LoginURL: serveFixture(t, "pcfinancial_access_denied.html"),
+		DefaultCurrency: "CAD", Account: "Liabilities:Personal:PC Mastercard",
+	}, nil)
+	skipIfNoBrowser(t, err)
+	if err == nil || !strings.Contains(err.Error(), "Access Denied") {
+		t.Fatalf("err = %v, want a failure naming the Access Denied page", err)
 	}
 }
