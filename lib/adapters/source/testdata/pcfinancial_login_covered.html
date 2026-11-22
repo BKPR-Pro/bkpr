@@ -1,0 +1,29 @@
+<!doctype html>
+<html><body>
+  <!-- The 2026 sign-in form, in the main frame (the ThreatMetrix iframe is now about:blank). -->
+  <iframe id="tmx_tags_iframe" src="about:blank" style="width:0;height:0;border:0"></iframe>
+  <form id="login">
+    <label for="username">Username</label>
+    <input id="username" data-qa="username-input" type="text">
+    <label for="password">Password</label>
+    <input id="password" data-qa="password-input" type="password">
+    <button type="submit" data-qa="login-button" class="btn btn-primary"><loader><span>Sign in</span></loader></button>
+  </form>
+  <!-- A fixed layer over the page, as the Ada chat frame or a loader sits over the live one: a click on
+       Sign in cannot land, so only a submit that does not go through the pointer gets past it. -->
+  <div id="overlay" style="position:fixed;inset:0;z-index:1000;background:transparent"></div>
+  <script>
+    document.getElementById('login').addEventListener('submit', function (e) {
+      e.preventDefault()
+      if (!document.getElementById('username').value || !document.getElementById('password').value) return
+      document.body.innerHTML =
+        '<authenticated-header><header><nav>Accounts</nav></header></authenticated-header>' +
+        '<balance-block><div class="balance-block"><p class="description">Current balance</p><p class="amount"> $9,999.99 </p></div></balance-block>' +
+        '<h2>Posted transactions</h2>' +
+        '<sortable-table amounttype="credit"><div class="table-sortable"><table><tbody class="credit">' +
+        '<tr class="clickable"><td class="description"><p class="description"><span class="description-text">DIGITALOCEAN.COM </span><span class="description-date">Sep 1, 2026</span></p></td>' +
+        '<td class="string">Purchase</td><td class="date"><span>Sep 1, 2026</span></td><td class="amount positive"> $23.62 </td></tr>' +
+        '</tbody></table></div></sortable-table>'
+    })
+  </script>
+</body></html>

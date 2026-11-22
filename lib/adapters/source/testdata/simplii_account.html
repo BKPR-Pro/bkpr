@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="earliest" content=""><title>Simplii line of credit (fixture)</title></head>
+<body>
+<!-- Mirrors Simplii's account page: the signed-in landmark, the balance tombstone, the "Past
+     Transactions (from to to)" header, the custom-search form with From/To month/day/year selects and
+     "Get Details", and the transaction list. Like the real Ember app, a search answers asynchronously
+     (well after the page went network-idle) and re-renders the header and the rows. A YYYY-MM-DD in
+     <meta name="earliest"> makes the bank clamp the From date to that day, the way a bank caps how far back a search reaches. -->
+<a data-test-id="sidebar-profile-link-header" href="#">TP</a>
+
+<div class="line-of-credits-details">
+  <div class="tombstone"><div class="row">
+    <div class="box-small balance"><span>Balance:</span><em>−$100.00</em></div>
+    <div class="box-small available-funds"><span>Available Funds:</span><em>$900.00</em></div>
+  </div></div>
+</div>
+
+<div class="transactions">
+<section class="search row ember-view">
+  <div class="header"><h2>
+    Past Transactions
+    <span>(October 25, 2026
+    to
+    November 27, 2026)</span>
+  </h2></div>
+
+  <div class="option-bar separator">
+    <div class="toggles">
+      <ui-button tabindex="0" aria-expanded="true" aria-label="Hide Custom Search" role="button" class="custom-search ui-button"><button type="button" tabindex="-1" aria-hidden="true">Hide Custom Search</button><div class="ui-wrapper">Hide Custom Search</div></ui-button>
+    </div>
+    <div class="presets"><span>View:</span><ul>
+      <li><ui-button tabindex="0" aria-pressed="true" aria-label="Last 4 Weeks" role="button" class="active ui-button"><div class="ui-wrapper">Last 4 Weeks</div></ui-button></li>
+      <li><ui-button tabindex="0" aria-pressed="false" aria-label="Last 3 Months" role="button" class="non-active ui-button"><div class="ui-wrapper">Last 3 Months</div></ui-button></li>
+    </ul></div>
+  </div>
+
+  <form aria-label="Transaction Custom Search" class="form-wrapper">
+    <div aria-hidden="false" class="filters show">
+      <h3 class="title">Transaction Custom Search</h3>
+      <div class="date">
+        <div role="group" aria-label="Filter by Date Range" class="range filter-by-range">
+          <input type="radio" aria-label="Filter by Date Range" value="range" name="filter-options" checked>
+          <div class="from calendar-popover"><label>From</label><div class="ui-group">
+            <ui-select class="ui-month ui-select"><select aria-label="Month"></select></ui-select>
+            <ui-select class="ui-date ui-select"><select aria-label="Day"></select></ui-select>
+            <ui-select class="ui-year ui-select"><select aria-label="Year"></select></ui-select>
+          </div></div>
+          <div class="to calendar-popover"><label>To</label><div class="ui-group">
+            <ui-select class="ui-month ui-select"><select aria-label="Month"></select></ui-select>
+            <ui-select class="ui-date ui-select"><select aria-label="Day"></select></ui-select>
+            <ui-select class="ui-year ui-select"><select aria-label="Year"></select></ui-select>
+          </div></div>
+        </div>
+        <div role="group" aria-label="Filter by month" class="month filter-by-month">
+          <input type="radio" value="month" name="filter-options">
+          <div class="month ui-set-select"><label>Month</label><select><option value="10">October</option><option value="11">November</option></select></div>
+          <div class="year ui-set-select"><label>Year</label><select><option value="2025">2025</option><option value="2026">2026</option></select></div>
+        </div>
+      </div>
+      <ui-button tabindex="0" aria-label="Get Details" role="button" class="primary custom-search-button ui-button"><button type="submit" tabindex="-1" aria-hidden="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Get Details</button><div class="ui-wrapper">Get Details</div></ui-button>
+    </div>
+  </form>
+</section>
+
+<section class="transaction-list row ember-view">
+  <div aria-busy="false" class="ui-content">
+    <h3 class="title">Transaction List</h3>
+    <table>
+      <thead><tr><th class="postedDate">Date</th><th class="transactions">TRANSACTIONS</th><th class="debit">Funds out</th><th class="credit">Funds in</th><th class="balance">Running Balance</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+</div>
+
+<script>
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+  const pad = n => String(n).padStart(2, '0')
+  const ALL = [
+    { date: '2026-11-16', desc: 'TRANSFER IN', credit: '$40.00' },
+    { date: '2026-11-10', desc: 'TRANSFER OUT', debit: '$25.00' },
+    { date: '2026-10-10', desc: 'INTEREST', debit: '$3.21' },
+    { date: '2026-09-20', desc: 'OLDER TRANSFER', debit: '$9.99' },
+  ]
+  const long = d => `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`
+  const short = d => `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getDate()}, ${d.getFullYear()}`
+  const day = iso => new Date(iso + 'T00:00:00')
+
+  function render(from, to) {
+    document.querySelector('section.search .header h2 span').textContent = `(${long(from)}\n    to\n    ${long(to)})`
+    document.querySelector('section.transaction-list tbody').innerHTML = ALL
+      .filter(r => day(r.date) >= from && day(r.date) <= to)
+      .map(r => `<tr><td class="date">${short(day(r.date))}</td>
+        <td class="transactions"><span class="transactionLocation"></span><span class="transactionDescription"> ${r.desc} </span></td>
+        <td class="debit">${r.debit ? `<span>${r.debit}</span>` : '<span class="hidden-text">Not applicable</span>'}</td>
+        <td class="credit">${r.credit ? `<span>${r.credit}</span>` : '<span class="hidden-text">Not applicable</span>'}</td>
+        <td class="balance"><span class="negative">−$100.00</span></td></tr>`).join('')
+  }
+
+  for (const box of document.querySelectorAll('.filter-by-range .calendar-popover')) {
+    box.querySelector('.ui-month select').innerHTML = MONTHS.map((m, i) => `<option value="${pad(i + 1)}">${m}</option>`).join('')
+    box.querySelector('.ui-date select').innerHTML = Array.from({ length: 31 }, (_, i) => `<option value="${pad(i + 1)}">${i + 1}</option>`).join('')
+    box.querySelector('.ui-year select').innerHTML = '<option value="2025">2025</option><option value="2026">2026</option>'
+  }
+  const picked = c => {
+    const v = s => document.querySelector(`.filter-by-range ${c} ${s} select`).value
+    return day(`${v('.ui-year')}-${v('.ui-month')}-${v('.ui-date')}`)
+  }
+
+  render(day('2026-10-25'), day('2026-11-27'))
+
+  const form = document.querySelector('form')
+  document.querySelector('.custom-search-button').addEventListener('click', () => form.requestSubmit())
+  form.addEventListener('submit', e => {
+    e.preventDefault()
+    let from = picked('.from')
+    const to = picked('.to')
+    const earliest = document.querySelector('meta[name=earliest]').content
+    if (earliest && from < day(earliest)) from = day(earliest)
+    document.querySelector('section.transaction-list .ui-content').setAttribute('aria-busy', 'true')
+    setTimeout(() => {
+      render(from, to)
+      document.querySelector('section.transaction-list .ui-content').setAttribute('aria-busy', 'false')
+    }, 3000)
+  })
+</script>
+</body>
+</html>
