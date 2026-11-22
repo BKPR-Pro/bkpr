@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -251,76 +252,58 @@ func TestSimpliiResetsToAccountsOverviewBeforeNavigatingAccountPath(t *testing.T
 	}
 }
 
-// A history window drives Simplii's custom date search: widenHistory fills the From (and To) date --
-// each a month/day/year <select> -- and clicks Get Details. The fixture reveals an older row only once
-// the From date holds the requested start, so the test passes only if -from actually reached the
-// date fields.
-func TestSimpliiReadsAWiderHistoryWindow(t *testing.T) {
-	requireBrowserTests(t)
-	months := padOptions(12)
-	days := padOptions(31)
-	years := `<option value="2025">2025</option><option value="2026">2026</option>`
-	dateRow := func(container string) string {
-		return `<div class="` + container + `">
-		  <div class="ui-month"><select>` + months + `</select></div>
-		  <div class="ui-date"><select>` + days + `</select></div>
-		  <div class="ui-year"><select>` + years + `</select></div>
-		</div>`
-	}
-
-	body := `
-	  <div class="filter-by-range">` + dateRow("from") + dateRow("to") + `</div>
-	  <button type="button" id="getDetails">Get Details</button>
-	  <section class="transaction-list row"><table><tbody id="tb">
-	    <tr>
-	      <td class="date">Jul 10, 2026</td>
-	      <td class="transactions"><span class="transactionDescription">RECENT</span></td>
-	      <td class="debit"><span class="hidden-text">Not applicable</span></td>
-	      <td class="credit"><span>$50.00</span></td>
-	      <td class="balance"><span class="negative">−$49,671.86</span></td>
-	    </tr>
-	  </tbody></table></section>
-	  <script>
-	    document.getElementById('getDetails').addEventListener('click', function () {
-	      var f = document.querySelector('.filter-by-range .from')
-	      if (f.querySelector('.ui-month select').value === '02' &&
-	          f.querySelector('.ui-date select').value === '01' &&
-	          f.querySelector('.ui-year select').value === '2026') {
-	        document.getElementById('tb').insertAdjacentHTML('beforeend',
-	          '<tr><td class="date">Feb 5, 2026</td>' +
-	          '<td class="transactions"><span class="transactionDescription">OLDER DRAW</span></td>' +
-	          '<td class="debit"><span>$200.00</span></td>' +
-	          '<td class="credit"><span class="hidden-text">Not applicable</span></td>' +
-	          '<td class="balance"><span class="negative">−$50,000.00</span></td></tr>')
-	      }
-	    })
-	  </script>`
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(signedInSimplii(body)))
-	}))
-	defer srv.Close()
-
-	out, err := execBankScript(Bank{
-		Institution: "simplii", LoginURL: srv.URL, DefaultCurrency: "CAD",
+// simpliiWindowed reads the account fixture with a requested history window.
+func simpliiWindowed(url string) ([]byte, error) {
+	return execBankScript(Bank{
+		Institution: "simplii", LoginURL: url, DefaultCurrency: "CAD",
 		Account:     "Liabilities:Real Estate:Simplii LOC",
-		HistoryFrom: "Feb 1, 2026", HistoryTo: "Jul 13, 2026",
+		HistoryFrom: "Oct 5, 2026", HistoryTo: "Nov 22, 2026",
 	}, nil)
+}
+
+// Simplii's custom search answers well after the page has gone network-idle, so reading the table
+// right after "Get Details" reads the site's default four weeks. The script must wait for the header to
+// show the requested range and read the rows of that range.
+func TestSimpliiReadsTheRequestedHistoryWindow(t *testing.T) {
+	requireBrowserTests(t)
+	out, err := simpliiWindowed(serveFixture(t, "simplii_account.html"))
 	skipIfNoBrowser(t, err)
 	if err != nil {
 		t.Fatalf("reading with a Simplii history window: %v", err)
 	}
-
 	res, err := parseBankOutput(out, "test-connector", "Liabilities:Real Estate:Simplii LOC", "CAD")
 	if err != nil {
 		t.Fatalf("parsing simplii.js output %q: %v", out, err)
 	}
-	if len(res.Transactions) != 2 {
-		t.Fatalf("got %d transactions, want 2 (recent + older via the date range): %q", len(res.Transactions), out)
+	var got []string
+	for _, tx := range res.Transactions {
+		got = append(got, tx.Date.Format("2006-01-02")+" "+tx.Amount.String())
 	}
-	if res.Transactions[1].Date.Format("2006-01-02") != "2026-02-05" || res.Transactions[1].Description != "OLDER DRAW" {
-		t.Errorf("older row not loaded from the date range: %+v", res.Transactions[1])
+	want := []string{"2026-11-16 40.00 CAD", "2026-11-10 -25.00 CAD", "2026-10-10 -3.21 CAD"}
+	if strings.Join(got, ", ") != strings.Join(want, ", ") {
+		t.Fatalf("transactions = %v, want %v", got, want)
+	}
+}
+
+// When the bank applies a range that starts after the requested From, the script fails and names the
+// range it saw, instead of reading a narrower window as if it were the whole one.
+func TestSimpliiFailsWhenTheAppliedRangeStartsLate(t *testing.T) {
+	requireBrowserTests(t)
+	html, err := os.ReadFile("testdata/simplii_account.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clamped := strings.Replace(string(html), `<meta name="earliest" content="">`, `<meta name="earliest" content="2026-10-15">`, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(clamped))
+	}))
+	defer srv.Close()
+
+	_, err = simpliiWindowed(srv.URL)
+	skipIfNoBrowser(t, err)
+	if err == nil || !strings.Contains(err.Error(), "October 15, 2026") {
+		t.Fatalf("err = %v, want a failure naming the applied range from October 15, 2026", err)
 	}
 }
 
