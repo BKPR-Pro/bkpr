@@ -16,11 +16,14 @@ import (
 func TestPCFinancialSignsInAcrossTheThreatMetrixFrame(t *testing.T) {
 	requireBrowserTests(t)
 	const loginHTML = `<!doctype html><html><body>
-	  <input aria-label="Username" name="username" type="text">
-	  <input aria-label="Password" name="password" type="password">
-	  <button type="submit" id="signin">Sign in</button>
+	  <form id="login">
+	    <input aria-label="Username" name="username" type="text">
+	    <input aria-label="Password" name="password" type="password">
+	    <button type="submit">Sign in</button>
+	  </form>
 	  <script>
-	    document.getElementById('signin').addEventListener('click', function () {
+	    document.getElementById('login').addEventListener('submit', function (e) {
+	      e.preventDefault()
 	      if (document.querySelector('[name=username]').value &&
 	          document.querySelector('[name=password]').value) {
 	        location.href = '/verify'
@@ -379,5 +382,28 @@ func TestPCFinancialClicksThroughToTransactionsFromTheDashboard(t *testing.T) {
 	}
 	if !res.HasBalance || res.Balance.String() != "9999.99 CAD" {
 		t.Errorf("balance = %s (has=%v), want 9999.99 CAD", res.Balance, res.HasBalance)
+	}
+}
+
+// PC Financial's Sign in button sits under page layers (the Ada chat frame, a loader), so a click on
+// it can fail to land; on a live run the fields were filled and the form was never submitted. The
+// fixture covers the button with a fixed layer and reveals the card only when the form submits, so the
+// test passes only if sign-in submits without going through the pointer.
+func TestPCFinancialSubmitsSignInPastAnOverlay(t *testing.T) {
+	requireBrowserTests(t)
+	out, err := execBankScript(Bank{
+		Institution: "pcfinancial", LoginURL: serveFixture(t, "pcfinancial_login_covered.html"),
+		DefaultCurrency: "CAD", Account: "Liabilities:Personal:PC Mastercard",
+	}, map[string]string{"username": "testuser", "password": "hunter2"})
+	skipIfNoBrowser(t, err)
+	if err != nil {
+		t.Fatalf("signing in past an overlay: %v", err)
+	}
+	res, err := parseBankOutput(out, "test-connector", "Liabilities:Personal:PC Mastercard", "CAD")
+	if err != nil {
+		t.Fatalf("parsing pcfinancial.js output %q: %v", out, err)
+	}
+	if len(res.Transactions) != 1 || res.Transactions[0].Amount.String() != "-23.62 CAD" {
+		t.Fatalf("transactions = %+v, want the one card row behind the sign-in", res.Transactions)
 	}
 }
