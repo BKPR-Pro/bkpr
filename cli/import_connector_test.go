@@ -170,3 +170,23 @@ func TestImportConnectorSendsTheDefaultWindowToTheBank(t *testing.T) {
 		t.Errorf("the bank got from=%q to=%q; want from=\"Sep 9, 2026\" and a to date", sent.HistoryFrom, sent.HistoryTo)
 	}
 }
+
+// A fetch that reads rows but no balance must say so. A PC Financial run read 11 rows and recorded no
+// balance, and the only sign was a missing "bank balance recorded" line; the stale anchor went unseen.
+func TestImportConnectorSaysWhenNoBalanceWasRead(t *testing.T) {
+	log := eventlog.New(eventlog.NewMemory())
+	c := books.Connector{Name: "pcf", Kind: "pcfinancial", Account: "Liabilities:Card:PC Mastercard"}
+	books.AssertBalance(log, "t", c.Account, time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC), model.Amount{Units: 1, Scale: 2, Commodity: "CAD"})
+
+	orig := readBank
+	readBank = func(source.Bank) (source.BankResult, error) { return source.BankResult{}, nil }
+	defer func() { readBank = orig }()
+
+	out, err := withPipedStdout(t, func() error { return importConnector(log, c, fetchOpts{}) })
+	if err != nil {
+		t.Fatalf("importConnector: %v", err)
+	}
+	if want := "no bank balance read; the last one recorded for Liabilities:Card:PC Mastercard is 2026-10-08"; !strings.Contains(out, want) {
+		t.Errorf("output = %q, want it to contain %q", out, want)
+	}
+}

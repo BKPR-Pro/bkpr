@@ -1134,13 +1134,20 @@ func importConnector(log *eventlog.Log, c books.Connector, o fetchOpts) error {
 	}
 	// The scraped balance anchors reconciliation: record what the bank showed, as of now, so the next
 	// `reconcile` can check the books against it to the penny.
-	if got.hasBalance {
-		bal := reconcileBalance(c.Account, got.balance)
-		if err := books.AssertBalance(log, label, c.Account, time.Now(), bal); err != nil {
-			return err
+	if !got.hasBalance {
+		// Say so: a silent miss leaves the anchor stale, and the next window starts from it.
+		if last, ok, _ := books.LastBalanceAsserted(log, c.Account); ok {
+			fmt.Printf("no bank balance read; the last one recorded for %s is %s\n", c.Account, last.Format(windowNoteLayout))
+		} else {
+			fmt.Printf("no bank balance read; none is recorded for %s\n", c.Account)
 		}
-		fmt.Printf("bank balance recorded: %s reconciles %s\n", bal, c.Account)
+		return nil
 	}
+	bal := reconcileBalance(c.Account, got.balance)
+	if err := books.AssertBalance(log, label, c.Account, time.Now(), bal); err != nil {
+		return err
+	}
+	fmt.Printf("bank balance recorded: %s reconciles %s\n", bal, c.Account)
 	return nil
 }
 
